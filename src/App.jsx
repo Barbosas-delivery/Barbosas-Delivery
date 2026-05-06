@@ -1351,7 +1351,6 @@ export default function App() {
       origin: delivery.origin || "store",
       needs_store_approval: delivery.needsStoreApproval === true,
       store_order_approved: delivery.storeOrderApproved === true,
-      approved_at: delivery.approvedAt || null,
       reference: delivery.reference || "",
       courier_username: delivery.courierUsername || "ALL",
       courier_name: delivery.courierName || "Todos os motoboys",
@@ -1381,6 +1380,94 @@ export default function App() {
       is_kit: item.isKit === true,
       kit_id: item.kitId || null,
     }));
+  }
+
+  function getMissingColumnName(error) {
+    const message = String(error?.message || error || "");
+    const patterns = [
+      /Could not find the ['"`]([^'"`]+)['"`] column/i,
+      /(?:column|coluna)\s+['"`]([^'"`]+)['"`]/i,
+      /['"`]([^'"`]+)['"`]\s+(?:column|coluna)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = message.match(pattern);
+      if (match?.[1]) return match[1];
+    }
+
+    return "";
+  }
+
+  function payloadHasColumn(payload, columnName) {
+    if (!columnName) return false;
+    if (Array.isArray(payload)) return payload.some((row) => Object.prototype.hasOwnProperty.call(row || {}, columnName));
+    return Object.prototype.hasOwnProperty.call(payload || {}, columnName);
+  }
+
+  function removeColumnFromPayload(payload, columnName) {
+    if (Array.isArray(payload)) {
+      return payload.map((row) => {
+        const nextRow = { ...(row || {}) };
+        delete nextRow[columnName];
+        return nextRow;
+      });
+    }
+
+    const nextPayload = { ...(payload || {}) };
+    delete nextPayload[columnName];
+    return nextPayload;
+  }
+
+  async function insertWithSchemaRetry(tableName, payload, selectSingle = false) {
+    let currentPayload = Array.isArray(payload) ? payload.map((row) => ({ ...(row || {}) })) : { ...(payload || {}) };
+    const ignoredColumns = [];
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      let query = supabase.from(tableName).insert(currentPayload);
+      if (selectSingle) query = query.select().single();
+
+      const { data, error } = await query;
+      if (!error) return { data, error: null, ignoredColumns };
+
+      const missingColumn = getMissingColumnName(error);
+      if (!missingColumn || !payloadHasColumn(currentPayload, missingColumn)) {
+        return { data: null, error, ignoredColumns };
+      }
+
+      console.warn(`Coluna ${missingColumn} não existe em ${tableName}. Enviando novamente sem essa coluna.`);
+      ignoredColumns.push(missingColumn);
+      currentPayload = removeColumnFromPayload(currentPayload, missingColumn);
+    }
+
+    return {
+      data: null,
+      error: new Error(`Não foi possível salvar em ${tableName}: muitas colunas incompatíveis com o Supabase.`),
+      ignoredColumns,
+    };
+  }
+
+  async function updateWithSchemaRetry(tableName, id, patch) {
+    let currentPatch = { ...(patch || {}) };
+    const ignoredColumns = [];
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const { error } = await supabase.from(tableName).update(currentPatch).eq("id", id);
+      if (!error) return { error: null, ignoredColumns };
+
+      const missingColumn = getMissingColumnName(error);
+      if (!missingColumn || !payloadHasColumn(currentPatch, missingColumn)) {
+        return { error, ignoredColumns };
+      }
+
+      console.warn(`Coluna ${missingColumn} não existe em ${tableName}. Atualizando novamente sem essa coluna.`);
+      ignoredColumns.push(missingColumn);
+      currentPatch = removeColumnFromPayload(currentPatch, missingColumn);
+    }
+
+    return {
+      error: new Error(`Não foi possível atualizar ${tableName}: muitas colunas incompatíveis com o Supabase.`),
+      ignoredColumns,
+    };
   }
 
   async function loadDeliveries() {
@@ -1417,11 +1504,11 @@ export default function App() {
   }
 
   async function saveDeliveryToSupabase(delivery) {
-    const { data: savedOrder, error: orderError } = await supabase
-      .from("orders")
-      .insert(mapOrderToDatabase(delivery))
-      .select()
-      .single();
+    const { data: savedOrder, error: orderError, ignoredColumns: ignoredOrderColumns } = await insertWithSchemaRetry(
+      "orders",
+      mapOrderToDatabase(delivery),
+      true
+    );
 
     if (orderError) {
       console.error("Erro ao salvar pedido no Supabase:", orderError);
@@ -1432,14 +1519,20 @@ export default function App() {
     const itemsPayload = mapOrderItemsToDatabase(orderId, delivery.items || []);
 
     if (itemsPayload.length > 0) {
-      const { error: itemsError } = await supabase
-        .from("order_items")
-        .insert(itemsPayload);
+      const { error: itemsError, ignoredColumns: ignoredItemColumns } = await insertWithSchemaRetry("order_items", itemsPayload, false);
 
       if (itemsError) {
         console.error("Erro ao salvar itens do pedido no Supabase:", itemsError);
         throw new Error(itemsError.message || "Pedido salvo, mas os itens não foram salvos.");
       }
+
+      if (ignoredItemColumns.length > 0) {
+        console.warn("Itens salvos ignorando colunas inexistentes:", ignoredItemColumns);
+      }
+    }
+
+    if (ignoredOrderColumns.length > 0) {
+      console.warn("Pedido salvo ignorando colunas inexistentes:", ignoredOrderColumns);
     }
 
     return { ...delivery, id: orderId };
@@ -1458,7 +1551,6 @@ export default function App() {
       motorcycleType: "motorcycle_type",
       needsStoreApproval: "needs_store_approval",
       storeOrderApproved: "store_order_approved",
-      approvedAt: "approved_at",
       courierUsername: "courier_username",
       courierName: "courier_name",
       pickedUpByUsername: "picked_up_by_username",
@@ -1478,15 +1570,16 @@ export default function App() {
       dbPatch[fieldMap[key] || key] = value === "" ? null : value;
     });
 
-    const { error } = await supabase
-      .from("orders")
-      .update(dbPatch)
-      .eq("id", id);
+    const { error, ignoredColumns } = await updateWithSchemaRetry("orders", id, dbPatch);
 
     if (error) {
       console.error("Erro ao atualizar pedido no Supabase:", error);
       setLastAction(`Pedido atualizado na tela, mas não no Supabase: ${error.message || "verifique policies de UPDATE."}`);
       return false;
+    }
+
+    if (ignoredColumns.length > 0) {
+      console.warn("Pedido atualizado ignorando colunas inexistentes:", ignoredColumns);
     }
 
     return true;
