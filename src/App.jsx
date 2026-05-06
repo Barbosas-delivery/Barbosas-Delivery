@@ -1357,9 +1357,6 @@ export default function App() {
       motorcycle_type: delivery.motorcycleType || "",
       value: Number(delivery.value || 0),
       status: delivery.status || DELIVERY_STATUS.WAITING_PICKUP,
-      origin: delivery.origin || "store",
-      needs_store_approval: delivery.needsStoreApproval === true,
-      store_order_approved: delivery.storeOrderApproved === true,
       reference: delivery.reference || "",
       courier_username: delivery.courierUsername || "ALL",
       courier_name: delivery.courierName || "Todos os motoboys",
@@ -1513,10 +1510,12 @@ export default function App() {
   }
 
   async function saveDeliveryToSupabase(delivery) {
-    const { data: savedOrder, error: orderError, ignoredColumns: ignoredOrderColumns } = await insertWithSchemaRetry(
+    // A tabela orders permite INSERT público, mas nem sempre permite SELECT público.
+    // Por isso o pedido é inserido sem .select().single(), usando o id já gerado pelo app.
+    const { error: orderError, ignoredColumns: ignoredOrderColumns } = await insertWithSchemaRetry(
       "orders",
       mapOrderToDatabase(delivery),
-      true
+      false
     );
 
     if (orderError) {
@@ -1524,7 +1523,7 @@ export default function App() {
       throw new Error(orderError.message || "Erro ao salvar pedido no Supabase.");
     }
 
-    const orderId = savedOrder?.id ?? delivery.id;
+    const orderId = delivery.id;
     const itemsPayload = mapOrderItemsToDatabase(orderId, delivery.items || []);
 
     if (itemsPayload.length > 0) {
@@ -1558,8 +1557,6 @@ export default function App() {
       courierFee: "courier_fee",
       storeFee: "store_fee",
       motorcycleType: "motorcycle_type",
-      needsStoreApproval: "needs_store_approval",
-      storeOrderApproved: "store_order_approved",
       courierUsername: "courier_username",
       courierName: "courier_name",
       pickedUpByUsername: "picked_up_by_username",
@@ -1575,10 +1572,15 @@ export default function App() {
       launchedAt: "launched_at",
     };
 
+    const unsupportedOrderPatchKeys = new Set(["origin", "needsStoreApproval", "storeOrderApproved", "approvedAt"]);
+
     Object.entries(patch).forEach(([key, value]) => {
+      if (unsupportedOrderPatchKeys.has(key)) return;
       const dbKey = fieldMap[key] || key;
       dbPatch[dbKey] = dbKey === "change_for" ? toNullableNumber(value) : value === "" ? null : value;
     });
+
+    if (Object.keys(dbPatch).length === 0) return true;
 
     const { error, ignoredColumns } = await updateWithSchemaRetry("orders", id, dbPatch);
 
