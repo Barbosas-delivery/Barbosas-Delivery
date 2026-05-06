@@ -274,6 +274,15 @@ function toNonNegativeNumber(value, fallback = 0) {
   return number;
 }
 
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim().replace(",", ".");
+  if (text === "") return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
 function normalizeBarcode(value) {
   return String(value || "").replace(/\D/g, "").trim();
 }
@@ -1339,7 +1348,7 @@ export default function App() {
       address: delivery.address || "",
       payment: delivery.payment || "Pix",
       payment_status: delivery.paymentStatus || PAYMENT_STATUS.PENDING,
-      change_for: delivery.changeFor || "",
+      change_for: toNullableNumber(delivery.changeFor),
       products_total: Number(delivery.productsTotal || 0),
       delivery_fee: normalizeDeliveryFee(delivery.deliveryFee),
       discount: Number(delivery.discount || 0),
@@ -1567,7 +1576,8 @@ export default function App() {
     };
 
     Object.entries(patch).forEach(([key, value]) => {
-      dbPatch[fieldMap[key] || key] = value === "" ? null : value;
+      const dbKey = fieldMap[key] || key;
+      dbPatch[dbKey] = dbKey === "change_for" ? toNullableNumber(value) : value === "" ? null : value;
     });
 
     const { error, ignoredColumns } = await updateWithSchemaRetry("orders", id, dbPatch);
@@ -2433,7 +2443,7 @@ export default function App() {
       address: `${customerForm.street}, ${customerForm.number} - ${customerForm.district}, ${customerForm.city}/${customerForm.state}`,
       payment: customerPayment,
       paymentStatus: PAYMENT_STATUS.PENDING,
-      changeFor: customerPayment === "Dinheiro" ? customerChangeFor : "",
+      changeFor: customerPayment === "Dinheiro" ? customerChangeFor : null,
       productsTotal: syncedProductsTotal,
       deliveryFee: normalizeDeliveryFee(storeSettings.defaultDeliveryFee),
       courierFee: 0,
