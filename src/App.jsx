@@ -1280,8 +1280,236 @@ export default function App() {
     setLastAction("Produtos carregados do Supabase.");
   }
 
+
+  function mapOrderFromDatabase(order, items = []) {
+    return {
+      id: order.id,
+      orderType: order.order_type || ORDER_TYPE.DELIVERY,
+      client: order.client || order.customer_name || "Cliente",
+      phone: order.phone || "",
+      address: order.address || "",
+      payment: order.payment || "Pix",
+      paymentStatus: order.payment_status || PAYMENT_STATUS.PENDING,
+      changeFor: order.change_for || "",
+      productsTotal: Number(order.products_total || 0),
+      deliveryFee: normalizeDeliveryFee(order.delivery_fee),
+      discount: Number(order.discount || 0),
+      courierFee: Number(order.courier_fee || 0),
+      storeFee: Number(order.store_fee || 0),
+      motorcycleType: order.motorcycle_type || "",
+      value: Number(order.value || 0),
+      status: order.status || DELIVERY_STATUS.WAITING_PICKUP,
+      origin: order.origin || "store",
+      needsStoreApproval: order.needs_store_approval === true,
+      storeOrderApproved: order.store_order_approved === true,
+      approvedAt: order.approved_at || "",
+      reference: order.reference || "",
+      courierUsername: order.courier_username || "ALL",
+      courierName: order.courier_name || "Todos os motoboys",
+      notes: order.notes || "",
+      items: (Array.isArray(items) ? items : []).map((item) => ({
+        id: item.product_id ?? item.id,
+        name: item.name || item.product_name || "Produto",
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || 0),
+        barcode: item.barcode || "",
+        isKit: item.is_kit === true,
+        kitId: item.kit_id || null,
+      })),
+      pickedUpByUsername: order.picked_up_by_username || "",
+      pickedUpByName: order.picked_up_by_name || "",
+      pickedUpAt: order.picked_up_at || "",
+      deliveredByUsername: order.delivered_by_username || "",
+      deliveredByName: order.delivered_by_name || "",
+      deliveredAt: order.delivered_at || "",
+      ownerApproved: order.owner_approved === true,
+      ownerApprovedAt: order.owner_approved_at || "",
+      cancelledAt: order.cancelled_at || "",
+      cancellationReason: order.cancellation_reason || "",
+      launchedAt: order.launched_at || order.created_at || new Date().toISOString(),
+    };
+  }
+
+  function mapOrderToDatabase(delivery) {
+    return {
+      id: delivery.id,
+      order_type: delivery.orderType || ORDER_TYPE.DELIVERY,
+      client: delivery.client || "Cliente",
+      phone: delivery.phone || "",
+      address: delivery.address || "",
+      payment: delivery.payment || "Pix",
+      payment_status: delivery.paymentStatus || PAYMENT_STATUS.PENDING,
+      change_for: delivery.changeFor || "",
+      products_total: Number(delivery.productsTotal || 0),
+      delivery_fee: normalizeDeliveryFee(delivery.deliveryFee),
+      discount: Number(delivery.discount || 0),
+      courier_fee: Number(delivery.courierFee || 0),
+      store_fee: Number(delivery.storeFee || 0),
+      motorcycle_type: delivery.motorcycleType || "",
+      value: Number(delivery.value || 0),
+      status: delivery.status || DELIVERY_STATUS.WAITING_PICKUP,
+      origin: delivery.origin || "store",
+      needs_store_approval: delivery.needsStoreApproval === true,
+      store_order_approved: delivery.storeOrderApproved === true,
+      approved_at: delivery.approvedAt || null,
+      reference: delivery.reference || "",
+      courier_username: delivery.courierUsername || "ALL",
+      courier_name: delivery.courierName || "Todos os motoboys",
+      notes: delivery.notes || "",
+      picked_up_by_username: delivery.pickedUpByUsername || "",
+      picked_up_by_name: delivery.pickedUpByName || "",
+      picked_up_at: delivery.pickedUpAt || null,
+      delivered_by_username: delivery.deliveredByUsername || "",
+      delivered_by_name: delivery.deliveredByName || "",
+      delivered_at: delivery.deliveredAt || null,
+      owner_approved: delivery.ownerApproved === true,
+      owner_approved_at: delivery.ownerApprovedAt || null,
+      cancelled_at: delivery.cancelledAt || null,
+      cancellation_reason: delivery.cancellationReason || "",
+      launched_at: delivery.launchedAt || new Date().toISOString(),
+    };
+  }
+
+  function mapOrderItemsToDatabase(orderId, items = []) {
+    return expandItemsForStock(items).map((item) => ({
+      order_id: orderId,
+      product_id: Number.isFinite(Number(item.id)) ? Number(item.id) : null,
+      name: item.name || "Produto",
+      quantity: Number(item.quantity || 0),
+      price: Number(item.price || 0),
+      barcode: item.barcode || "",
+      is_kit: item.isKit === true,
+      kit_id: item.kitId || null,
+    }));
+  }
+
+  async function loadDeliveries() {
+    const { data: ordersData, error: ordersError } = await supabase
+      .from("orders")
+      .select("*")
+      .order("launched_at", { ascending: false });
+
+    if (ordersError) {
+      console.error("Erro ao carregar pedidos:", ordersError);
+      setLastAction(`Erro ao carregar pedidos do Supabase: ${ordersError.message || "verifique policies de SELECT em orders."}`);
+      return;
+    }
+
+    const { data: itemsData, error: itemsError } = await supabase
+      .from("order_items")
+      .select("*");
+
+    if (itemsError) {
+      console.error("Erro ao carregar itens dos pedidos:", itemsError);
+      setDeliveries((ordersData || []).map((order) => mapOrderFromDatabase(order, [])));
+      setLastAction(`Pedidos carregados, mas os itens não foram lidos: ${itemsError.message || "verifique SELECT em order_items."}`);
+      return;
+    }
+
+    const itemsByOrder = (itemsData || []).reduce((acc, item) => {
+      const key = item.order_id;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+
+    setDeliveries((ordersData || []).map((order) => mapOrderFromDatabase(order, itemsByOrder[order.id] || [])));
+  }
+
+  async function saveDeliveryToSupabase(delivery) {
+    const { data: savedOrder, error: orderError } = await supabase
+      .from("orders")
+      .insert(mapOrderToDatabase(delivery))
+      .select()
+      .single();
+
+    if (orderError) {
+      console.error("Erro ao salvar pedido no Supabase:", orderError);
+      throw new Error(orderError.message || "Erro ao salvar pedido no Supabase.");
+    }
+
+    const orderId = savedOrder?.id ?? delivery.id;
+    const itemsPayload = mapOrderItemsToDatabase(orderId, delivery.items || []);
+
+    if (itemsPayload.length > 0) {
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(itemsPayload);
+
+      if (itemsError) {
+        console.error("Erro ao salvar itens do pedido no Supabase:", itemsError);
+        throw new Error(itemsError.message || "Pedido salvo, mas os itens não foram salvos.");
+      }
+    }
+
+    return { ...delivery, id: orderId };
+  }
+
+  async function updateDeliveryInSupabase(id, patch) {
+    const dbPatch = {};
+    const fieldMap = {
+      orderType: "order_type",
+      paymentStatus: "payment_status",
+      changeFor: "change_for",
+      productsTotal: "products_total",
+      deliveryFee: "delivery_fee",
+      courierFee: "courier_fee",
+      storeFee: "store_fee",
+      motorcycleType: "motorcycle_type",
+      needsStoreApproval: "needs_store_approval",
+      storeOrderApproved: "store_order_approved",
+      approvedAt: "approved_at",
+      courierUsername: "courier_username",
+      courierName: "courier_name",
+      pickedUpByUsername: "picked_up_by_username",
+      pickedUpByName: "picked_up_by_name",
+      pickedUpAt: "picked_up_at",
+      deliveredByUsername: "delivered_by_username",
+      deliveredByName: "delivered_by_name",
+      deliveredAt: "delivered_at",
+      ownerApproved: "owner_approved",
+      ownerApprovedAt: "owner_approved_at",
+      cancelledAt: "cancelled_at",
+      cancellationReason: "cancellation_reason",
+      launchedAt: "launched_at",
+    };
+
+    Object.entries(patch).forEach(([key, value]) => {
+      dbPatch[fieldMap[key] || key] = value === "" ? null : value;
+    });
+
+    const { error } = await supabase
+      .from("orders")
+      .update(dbPatch)
+      .eq("id", id);
+
+    if (error) {
+      console.error("Erro ao atualizar pedido no Supabase:", error);
+      setLastAction(`Pedido atualizado na tela, mas não no Supabase: ${error.message || "verifique policies de UPDATE."}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function persistProductStocks(nextProducts) {
+    try {
+      await Promise.all(
+        nextProducts.map((product) =>
+          supabase
+            .from("products")
+            .update({ stock: Number(product.stock || 0) })
+            .eq("id", product.id)
+        )
+      );
+    } catch (error) {
+      console.error("Erro ao atualizar estoque no Supabase:", error);
+    }
+  }
+
   useEffect(() => {
     loadProducts();
+    loadDeliveries();
   }, []);
   const [deliveryProductSearch, setDeliveryProductSearch] = useState("");
   const [deliveryDraft, setDeliveryDraft] = useState({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: initialStoreSettings.defaultDeliveryFee, discount: 0 });
@@ -1952,9 +2180,17 @@ export default function App() {
     setLastAction("Status do entregador atualizado.");
   }
 
-  function toggleProductStatus(id) {
-    setProducts((previousProducts) => previousProducts.map((product) => (product.id === id ? { ...product, active: !product.active } : product)));
-    setLastAction("Status do produto atualizado manualmente.");
+  async function toggleProductStatus(id) {
+    const product = products.find((item) => item.id === id);
+    if (!product) return;
+    const nextActive = !product.active;
+    const { error } = await supabase.from("products").update({ active: nextActive }).eq("id", id);
+    if (error) {
+      console.error("Erro ao atualizar status do produto:", error);
+      return setLastAction(`Status não salvo no Supabase: ${error.message || "verifique policies de UPDATE em products."}`);
+    }
+    setProducts((previousProducts) => previousProducts.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
+    setLastAction("Status do produto atualizado no Supabase.");
   }
 
   function updateProductField(id, field, value) {
@@ -1963,7 +2199,7 @@ export default function App() {
     setProducts((previousProducts) => previousProducts.map((product) => (product.id === id ? { ...product, [field]: finalValue } : product)));
   }
 
-  function saveProductEdits(id) {
+  async function saveProductEdits(id) {
     const product = products.find((item) => item.id === id);
     if (!product) return;
     if (!product.name || product.price === "" || !product.barcode) {
@@ -1978,20 +2214,29 @@ export default function App() {
       setLastAction("Código de barras já cadastrado em outro produto.");
       return;
     }
-    setProducts((previousProducts) =>
-      previousProducts.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              price: Number(item.price || 0),
-              cost: Number(item.cost || 0),
-              stock: Number(item.stock || 0),
-              minStock: Number(item.minStock || 0),
-            }
-          : item
-      )
-    );
-    setLastAction("Produto atualizado com sucesso.");
+
+    const productPatch = {
+      name: product.name.trim(),
+      category: product.category,
+      price: Number(product.price || 0),
+      cost: Number(product.cost || 0),
+      stock: Number(product.stock || 0),
+      min_stock: Number(product.minStock || 0),
+      ncm: String(product.ncm || "").trim(),
+      barcode: normalizeBarcode(product.barcode),
+      expiration_date: product.expirationDate || null,
+      image_url: product.imageUrl || "",
+      active: product.active === true,
+    };
+
+    const { error } = await supabase.from("products").update(productPatch).eq("id", id);
+    if (error) {
+      console.error("Erro ao salvar edição do produto:", error);
+      return setLastAction(`Produto não salvo no Supabase: ${error.message || "verifique policies de UPDATE em products."}`);
+    }
+
+    await loadProducts();
+    setLastAction("Produto atualizado com sucesso no Supabase.");
     setEditingProductId(null);
   }
 
@@ -2076,7 +2321,7 @@ export default function App() {
     setCustomerError("");
   }
 
-  function submitCustomerOrder() {
+  async function submitCustomerOrder() {
     if (!storeSettings.isOpen) return setCustomerError("A loja está fechada no momento. Tente novamente dentro do horário de atendimento.");
     const validation = validateOrderItems(customerCart, products);
     if (!validation.valid) return setCustomerError(validation.message);
@@ -2123,14 +2368,25 @@ export default function App() {
       launchedAt: new Date().toISOString(),
     };
 
-    setDeliveries((previousDeliveries) => [newDelivery, ...previousDeliveries]);
-    setProducts((previousProducts) => reduceProductStock(previousProducts, syncedItems));
-    addNotification("novo_pedido", "Novo pedido recebido", `${customerForm.name} enviou um pedido de ${money(newDelivery.value)}.`, "loja", newDelivery.id);
-    addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${newDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", newDelivery.id);
+    let savedDelivery;
+    try {
+      savedDelivery = await saveDeliveryToSupabase(newDelivery);
+    } catch (error) {
+      return setCustomerError(`Erro ao enviar pedido para a loja: ${error.message || "verifique Supabase."}`);
+    }
+
+    setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
+    setProducts((previousProducts) => {
+      const nextProducts = reduceProductStock(previousProducts, syncedItems);
+      persistProductStocks(nextProducts);
+      return nextProducts;
+    });
+    addNotification("novo_pedido", "Novo pedido recebido", `${customerForm.name} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
+    addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${savedDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", savedDelivery.id);
     setCustomerCart([]);
     setShowCustomerCheckout(false);
     setCustomerChangeFor("");
-    setCustomerOrderConfirmation(buildOrderConfirmation(newDelivery));
+    setCustomerOrderConfirmation(buildOrderConfirmation(savedDelivery));
     setCustomerError("Pedido enviado para a loja. Aguarde a confirmação.");
   }
 
@@ -2336,7 +2592,7 @@ export default function App() {
     return printed;
   }
 
-  function launchCounterSale() {
+  async function launchCounterSale() {
     if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco.");
     const validation = validateOrderItems(counterDraft.items, products);
     if (!validation.valid) return setLastAction(validation.message);
@@ -2379,16 +2635,27 @@ export default function App() {
       launchedAt: new Date().toISOString(),
     };
 
-    setDeliveries((previousDeliveries) => [newSale, ...previousDeliveries]);
-    setProducts((previousProducts) => reduceProductStock(previousProducts, syncedItems));
-    printDeliveryReceipt(newSale);
+    let savedSale;
+    try {
+      savedSale = await saveDeliveryToSupabase(newSale);
+    } catch (error) {
+      return setLastAction(`Venda não salva no Supabase: ${error.message || "verifique Supabase."}`);
+    }
+
+    setDeliveries((previousDeliveries) => [savedSale, ...previousDeliveries]);
+    setProducts((previousProducts) => {
+      const nextProducts = reduceProductStock(previousProducts, syncedItems);
+      persistProductStocks(nextProducts);
+      return nextProducts;
+    });
+    printDeliveryReceipt(savedSale);
     setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
     setCounterProductSearch("");
     setCounterKitSearch("");
-    setLastAction("Venda de balcão registrada, estoque baixado e impressão aberta.");
+    setLastAction("Venda de balcão registrada no Supabase, estoque baixado e impressão aberta.");
   }
 
-  function launchDeliveryOrder() {
+  async function launchDeliveryOrder() {
     if (!selectedDeliveryClient) return setLastAction("Selecione o cliente antes de lançar a entrega.");
     const validation = validateOrderItems(deliveryDraft.items, products);
     if (!validation.valid) return setLastAction(validation.message);
@@ -2435,48 +2702,72 @@ export default function App() {
       launchedAt: new Date().toISOString(),
     };
 
-    setDeliveries((previousDeliveries) => [newDelivery, ...previousDeliveries]);
-    setProducts((previousProducts) => reduceProductStock(previousProducts, syncedItems));
-    addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${newDelivery.id} liberado para retirada na loja.`, "couriers", newDelivery.id);
-    printDeliveryReceipt(newDelivery, 2);
+    let savedDelivery;
+    try {
+      savedDelivery = await saveDeliveryToSupabase(newDelivery);
+    } catch (error) {
+      return setLastAction(`Entrega não salva no Supabase: ${error.message || "verifique Supabase."}`);
+    }
+
+    setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
+    setProducts((previousProducts) => {
+      const nextProducts = reduceProductStock(previousProducts, syncedItems);
+      persistProductStocks(nextProducts);
+      return nextProducts;
+    });
+    addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${savedDelivery.id} liberado para retirada na loja.`, "couriers", savedDelivery.id);
+    printDeliveryReceipt(savedDelivery, 2);
     setDeliveryDraft({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: storeSettings.defaultDeliveryFee, discount: 0 });
     setDeliveryProductSearch("");
     setPvdKitSearch("");
-    setLastAction("Entrega lançada, taxa adicionada e impressão enviada para o navegador.");
+    setLastAction("Entrega lançada no Supabase, taxa adicionada e impressão enviada para o navegador.");
   }
 
-  function markCourierPickedUp(id) {
+  async function markCourierPickedUp(id) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery || !isDeliveryOrder(delivery) || needsStoreApprovalBeforeCourier(delivery) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return setLastAction("Essa entrega não está disponível para retirada ou ainda precisa ser aprovada pela loja.");
+    const patch = { status: DELIVERY_STATUS.OUT_FOR_DELIVERY, pickedUpByUsername: loggedCourier?.username || "", pickedUpByName: loggedCourier?.name || "", pickedUpAt: new Date().toISOString() };
+    await updateDeliveryInSupabase(id, patch);
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((delivery) => {
         if (delivery.id !== id) return delivery;
         if (!isDeliveryOrder(delivery)) return delivery;
         if (delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return delivery;
-        return { ...delivery, status: DELIVERY_STATUS.OUT_FOR_DELIVERY, pickedUpByUsername: loggedCourier?.username || "", pickedUpByName: loggedCourier?.name || "", pickedUpAt: new Date().toISOString() };
+        return { ...delivery, ...patch };
       })
     );
     setLastAction(`Pedido #${id} saiu para entrega com ${loggedCourier?.name || "entregador"}.`);
   }
 
-  function requestDeliveryApproval(id) {
+  async function requestDeliveryApproval(id) {
     const deliveryToApprove = deliveries.find((item) => item.id === id);
     const canRequestApproval = deliveryToApprove && isDeliveryOrder(deliveryToApprove) && deliveryToApprove.status === DELIVERY_STATUS.OUT_FOR_DELIVERY && canCourierControlDelivery(deliveryToApprove, loggedCourier?.username);
     if (!canRequestApproval) return setLastAction("Essa entrega ainda não pode pedir aprovação da loja.");
+    const patch = {
+      status: DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
+      deliveredByUsername: loggedCourier?.username || "",
+      deliveredByName: loggedCourier?.name || "",
+      deliveredAt: new Date().toISOString(),
+      ownerApproved: false,
+      motorcycleType: loggedCourier?.motorcycleType || "Moto própria",
+      courierFee: calculateCourierFee(deliveryToApprove.deliveryFee, loggedCourier?.motorcycleType || "Moto própria"),
+      storeFee: calculateStoreFee(deliveryToApprove.deliveryFee, loggedCourier?.motorcycleType || "Moto própria"),
+    };
+    await updateDeliveryInSupabase(id, patch);
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((delivery) => {
         if (delivery.id !== id) return delivery;
         if (!isDeliveryOrder(delivery)) return delivery;
         if (!canCourierControlDelivery(delivery, loggedCourier?.username)) return delivery;
         if (delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY) return delivery;
-        return { ...delivery, status: DELIVERY_STATUS.WAITING_OWNER_APPROVAL, deliveredByUsername: loggedCourier?.username || "", deliveredByName: loggedCourier?.name || "", deliveredAt: new Date().toISOString(), ownerApproved: false, motorcycleType: loggedCourier?.motorcycleType || "Moto própria", courierFee: calculateCourierFee(delivery.deliveryFee, loggedCourier?.motorcycleType || "Moto própria"), storeFee: calculateStoreFee(delivery.deliveryFee, loggedCourier?.motorcycleType || "Moto própria") };
+        return { ...delivery, ...patch };
       })
     );
     addNotification("entrega_aguardando_aprovacao", "Entrega aguardando aprovação", `Pedido #${id} foi marcado como entregue por ${loggedCourier?.name || "entregador"}.`, "loja", id);
     setLastAction(`Pedido #${id} enviado para aprovação da loja.`);
   }
 
-  function updateDeliveryStatus(id, status) {
+  async function updateDeliveryStatus(id, status) {
     const deliveryToUpdate = deliveries.find((item) => item.id === id);
     if (!deliveryToUpdate || !isDeliveryOrder(deliveryToUpdate)) return setLastAction("Entrega não encontrada.");
     if (needsStoreApprovalBeforeCourier(deliveryToUpdate)) return setLastAction("A loja precisa aprovar o pedido antes de liberar qualquer status.");
@@ -2484,6 +2775,7 @@ export default function App() {
     if (status === DELIVERY_STATUS.DELIVERY_PROBLEM && deliveryToUpdate.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY) return setLastAction("Problema na entrega só pode ser registrado depois da saída da loja.");
     if (loggedCourier && !canCourierControlDelivery(deliveryToUpdate, loggedCourier.username)) return setLastAction("Essa entrega está vinculada a outro entregador.");
 
+    await updateDeliveryInSupabase(id, { status });
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((delivery) => {
         if (delivery.id !== id) return delivery;
@@ -2494,30 +2786,36 @@ export default function App() {
     setLastAction(`Pedido #${id} atualizado para: ${status}.`);
   }
 
-  function approveDelivery(id) {
+  async function approveDelivery(id) {
     const currentDelivery = deliveries.find((item) => item.id === id);
     if (!currentDelivery) return setLastAction("Pedido não encontrado.");
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
-      setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: false, storeOrderApproved: true, approvedAt: new Date().toISOString() } : delivery));
+      const patch = { status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: false, storeOrderApproved: true, approvedAt: new Date().toISOString() };
+      await updateDeliveryInSupabase(id, patch);
+      setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...patch } : delivery));
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "couriers", id);
       setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
       return;
     }
-    setDeliveries((previousDeliveries) =>
-      previousDeliveries.map((delivery) => {
-        if (delivery.id !== id) return delivery;
-        if (delivery.status === DELIVERY_STATUS.CANCELLED || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return delivery;
-        if (delivery.status !== DELIVERY_STATUS.WAITING_OWNER_APPROVAL) return delivery;
-        return { ...delivery, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, ownerApprovedAt: new Date().toISOString(), paymentStatus: PAYMENT_STATUS.PAID };
-      })
-    );
+    if (currentDelivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL) {
+      const patch = { status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, ownerApprovedAt: new Date().toISOString(), paymentStatus: PAYMENT_STATUS.PAID };
+      await updateDeliveryInSupabase(id, patch);
+      setDeliveries((previousDeliveries) =>
+        previousDeliveries.map((delivery) => {
+          if (delivery.id !== id) return delivery;
+          if (delivery.status === DELIVERY_STATUS.CANCELLED || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return delivery;
+          if (delivery.status !== DELIVERY_STATUS.WAITING_OWNER_APPROVAL) return delivery;
+          return { ...delivery, ...patch };
+        })
+      );
+    }
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL && currentDelivery.deliveredByName) {
       addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} aprovado pela loja. Valor liberado no relatório.`, "couriers", id);
     }
     setLastAction(currentDelivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL ? `Entrega #${id} aprovada e marcada como paga.` : "Apenas pedidos aguardando aprovação podem ser aprovados.");
   }
 
-  function updatePaymentStatus(id, paymentStatus) {
+  async function updatePaymentStatus(id, paymentStatus) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery) return setLastAction("Pedido ou venda não encontrado.");
     const orderLabel = getOrderLabel(delivery);
@@ -2527,6 +2825,7 @@ export default function App() {
       const confirmed = window.confirm(`Confirmar pagamento da ${orderLabel} #${id} no valor de ${money(delivery.value)}?`);
       if (!confirmed) return setLastAction("Marcação de pagamento cancelada.");
     }
+    await updateDeliveryInSupabase(id, { paymentStatus });
     setDeliveries((previousDeliveries) => previousDeliveries.map((item) => (item.id === id ? { ...item, paymentStatus } : item)));
     setLastAction(`Pagamento da ${orderLabel} #${id} atualizado para: ${paymentStatus}.`);
   }
@@ -2539,7 +2838,7 @@ export default function App() {
     setPendingCancellation({ open: true, deliveryId: id, reason: CANCELLATION_REASONS[0], details: "", orderType: delivery.orderType || ORDER_TYPE.DELIVERY });
   }
 
-  function cancelDelivery() {
+  async function cancelDelivery() {
     const id = pendingCancellation.deliveryId;
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery) return;
@@ -2550,11 +2849,17 @@ export default function App() {
       ? `${pendingCancellation.reason}: ${pendingCancellation.details.trim()}`
       : pendingCancellation.reason;
 
-    setProducts((previousProducts) => restoreProductStock(previousProducts, delivery.items || []));
+    const patch = { status: DELIVERY_STATUS.CANCELLED, paymentStatus: PAYMENT_STATUS.PENDING, cancelledAt: new Date().toISOString(), cancellationReason: cancellationText, courierFee: 0, storeFee: 0 };
+    await updateDeliveryInSupabase(id, patch);
+    setProducts((previousProducts) => {
+      const nextProducts = restoreProductStock(previousProducts, delivery.items || []);
+      persistProductStocks(nextProducts);
+      return nextProducts;
+    });
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((item) =>
         item.id === id
-          ? { ...item, status: DELIVERY_STATUS.CANCELLED, paymentStatus: PAYMENT_STATUS.PENDING, cancelledAt: new Date().toISOString(), cancellationReason: cancellationText, courierFee: 0, storeFee: 0 }
+          ? { ...item, ...patch }
           : item
       )
     );
@@ -2716,7 +3021,7 @@ export default function App() {
     setTabProductSelectByTab((previous) => ({ ...previous, [tabId]: "" }));
   }
 
-  function closeTabAccount(tabId) {
+  async function closeTabAccount(tabId) {
     const tab = tabsAccounts.find((item) => item.id === tabId);
     if (!tab) return setLastAction("Comanda não encontrada.");
     const validation = validateOrderItems(tab.items, products);
@@ -2764,12 +3069,23 @@ export default function App() {
       closedAt: new Date().toISOString(),
     };
     const nextLimit = adjustTabCreditLimitAfterClose(tab, total, tabClosingPayment);
-    setDeliveries((previous) => [closedOrder, ...previous]);
-    setProducts((previousProducts) => reduceProductStock(previousProducts, syncedItems));
+    let savedClosedOrder;
+    try {
+      savedClosedOrder = await saveDeliveryToSupabase(closedOrder);
+    } catch (error) {
+      return setLastAction(`Comanda não salva no Supabase: ${error.message || "verifique Supabase."}`);
+    }
+
+    setDeliveries((previous) => [savedClosedOrder, ...previous]);
+    setProducts((previousProducts) => {
+      const nextProducts = reduceProductStock(previousProducts, syncedItems);
+      persistProductStocks(nextProducts);
+      return nextProducts;
+    });
     setTabsAccounts((previous) => previous.filter((item) => item.id !== tabId));
     cancelClosingTab();
-    printDeliveryReceipt(closedOrder, 2);
-    setLastAction(`Comanda de ${tab.customerName} fechada em ${money(total)}. Novo limite sugerido: ${money(nextLimit)}. Foram abertas 2 vias para impressão.`);
+    printDeliveryReceipt(savedClosedOrder, 2);
+    setLastAction(`Comanda de ${tab.customerName} fechada em ${money(total)} e salva no Supabase. Novo limite sugerido: ${money(nextLimit)}. Foram abertas 2 vias para impressão.`);
   }
 
 
@@ -2781,26 +3097,28 @@ export default function App() {
     }
   }
 
-  function confirmManualDelivery(id) {
+  async function confirmManualDelivery(id) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery) return;
     if (!isDeliveryOrder(delivery)) return setLastAction("Venda de balcão não precisa de confirmação de entrega.");
     if (delivery.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Pedido cancelado não pode ser confirmado.");
     if (delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return setLastAction("Pedido já está confirmado.");
 
+    const patch = {
+      status: DELIVERY_STATUS.CONFIRMED_DELIVERED,
+      ownerApproved: true,
+      ownerApprovedAt: new Date().toISOString(),
+      deliveredAt: delivery.deliveredAt || new Date().toISOString(),
+      motorcycleType: delivery.motorcycleType || "Confirmação manual",
+      courierFee: delivery.deliveredByUsername ? delivery.courierFee : 0,
+      storeFee: delivery.deliveredByUsername ? delivery.storeFee : 0,
+      paymentStatus: PAYMENT_STATUS.PAID,
+    };
+    await updateDeliveryInSupabase(id, patch);
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((item) =>
         item.id === id
-          ? {
-              ...item,
-              status: DELIVERY_STATUS.CONFIRMED_DELIVERED,
-              ownerApproved: true,
-              ownerApprovedAt: new Date().toISOString(),
-              deliveredAt: item.deliveredAt || new Date().toISOString(),
-              motorcycleType: item.motorcycleType || "Confirmação manual",
-              courierFee: item.deliveredByUsername ? item.courierFee : 0,
-              storeFee: item.deliveredByUsername ? item.storeFee : 0,
-            }
+          ? { ...item, ...patch }
           : item
       )
     );
