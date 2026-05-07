@@ -748,12 +748,17 @@ function buildPaidPaymentBreakdown(deliveries = []) {
   return totals;
 }
 
-function buildCashClosingReport(deliveries, cashSession = { openingAmount: 0, sangrias: [] }) {
+function buildCashClosingReport(deliveries, cashSession = { openingAmount: 0, sangrias: [] }, orderPayments = []) {
   const openedAtTime = cashSession?.openedAt ? new Date(cashSession.openedAt).getTime() : 0;
   const orderTime = (delivery) => new Date(delivery.launchedAt || delivery.createdAt || delivery.deliveredAt || delivery.closedAt || 0).getTime() || 0;
+  const hasCashSessionId = Boolean(cashSession?.id);
   const sessionOrders = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
-    if (cashSession?.id && delivery.cashSessionId) return String(delivery.cashSessionId) === String(cashSession.id);
+    if (hasCashSessionId) return String(delivery.cashSessionId || "") === String(cashSession.id);
     return !openedAtTime || orderTime(delivery) >= openedAtTime;
+  });
+  const sessionPayments = (Array.isArray(orderPayments) ? orderPayments : []).filter((payment) => {
+    if (!hasCashSessionId) return false;
+    return String(payment.cashSessionId || "") === String(cashSession.id);
   });
   const cancelledOrders = sessionOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED);
   const activeOrders = sessionOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
@@ -762,18 +767,36 @@ function buildCashClosingReport(deliveries, cashSession = { openingAmount: 0, sa
   const deliveryOrders = activeOrders.filter((delivery) => isDeliveryOrder(delivery));
   const counterOrders = activeOrders.filter((delivery) => isCounterOrder(delivery));
   const byPayment = { Pix: 0, Dinheiro: 0, "Cartão débito": 0, "Cartão crédito": 0 };
-  paidOrders.forEach((delivery) => {
-    if (delivery.payment === "Misto" && delivery.mixedPayment) {
-      byPayment.Pix += toSafeMoneyNumber(delivery.mixedPayment.pix, 0);
-      byPayment.Dinheiro += toSafeMoneyNumber(delivery.mixedPayment.cash, 0);
-      byPayment["Cartão débito"] += toSafeMoneyNumber(delivery.mixedPayment.debit, 0);
-      byPayment["Cartão crédito"] += toSafeMoneyNumber(delivery.mixedPayment.credit, 0);
-      return;
-    }
-    if (Object.prototype.hasOwnProperty.call(byPayment, delivery.payment)) {
-      byPayment[delivery.payment] += toSafeMoneyNumber(delivery.value, 0);
-    }
-  });
+  const hasPaymentRows = sessionPayments.length > 0;
+  if (hasPaymentRows) {
+    sessionPayments
+      .filter((payment) => String(payment.status || "paid") === "paid")
+      .forEach((payment) => {
+        const method = payment.method || "Outro";
+        if (Object.prototype.hasOwnProperty.call(byPayment, method)) {
+          byPayment[method] += toSafeMoneyNumber(payment.amount, 0);
+        }
+      });
+  } else {
+    paidOrders.forEach((delivery) => {
+      if (delivery.payment === "Misto" && delivery.mixedPayment) {
+        byPayment.Pix += toSafeMoneyNumber(delivery.mixedPayment.pix, 0);
+        byPayment.Dinheiro += toSafeMoneyNumber(delivery.mixedPayment.cash, 0);
+        byPayment["Cartão débito"] += toSafeMoneyNumber(delivery.mixedPayment.debit, 0);
+        byPayment["Cartão crédito"] += toSafeMoneyNumber(delivery.mixedPayment.credit, 0);
+        return;
+      }
+      if (Object.prototype.hasOwnProperty.call(byPayment, delivery.payment)) {
+        byPayment[delivery.payment] += toSafeMoneyNumber(delivery.value, 0);
+      }
+    });
+  }
+  const paymentsReceivedTotal = hasPaymentRows
+    ? sessionPayments.filter((payment) => String(payment.status || "paid") === "paid").reduce((sum, payment) => sum + toSafeMoneyNumber(payment.amount, 0), 0)
+    : paidOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0);
+  const paymentsPendingTotal = hasPaymentRows
+    ? sessionPayments.filter((payment) => String(payment.status || "") !== "paid").reduce((sum, payment) => sum + toSafeMoneyNumber(payment.amount, 0), 0)
+    : pendingOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0);
   const sangriaTotal = (cashSession.sangrias || []).reduce((sum, item) => sum + toSafeMoneyNumber(item.value, 0), 0);
   const openingAmount = toSafeMoneyNumber(cashSession.openingAmount, 0);
   const expectedDrawerCash = openingAmount + byPayment.Dinheiro - sangriaTotal;
@@ -781,8 +804,8 @@ function buildCashClosingReport(deliveries, cashSession = { openingAmount: 0, sa
     orders: sessionOrders,
     activeOrders,
     totalSold: activeOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
-    totalReceived: paidOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
-    pendingAmount: pendingOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    totalReceived: paymentsReceivedTotal,
+    pendingAmount: paymentsPendingTotal,
     expectedCash: byPayment.Dinheiro,
     openingAmount,
     sangriaTotal,
@@ -1739,6 +1762,34 @@ function App() {
   }
 
 
+  function mapOrderPaymentFromDatabase(row) {
+    return {
+      id: row.id,
+      orderId: row.order_id,
+      cashSessionId: row.cash_session_id || "",
+      method: row.method || "Outro",
+      amount: Number(row.amount || 0),
+      status: row.status || "paid",
+      notes: row.notes || "",
+      createdAt: row.created_at || "",
+    };
+  }
+
+  async function fetchOrderPayments() {
+    const { data, error } = await supabase.from("order_payments").select("*");
+    if (error) {
+      console.error("Erro ao carregar pagamentos do caixa:", error);
+      return [];
+    }
+    return (Array.isArray(data) ? data : []).map(mapOrderPaymentFromDatabase);
+  }
+
+  async function loadOrderPayments() {
+    const rows = await fetchOrderPayments();
+    setOrderPayments(rows);
+    return rows;
+  }
+
   function mapOrderFromDatabase(order, items = []) {
     return {
       id: order.id,
@@ -2050,11 +2101,36 @@ function App() {
     }];
   }
 
+  async function cancelExistingOrderPayments(orderId, reason = "substituído") {
+    if (!orderId) return true;
+    const { error } = await supabase
+      .from("order_payments")
+      .update({ status: "cancelled", notes: `Pagamento ${reason}` })
+      .eq("order_id", orderId)
+      .neq("status", "cancelled");
+    if (error) console.warn("Pagamentos anteriores não foram cancelados:", error);
+    return !error;
+  }
+
   async function saveOrderPayments(delivery) {
     const rows = buildOrderPaymentRows(delivery);
     if (!rows.length) return true;
+    await cancelExistingOrderPayments(delivery.id, "substituído por novo registro");
     const { error } = await insertWithSchemaRetry("order_payments", rows, false);
     if (error) throw new Error(error.message || "Pagamentos não foram salvos em order_payments.");
+    setOrderPayments((previous) => [
+      ...previous.map((payment) => String(payment.orderId) === String(delivery.id) ? { ...payment, status: "cancelled" } : payment),
+      ...rows.map((row) => ({
+        id: `${row.order_id}-${row.method}-${Date.now()}-${Math.random()}`,
+        orderId: row.order_id,
+        cashSessionId: row.cash_session_id || "",
+        method: row.method,
+        amount: Number(row.amount || 0),
+        status: row.status || "paid",
+        notes: row.notes || "",
+        createdAt: new Date().toISOString(),
+      }))
+    ]);
     return true;
   }
 
@@ -2173,7 +2249,7 @@ function App() {
     const savedDelivery = { ...delivery, id: orderId };
     await saveOrderPayments(savedDelivery);
     await saveStockMovements(savedDelivery, "sale");
-    await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment });
+    await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "" });
 
     return savedDelivery;
   }
@@ -2268,6 +2344,7 @@ function App() {
     loadDeliveries();
     loadTabsAccounts();
     loadCashData();
+    loadOrderPayments();
     loadNotifications();
 
     // Mantém o PDV Entregas sincronizado com pedidos feitos em outro celular/computador.
@@ -2299,6 +2376,7 @@ function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "cash_sessions" }, () => { if (isMounted) loadCashData(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "tab_account_items" }, () => { if (isMounted) loadTabsAccounts(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, () => { if (isMounted) loadNotifications(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "order_payments" }, () => { if (isMounted) loadOrderPayments(); })
       .subscribe();
 
     return () => {
@@ -2335,6 +2413,7 @@ function App() {
   const [editingCourierId, setEditingCourierId] = useState(null);
   const [editingProductId, setEditingProductId] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [orderPayments, setOrderPayments] = useState([]);
   const [cashSession, setCashSession] = useState({ isOpen: false, id: "", openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [sangriaDraft, setSangriaDraft] = useState({ value: "", reason: "" });
@@ -2492,7 +2571,7 @@ function App() {
   const waitingPickupDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_PICKUP), [loggedCourierDeliveries]);
   const courierPendingDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED), [loggedCourierDeliveries]);
   const dayReport = useMemo(() => buildDayReport(products, deliveries), [products, deliveries]);
-  const cashClosingReport = useMemo(() => buildCashClosingReport(deliveries, cashSession), [deliveries, cashSession]);
+  const cashClosingReport = useMemo(() => buildCashClosingReport(deliveries, cashSession, orderPayments), [deliveries, cashSession, orderPayments]);
   const activeDeliveryOrdersForStore = useMemo(
     () => deliveries.filter((delivery) => isDeliveryOrder(delivery) && delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED),
     [deliveries]
@@ -3266,6 +3345,8 @@ function App() {
 
     const newDelivery = {
       id: Date.now(),
+      cashSessionId: cashSession.id || "",
+      originType: "delivery",
       orderType: ORDER_TYPE.DELIVERY,
       client: customerForm.name,
       phone: customerForm.phone,
@@ -3466,6 +3547,18 @@ function App() {
 
   async function openCashRegister() {
     if (cashSession.isOpen) return setLastAction("O caixa já está aberto.");
+    const { data: existingOpen, error: existingError } = await supabase
+      .from("cash_sessions")
+      .select("id, opened_at, opening_amount")
+      .eq("status", "open")
+      .limit(1);
+    if (existingError) return setLastAction(`Não consegui verificar caixa aberto: ${existingError.message || "verifique cash_sessions."}`);
+    if (Array.isArray(existingOpen) && existingOpen.length > 0) {
+      const session = existingOpen[0];
+      setCashSession({ isOpen: true, id: session.id, openedAt: session.opened_at || new Date().toISOString(), closedAt: "", openingAmount: Number(session.opening_amount || 0), sangrias: [] });
+      await loadCashData();
+      return setLastAction("Já havia um caixa aberto no Supabase. O sistema foi sincronizado com esse caixa.");
+    }
     const openingAmount = Math.max(0, Number(openingCashInput || 0));
     const openedAt = new Date().toISOString();
     const { data, error } = await supabase
@@ -3590,7 +3683,10 @@ function App() {
       ${isDelivery ? `<p class="center thanks">Barbosas Delivery agradece!</p>` : ""}
     `;
     const printed = printThermalHtml(`${isCounterOrder(delivery) ? "VENDA" : "ENTREGA"} #${delivery.id}`, body, copies, { delivery: isDelivery, ...printOptions });
-    if (printed) setLastAction(`Impressão aberta em ${copies} via${copies > 1 ? "s" : ""}.`);
+    if (printed) {
+      auditAction("print_receipt", "orders", delivery.id, { copies, orderType: delivery.orderType || ORDER_TYPE.DELIVERY, value: delivery.value });
+      setLastAction(`Impressão aberta em ${copies} via${copies > 1 ? "s" : ""}.`);
+    }
     return printed;
   }
 
@@ -3680,6 +3776,8 @@ function App() {
 
     const newDelivery = {
       id: Date.now(),
+      cashSessionId: cashSession.id || "",
+      originType: "delivery",
       orderType: ORDER_TYPE.DELIVERY,
       client: selectedDeliveryClient.name,
       phone: selectedDeliveryClient.phone,
@@ -3823,7 +3921,8 @@ function App() {
     if (currentDelivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return setLastAction("Pedido já está entregue e confirmado.");
 
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
-      const dbPatch = { status: DELIVERY_STATUS.WAITING_PICKUP };
+      if (!isCashOpen) return setLastAction("Abra o caixa antes de aprovar pedidos recebidos pelo cliente.");
+      const dbPatch = { status: DELIVERY_STATUS.WAITING_PICKUP, cashSessionId: currentDelivery.cashSessionId || cashSession.id || "" };
       const updated = await updateDeliveryInSupabase(id, dbPatch);
       if (!updated) {
         setLastAction("Não consegui aprovar no Supabase. Verifique a policy UPDATE da tabela orders.");
@@ -3832,6 +3931,7 @@ function App() {
 
       const localPatch = {
         status: DELIVERY_STATUS.WAITING_PICKUP,
+        cashSessionId: currentDelivery.cashSessionId || cashSession.id || "",
         needsStoreApproval: false,
         storeOrderApproved: true,
         approvedAt: new Date().toISOString(),
@@ -3886,7 +3986,7 @@ function App() {
     }
     await updateDeliveryInSupabase(id, { paymentStatus });
     if (paymentStatus === PAYMENT_STATUS.PAID && delivery.cashSessionId) {
-      try { await saveOrderPayments({ ...delivery, paymentStatus }); } catch (error) { console.error("Pagamento adicional não salvo:", error); }
+      try { await saveOrderPayments({ ...delivery, paymentStatus }); await loadOrderPayments(); } catch (error) { console.error("Pagamento adicional não salvo:", error); }
     }
     setDeliveries((previousDeliveries) => previousDeliveries.map((item) => (item.id === id ? { ...item, paymentStatus } : item)));
     setLastAction(`Pagamento da ${orderLabel} #${id} atualizado para: ${paymentStatus}.`);
@@ -3939,8 +4039,9 @@ function App() {
       )
     );
     setPendingCancellation({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
+    await cancelExistingOrderPayments(id, "cancelado junto com pedido");
     await saveStockMovements(delivery, "cancel");
-    await auditAction("cancel_order", "orders", id, { reason: cancellationText, value: delivery.value });
+    await auditAction("cancel_order", "orders", id, { reason: cancellationText, value: delivery.value, cashSessionId: delivery.cashSessionId || "" }, delivery);
     setLastAction(`${isCounterOrder(delivery) ? "Venda" : "Pedido"} #${id} cancelado, motivo registrado e estoque devolvido automaticamente.`);
     await loadDeliveries();
   }
@@ -3949,7 +4050,8 @@ function App() {
     if (!cashSession.isOpen) return setLastAction("Abra o caixa antes de fechar.");
     if (closingCashCounted === "") return setLastAction("Informe quanto dinheiro foi contado na gaveta para fechar o caixa.");
     const countedCash = Math.max(0, Number(closingCashCounted || 0));
-    const report = buildCashClosingReport(deliveries, cashSession);
+    const latestPayments = await fetchOrderPayments();
+    const report = buildCashClosingReport(deliveries, cashSession, latestPayments);
     const difference = countedCash - report.expectedDrawerCash;
     const closedAt = new Date().toISOString();
     const record = {
@@ -5325,7 +5427,7 @@ function App() {
 
                 <CardBox>
                   <h3 className="font-bold text-lg mb-4">Caixas fechados salvos</h3>
-                  <p className="text-sm text-zinc-500 mb-4">O sistema mantém os fechamentos dos últimos 24 meses neste navegador e tenta registrar também na tabela cash_movements do Supabase.</p>
+                  <p className="text-sm text-zinc-500 mb-4">O sistema usa o Supabase como base principal. O fechamento é salvo em cash_sessions e os pagamentos em order_payments.</p>
                   {cashClosings.length === 0 ? (
                     <p className="text-sm text-zinc-500">Nenhum fechamento salvo ainda.</p>
                   ) : (
