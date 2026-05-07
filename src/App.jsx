@@ -353,13 +353,30 @@ function hasCurrencyValue(text, value) {
   return normalized.includes(money(value).replace(/ /g, " "));
 }
 
+function normalizeStoreCredential(value) {
+  return String(value || "").trim();
+}
+
+function normalizeStoreLogin(value) {
+  return normalizeStoreCredential(value).toLowerCase();
+}
+
 function isValidLogin(login, password) {
-  const normalizedLogin = String(login || "").trim();
-  const normalizedPassword = String(password || "").trim();
-  return (
-    (normalizedLogin === "loja" || normalizedLogin === "gabrieladmin" || normalizedLogin.includes("@")) &&
-    normalizedPassword.length >= 4
-  );
+  // Fallback legado para não travar a operação caso a tabela store_users ainda não exista.
+  // A regra principal do Bloco 3 passa a ser validar a loja em store_users no Supabase.
+  const normalizedLogin = normalizeStoreLogin(login);
+  const normalizedPassword = normalizeStoreCredential(password);
+  return (normalizedLogin === "loja" || normalizedLogin === "gabrieladmin") && normalizedPassword.length >= 4;
+}
+
+function isStoreLoginLocked(lockedUntil) {
+  return lockedUntil && Date.now() < new Date(lockedUntil).getTime();
+}
+
+function getStoreLockMessage(lockedUntil) {
+  const remainingMs = Math.max(0, new Date(lockedUntil || 0).getTime() - Date.now());
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  return `Muitas tentativas inválidas. Aguarde ${remainingMinutes} minuto(s) para tentar novamente.`;
 }
 
 function hasDuplicateBarcode(products, barcode) {
@@ -1166,7 +1183,7 @@ function runSelfTests() {
   const tests = [
     { name: "Login da loja com senha válida", passed: isValidLogin("loja", "1234") === true },
     { name: "Login bloqueia senha curta", passed: isValidLogin("loja", "123") === false },
-    { name: "Login aceita e-mail como usuário", passed: isValidLogin("gabriel@loja.com", "1234") === true },
+    { name: "Login legado não aceita qualquer e-mail", passed: isValidLogin("gabriel@loja.com", "1234") === false },
     { name: "Código de barras duplicado é detectado", passed: hasDuplicateBarcode(initialProducts, "7894900011517") === true },
     { name: "Código de barras novo é permitido", passed: hasDuplicateBarcode(initialProducts, "0001112223334") === false },
     { name: "Produto editado não pode duplicar código de barras", passed: isProductBarcodeAvailable(initialProducts, "0001112223334", 1) === true && isProductBarcodeAvailable(initialProducts, "7894900011517", 1) === false },
@@ -1405,10 +1422,13 @@ class AppErrorBoundary extends React.Component {
 
 function App() {
   const [isLogged, setIsLogged] = useState(false);
+  const [storeSession, setStoreSession] = useState(null);
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [failedStoreLoginAttempts, setFailedStoreLoginAttempts] = useState(0);
+  const [storeLoginLockedUntil, setStoreLoginLockedUntil] = useState(null);
   const [courierLogin, setCourierLogin] = useState("");
   const [courierPassword, setCourierPassword] = useState("");
   const [courierLoginError, setCourierLoginError] = useState("");
@@ -1665,7 +1685,7 @@ function App() {
       total: buildOrderTotal(tab.items || []),
       opened_at: tab.openedAt || new Date().toISOString(),
       closed_at: status === "closed" ? (tab.closedAt || new Date().toISOString()) : null,
-      closed_by: status === "closed" ? (login || "loja") : null,
+      closed_by: status === "closed" ? getCurrentStoreUserName() : null,
       cash_session_id: tab.cashSessionId || cashSession.id || null,
       items_json: JSON.stringify(tab.items || []),
       notes: JSON.stringify({ ...tab, items: undefined }),
@@ -2044,7 +2064,7 @@ function App() {
     if (error) console.error("Notificação não salva no Supabase:", error);
   }
 
-  async function auditAction(action, entity, entityId, afterJson = {}, beforeJson = null, userType = isLogged ? "store" : loggedCourier ? "courier" : "customer", userName = login || loggedCourier?.username || customerForm.name || "sistema") {
+  async function auditAction(action, entity, entityId, afterJson = {}, beforeJson = null, userType = isLogged ? "store" : loggedCourier ? "courier" : "customer", userName = getCurrentStoreUserName?.() || loggedCourier?.username || customerForm.name || "sistema") {
     const { error } = await insertWithSchemaRetry("audit_logs", {
       user_type: userType,
       user_name: userName,
@@ -2068,6 +2088,66 @@ function App() {
         created_at: new Date().toISOString(),
       }, false);
     } catch (_) {}
+  }
+
+  function mapStoreUserFromDatabase(row) {
+    return {
+      id: row.id,
+      name: row.name || row.display_name || row.username || row.email || "Usuário da loja",
+      username: normalizeStoreLogin(row.username || row.login || row.email),
+      email: normalizeStoreLogin(row.email || ""),
+      password: normalizeStoreCredential(row.password || row.password_text || row.password_hash || ""),
+      role: row.role || "operador",
+      active: isTruthyActive(row.active),
+      createdAt: row.created_at || "",
+    };
+  }
+
+  async function findStoreUserByLoginCredentials(inputLogin, inputPassword) {
+    const normalizedLogin = normalizeStoreLogin(inputLogin);
+    const normalizedPassword = normalizeStoreCredential(inputPassword);
+    if (!normalizedLogin || !normalizedPassword) return { ok: false, unavailable: false, user: null };
+
+    try {
+      const { data, error } = await supabase.from("store_users").select("*").limit(100);
+      if (error) {
+        const message = String(error.message || "").toLowerCase();
+        const storeUsersUnavailable = error.code === "42P01" || message.includes("store_users") || message.includes("does not exist") || message.includes("schema cache");
+        if (storeUsersUnavailable) return { ok: false, unavailable: true, user: null };
+        console.error("Erro ao validar login da loja em store_users:", error);
+        await registerAppError("store_login", error, { login: normalizedLogin });
+        return { ok: false, unavailable: false, user: null, error };
+      }
+
+      const user = (Array.isArray(data) ? data : [])
+        .map(mapStoreUserFromDatabase)
+        .find((storeUser) => {
+          const loginMatches = storeUser.username === normalizedLogin || storeUser.email === normalizedLogin;
+          return storeUser.active && loginMatches && storeUser.password === normalizedPassword;
+        });
+
+      return { ok: Boolean(user), unavailable: false, user: user || null };
+    } catch (error) {
+      console.error("Erro inesperado no login da loja:", error);
+      await registerAppError("store_login", error, { login: normalizedLogin });
+      return { ok: false, unavailable: false, user: null, error };
+    }
+  }
+
+  function getCurrentStoreUserName() {
+    return storeSession?.username || normalizeStoreLogin(login) || "loja";
+  }
+
+  function getCurrentStoreDisplayName() {
+    return storeSession?.name || getCurrentStoreUserName();
+  }
+
+  function handleStoreLogout() {
+    auditAction("store_logout", "store_session", storeSession?.id || getCurrentStoreUserName(), { username: getCurrentStoreUserName() }, null, "store", getCurrentStoreUserName());
+    setIsLogged(false);
+    setStoreSession(null);
+    setPassword("");
+    setLastAction("Sessão da loja encerrada com segurança.");
   }
 
   function buildOrderPaymentRows(delivery) {
@@ -2152,7 +2232,7 @@ function App() {
         stock_before: before,
         stock_after: after,
         reason: movementType === "cancel" ? "Cancelamento/devolução" : "Venda/pedido",
-        created_by: login || loggedCourier?.username || "sistema",
+        created_by: getCurrentStoreUserName() || loggedCourier?.username || "sistema",
         created_at: new Date().toISOString(),
       };
     });
@@ -2628,16 +2708,52 @@ function App() {
     await supabase.from("notifications").update({ read: true, read_at: new Date().toISOString() }).eq("audience", normalizedAudience);
   }
 
-  function handleLogin(event) {
+  async function handleLogin(event) {
     event.preventDefault();
-    if (!login.trim() || !password.trim()) return setLoginError("Preencha e-mail/usuário e senha.");
-    if (isValidLogin(login, password)) {
+    const normalizedLogin = normalizeStoreLogin(login);
+    const normalizedPassword = normalizeStoreCredential(password);
+
+    if (isStoreLoginLocked(storeLoginLockedUntil)) {
+      return setLoginError(getStoreLockMessage(storeLoginLockedUntil));
+    }
+
+    if (!normalizedLogin || !normalizedPassword) return setLoginError("Preencha usuário/e-mail e senha da loja.");
+
+    const storeUserResult = await findStoreUserByLoginCredentials(normalizedLogin, normalizedPassword);
+    const legacyFallbackAllowed = storeUserResult.unavailable && isValidLogin(normalizedLogin, normalizedPassword);
+
+    if (storeUserResult.ok || legacyFallbackAllowed) {
+      const sessionUser = storeUserResult.user || {
+        id: "legacy-store-login",
+        name: normalizedLogin === "gabrieladmin" ? "Administrador da loja" : "Loja",
+        username: normalizedLogin,
+        email: "",
+        role: normalizedLogin === "gabrieladmin" ? "admin" : "operador",
+        active: true,
+      };
+
+      setStoreSession({ ...sessionUser, loggedAt: new Date().toISOString(), mode: storeUserResult.ok ? "supabase" : "legacy" });
       setIsLogged(true);
       setLoginError("");
-      setLastAction("Login seguro realizado com sucesso.");
+      setFailedStoreLoginAttempts(0);
+      setStoreLoginLockedUntil(null);
+      setLastAction(storeUserResult.ok ? "Login da loja validado no Supabase." : "Login legado usado. Crie a tabela store_users para ativar controle profissional de usuários.");
+      await auditAction("store_login_success", "store_session", sessionUser.id || sessionUser.username, { username: sessionUser.username, role: sessionUser.role, mode: storeUserResult.ok ? "supabase" : "legacy" }, null, "store", sessionUser.username);
       return;
     }
-    setLoginError("Dados inválidos. Tente novamente.");
+
+    const nextAttempts = failedStoreLoginAttempts + 1;
+    setFailedStoreLoginAttempts(nextAttempts);
+    await auditAction("store_login_failed", "store_session", normalizedLogin, { username: normalizedLogin, attempts: nextAttempts }, null, "store", normalizedLogin);
+
+    if (nextAttempts >= 5) {
+      const lockedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      setStoreLoginLockedUntil(lockedUntil);
+      setFailedStoreLoginAttempts(0);
+      return setLoginError(getStoreLockMessage(lockedUntil));
+    }
+
+    setLoginError(`Dados inválidos. Tentativa ${nextAttempts}/5 antes do bloqueio temporário.`);
   }
 
   async function handleCourierLogin(event) {
@@ -3567,7 +3683,7 @@ function App() {
         status: "open",
         opening_amount: openingAmount,
         opened_at: openedAt,
-        opened_by: login || "loja",
+        opened_by: getCurrentStoreUserName(),
         notes: "Abertura de caixa pelo painel",
       })
       .select("*")
@@ -3634,7 +3750,7 @@ function App() {
     const payload = {
       status: "closed",
       closed_at: record.closedAt || new Date().toISOString(),
-      closed_by: login || "loja",
+      closed_by: getCurrentStoreUserName(),
       total_sold: Number(record.totalSold || 0),
       total_received: Number(record.totalReceived || 0),
       pix_total: Number(record.byPayment?.Pix || 0),
@@ -4233,7 +4349,7 @@ function App() {
   async function closeTabAccount(tabId) {
     if (!isCashOpen) return setLastAction("Abra o caixa antes de fechar comanda.");
     const typedStorePassword = String(tabClosingStorePassword || "").trim();
-    const currentStorePassword = String(password || "").trim();
+    const currentStorePassword = String(storeSession?.password || password || "").trim();
     if (!typedStorePassword || (currentStorePassword && typedStorePassword !== currentStorePassword) || (!currentStorePassword && !isValidLogin(login || "loja", typedStorePassword))) {
       return setLastAction("Senha da loja incorreta. Use a mesma senha do login da loja para fechar a comanda.");
     }
@@ -4340,7 +4456,7 @@ function App() {
       storeFee: delivery.deliveredByUsername ? delivery.storeFee : 0,
       paymentStatus: PAYMENT_STATUS.PAID,
       finalizedAt: new Date().toISOString(),
-      finalizedBy: login || "loja",
+      finalizedBy: getCurrentStoreUserName(),
     };
     await updateDeliveryInSupabase(id, patch);
     setDeliveries((previousDeliveries) =>
@@ -4738,11 +4854,11 @@ function App() {
 
               {entryMode === "loja" && (
                 <form onSubmit={handleLogin} className="space-y-4">
-                  <DarkLoginInput icon="mail" label="E-mail ou usuário" value={login} onChange={setLogin} placeholder="gabrieladmin ou email@loja.com" />
+                  <DarkLoginInput icon="mail" label="E-mail ou usuário" value={login} onChange={setLogin} placeholder="loja, gabrieladmin ou usuário cadastrado" />
                   <DarkLoginInput icon="lock" label="Senha" value={password} onChange={setPassword} placeholder="Digite sua senha" type={showPassword ? "text" : "password"} rightButton={<button type="button" onClick={() => setShowPassword(!showPassword)} className="text-zinc-400"><Icon name={showPassword ? "eyeOff" : "eye"} /></button>} />
                   {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
                   <Button type="submit" className="w-full rounded-2xl py-6 text-base !bg-white !text-zinc-950 hover:!bg-zinc-200">Entrar como loja</Button>
-                  <div className="text-xs text-zinc-500 leading-relaxed">Protótipo: use usuário <b>loja</b> ou <b>gabrieladmin</b> e uma senha com 4 ou mais caracteres.</div>
+                  <div className="text-xs text-zinc-500 leading-relaxed">Acesso da loja validado preferencialmente pela tabela <b>store_users</b> no Supabase. O fallback legado continua ativo apenas para não travar a operação.</div>
                 </form>
               )}
 
@@ -4767,8 +4883,8 @@ function App() {
     <div className="min-h-screen bg-zinc-100 text-zinc-950">
       <header className="bg-zinc-950 text-white px-4 md:px-8 py-5 sticky top-0 z-20 shadow-xl">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-xl font-bold">Sistema da Loja</h1><p className="text-xs text-zinc-400">Painel administrativo exclusivo da loja</p></div></div>
-          <Button onClick={() => setIsLogged(false)} variant="secondary" className="rounded-2xl"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
+          <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-xl font-bold">Sistema da Loja</h1><p className="text-xs text-zinc-400">Painel administrativo exclusivo da loja • {getCurrentStoreDisplayName()} {storeSession?.role ? `(${storeSession.role})` : ""}</p></div></div>
+          <Button onClick={handleStoreLogout} variant="secondary" className="rounded-2xl"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
         </div>
       </header>
 
@@ -5750,7 +5866,7 @@ function App() {
         </div>
       )}
 
-      {ownerPinOpen && <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"><Card className="max-w-sm w-full rounded-3xl"><CardContent className="p-6"><div className="flex items-center gap-3 mb-4"><Icon name="lock" /><h3 className="font-bold text-lg">Confirmação da loja</h3></div><p className="text-sm text-zinc-600 mb-4">Na versão final, ações sensíveis podem pedir senha, PIN ou biometria antes de confirmar.</p><Input label="PIN de confirmação" type="password" placeholder="****" /><div className="flex gap-2 mt-5"><Button onClick={() => setOwnerPinOpen(false)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 flex-1">Confirmar</Button><Button onClick={() => setOwnerPinOpen(false)} variant="secondary" className="rounded-2xl flex-1">Fechar</Button></div></CardContent></Card></div>}
+      {ownerPinOpen && <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"><Card className="max-w-sm w-full rounded-3xl"><CardContent className="p-6"><div className="flex items-center gap-3 mb-4"><Icon name="lock" /><h3 className="font-bold text-lg">Confirmação da loja</h3></div><p className="text-sm text-zinc-600 mb-4">Ações sensíveis devem ser confirmadas com a senha/PIN do usuário da loja quando necessário.</p><Input label="PIN de confirmação" type="password" placeholder="****" /><div className="flex gap-2 mt-5"><Button onClick={() => setOwnerPinOpen(false)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 flex-1">Confirmar</Button><Button onClick={() => setOwnerPinOpen(false)} variant="secondary" className="rounded-2xl flex-1">Fechar</Button></div></CardContent></Card></div>}
     </div>
   );
 
