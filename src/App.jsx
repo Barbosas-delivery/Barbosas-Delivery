@@ -269,25 +269,12 @@ const STORAGE_PREFIX = "barbosas_delivery_v3_";
 const STORAGE_24_MONTHS_MS = 1000 * 60 * 60 * 24 * 730;
 
 function readStoredValue(key, fallback) {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return parsed ?? fallback;
-  } catch (error) {
-    console.warn("Não foi possível ler armazenamento local:", key, error);
-    return fallback;
-  }
+  // Registro permanente deve vir do Supabase. O navegador não é mais usado como apoio.
+  return fallback;
 }
 
 function writeStoredValue(key, value) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
-  } catch (error) {
-    console.warn("Não foi possível salvar armazenamento local:", key, error);
-  }
+  // Intencionalmente vazio: nada permanente fica salvo no navegador.
 }
 
 function pruneRecordsByMonths(records, dateFields = ["closedAt", "createdAt", "launchedAt"]) {
@@ -757,29 +744,49 @@ function buildPaidPaymentBreakdown(deliveries = []) {
 
 function buildCashClosingReport(deliveries, cashSession = { openingAmount: 0, sangrias: [] }) {
   const openedAtTime = cashSession?.openedAt ? new Date(cashSession.openedAt).getTime() : 0;
-  const orderTime = (delivery) => new Date(delivery.launchedAt || delivery.deliveredAt || delivery.createdAt || 0).getTime() || 0;
-  const sessionDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => !openedAtTime || orderTime(delivery) >= openedAtTime);
-  const activeDeliveries = sessionDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
-  const activeDeliveryOrders = activeDeliveries.filter((delivery) => isDeliveryOrder(delivery));
-  const activeCounterOrders = activeDeliveries.filter((delivery) => isCounterOrder(delivery));
-  const byPayment = buildPaidPaymentBreakdown(activeDeliveries);
-  const sangriaTotal = (cashSession.sangrias || []).reduce((sum, item) => sum + Number(item.value || 0), 0);
-  const openingAmount = Number(cashSession.openingAmount || 0);
-  const cashInDay = byPayment.Dinheiro || 0;
-  const expectedDrawerCash = openingAmount + cashInDay - sangriaTotal;
+  const orderTime = (delivery) => new Date(delivery.launchedAt || delivery.createdAt || delivery.deliveredAt || delivery.closedAt || 0).getTime() || 0;
+  const sessionOrders = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => !openedAtTime || orderTime(delivery) >= openedAtTime);
+  const cancelledOrders = sessionOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED);
+  const activeOrders = sessionOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
+  const paidOrders = activeOrders.filter((delivery) => delivery.paymentStatus === PAYMENT_STATUS.PAID);
+  const pendingOrders = activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID);
+  const deliveryOrders = activeOrders.filter((delivery) => isDeliveryOrder(delivery));
+  const counterOrders = activeOrders.filter((delivery) => isCounterOrder(delivery));
+  const byPayment = { Pix: 0, Dinheiro: 0, "Cartão débito": 0, "Cartão crédito": 0 };
+  paidOrders.forEach((delivery) => {
+    if (delivery.payment === "Misto" && delivery.mixedPayment) {
+      byPayment.Pix += toSafeMoneyNumber(delivery.mixedPayment.pix, 0);
+      byPayment.Dinheiro += toSafeMoneyNumber(delivery.mixedPayment.cash, 0);
+      byPayment["Cartão débito"] += toSafeMoneyNumber(delivery.mixedPayment.debit, 0);
+      byPayment["Cartão crédito"] += toSafeMoneyNumber(delivery.mixedPayment.credit, 0);
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(byPayment, delivery.payment)) {
+      byPayment[delivery.payment] += toSafeMoneyNumber(delivery.value, 0);
+    }
+  });
+  const sangriaTotal = (cashSession.sangrias || []).reduce((sum, item) => sum + toSafeMoneyNumber(item.value, 0), 0);
+  const openingAmount = toSafeMoneyNumber(cashSession.openingAmount, 0);
+  const expectedDrawerCash = openingAmount + byPayment.Dinheiro - sangriaTotal;
   return {
-    totalSold: activeDeliveries.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    totalReceived: getPaidActiveOrders(activeDeliveries).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    expectedCash: cashInDay,
+    orders: sessionOrders,
+    activeOrders,
+    totalSold: activeOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    totalReceived: paidOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    pendingAmount: pendingOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    expectedCash: byPayment.Dinheiro,
     openingAmount,
     sangriaTotal,
     expectedDrawerCash,
     byPayment,
-    pendingAmount: activeDeliveries.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    pendingOrders: activeDeliveryOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED).length,
-    deliverySold: activeDeliveryOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    counterSold: activeCounterOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    cancelledOrders: sessionDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED).length,
+    deliverySold: deliveryOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    counterSold: counterOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    deliveryOrders: deliveryOrders.length,
+    counterOrders: counterOrders.length,
+    cancelledOrders: cancelledOrders.length,
+    cancelledAmount: cancelledOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
+    pendingOrders: pendingOrders.length,
+    paidOrders: paidOrders.length,
     openedAt: cashSession.openedAt || "",
     closedAt: cashSession.closedAt || "",
   };
@@ -1436,11 +1443,11 @@ function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [storeSettings, setStoreSettings] = useState(initialStoreSettings);
   const [products, setProducts] = useState([]);
-  const [promotions, setPromotions] = useState(() => readStoredValue("promotions", initialPromotions));
-  const [kits, setKits] = useState(() => readStoredValue("kits", initialKits));
+  const [promotions, setPromotions] = useState([]);
+  const [kits, setKits] = useState([]);
   const [clients, setClients] = useState(initialClients);
   const [deliveries, setDeliveries] = useState(initialDeliveries);
-  const [couriers, setCouriers] = useState(() => readStoredValue("couriers", initialCouriers));
+  const [couriers, setCouriers] = useState([]);
   const [search, setSearch] = useState("");
   const [ownerPinOpen, setOwnerPinOpen] = useState(false);
   const [lastAction, setLastAction] = useState("");
@@ -1556,14 +1563,147 @@ function App() {
 
     if (error) {
       console.error("Erro ao carregar entregadores:", error);
-      const storedCouriers = readStoredValue("couriers", null);
-      if (storedCouriers) setCouriers(storedCouriers);
+      setCouriers([]);
       setLastAction(`Entregadores não carregados do Supabase: ${error.message || "verifique SELECT em couriers."}`);
       return;
     }
 
-    const nextCouriers = Array.isArray(data) && data.length > 0 ? data.map(mapCourierFromDatabase) : readStoredValue("couriers", initialCouriers);
+    const nextCouriers = Array.isArray(data) ? data.map(mapCourierFromDatabase) : [];
     setCouriers(nextCouriers);
+    return nextCouriers;
+  }
+
+  async function loadPromotions() {
+    const { data, error } = await supabase.from("promotions").select("*");
+    if (error) {
+      console.error("Erro ao carregar promoções:", error);
+      setPromotions([]);
+      return;
+    }
+    setPromotions((Array.isArray(data) ? data : []).map((promotion) => ({
+      id: promotion.id,
+      title: promotion.title || "",
+      description: promotion.description || "",
+      productId: promotion.product_id ?? promotion.productId ?? "",
+      badge: promotion.badge || "Promoção da loja",
+      imageUrl: promotion.image_url || promotion.imageUrl || "",
+      discountPercent: Number(promotion.discount_percent ?? promotion.discountPercent ?? 0),
+      promotionalPrice: Number(promotion.promotional_price ?? promotion.promotionalPrice ?? 0),
+      startDate: promotion.start_date || promotion.startDate || "",
+      endDate: promotion.end_date || promotion.endDate || "",
+      active: isTruthyActive(promotion.active),
+    })));
+  }
+
+  async function loadKits() {
+    const { data: kitData, error: kitError } = await supabase.from("kits").select("*");
+    if (kitError) {
+      console.error("Erro ao carregar kits:", kitError);
+      setKits([]);
+      return;
+    }
+    const { data: itemData, error: itemError } = await supabase.from("kit_items").select("*");
+    if (itemError) {
+      console.error("Erro ao carregar itens dos kits:", itemError);
+      setKits((Array.isArray(kitData) ? kitData : []).map((kit) => ({ id: kit.id, name: kit.name || "", description: kit.description || "", items: [], price: Number(kit.price || 0), endDate: kit.end_date || kit.endDate || "", active: isTruthyActive(kit.active) })));
+      return;
+    }
+    const itemsByKit = (Array.isArray(itemData) ? itemData : []).reduce((acc, item) => {
+      const key = item.kit_id;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push({ productId: item.product_id, quantity: Number(item.quantity || 1) });
+      return acc;
+    }, {});
+    setKits((Array.isArray(kitData) ? kitData : []).map((kit) => ({
+      id: kit.id,
+      name: kit.name || "",
+      description: kit.description || "",
+      items: itemsByKit[kit.id] || [],
+      price: Number(kit.price || 0),
+      endDate: kit.end_date || kit.endDate || "",
+      active: isTruthyActive(kit.active),
+    })));
+  }
+
+  function parseJsonNotes(value, fallback) {
+    try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; }
+  }
+
+  async function loadTabsAccounts() {
+    const { data, error } = await supabase.from("tab_accounts").select("*");
+    if (error) {
+      console.error("Erro ao carregar comandas:", error);
+      setTabsAccounts([]);
+      setLastAction(`Comandas não carregadas do Supabase: ${error.message || "verifique tabela/policy tab_accounts."}`);
+      return;
+    }
+    const openTabs = (Array.isArray(data) ? data : [])
+      .filter((row) => String(row.status || "open") === "open")
+      .map((row) => ({
+        id: row.id,
+        customerName: row.customer_name || row.customerName || "Cliente",
+        phone: row.phone || "",
+        creditLimit: Number(row.credit_limit ?? row.creditLimit ?? DEFAULT_TAB_CREDIT_LIMIT),
+        payment: row.payment || "Dinheiro",
+        items: parseJsonNotes(row.items_json || row.items || "", parseJsonNotes(row.notes, {}).items || []),
+        openedAt: row.opened_at || row.openedAt || row.created_at || new Date().toISOString(),
+        notes: row.notes || "Comanda aberta",
+      }));
+    setTabsAccounts(openTabs);
+  }
+
+  async function persistTabAccount(tab, status = "open") {
+    const payload = {
+      id: tab.id,
+      customer_name: tab.customerName || "Cliente",
+      phone: tab.phone || "",
+      credit_limit: Number(tab.creditLimit || DEFAULT_TAB_CREDIT_LIMIT),
+      payment: tab.payment || "Dinheiro",
+      status,
+      total: buildOrderTotal(tab.items || []),
+      opened_at: tab.openedAt || new Date().toISOString(),
+      closed_at: status === "closed" ? new Date().toISOString() : null,
+      items_json: JSON.stringify(tab.items || []),
+      notes: JSON.stringify(tab),
+      updated_at: new Date().toISOString(),
+    };
+    const { error: insertError } = await insertWithSchemaRetry("tab_accounts", payload, false);
+    if (!insertError) return true;
+    const message = String(insertError.message || insertError || "").toLowerCase();
+    if (!message.includes("duplicate") && !message.includes("duplic") && !message.includes("23505")) {
+      throw new Error(insertError.message || "Não foi possível salvar comanda no Supabase.");
+    }
+    const { error: updateError } = await updateWithSchemaRetry("tab_accounts", tab.id, payload);
+    if (updateError) throw new Error(updateError.message || "Não foi possível atualizar comanda no Supabase.");
+    return true;
+  }
+
+  async function loadCashData() {
+    const { data, error } = await supabase.from("cash_movements").select("*");
+    if (error) {
+      console.error("Erro ao carregar movimentos de caixa:", error);
+      setCashClosings([]);
+      return;
+    }
+    const rows = (Array.isArray(data) ? data : []).slice().sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+    const closings = rows.filter((row) => String(row.movement_type || row.type || "") === "closing").map((row) => parseJsonNotes(row.notes, {
+      id: row.id,
+      openedAt: row.opened_at || "",
+      closedAt: row.closed_at || row.created_at || "",
+      totalSold: Number(row.total_sold || 0),
+      totalReceived: Number(row.total_received || row.amount || 0),
+      countedCash: Number(row.counted_cash || 0),
+      difference: Number(row.difference || 0),
+      byPayment: { Pix: Number(row.pix || 0), Dinheiro: Number(row.cash || 0), "Cartão débito": Number(row.debit || 0), "Cartão crédito": Number(row.credit || 0) },
+    }));
+    setCashClosings(pruneRecordsByMonths(closings.reverse(), ["closedAt", "createdAt"]));
+    const lastClosingTime = Math.max(0, ...rows.filter((row) => String(row.movement_type || row.type || "") === "closing").map((row) => new Date(row.closed_at || row.created_at || 0).getTime() || 0));
+    const lastOpen = rows.filter((row) => String(row.movement_type || row.type || "") === "cash_open" && (new Date(row.created_at || 0).getTime() || 0) > lastClosingTime).pop();
+    if (lastOpen) {
+      const openedAt = lastOpen.opened_at || lastOpen.created_at || new Date().toISOString();
+      const sangrias = rows.filter((row) => String(row.movement_type || row.type || "") === "sangria" && (new Date(row.created_at || 0).getTime() || 0) >= new Date(openedAt).getTime()).map((row) => ({ id: row.id, value: Number(row.value || row.amount || 0), reason: row.reason || "Sangria", createdAt: row.created_at || new Date().toISOString() }));
+      setCashSession({ isOpen: true, openedAt, closedAt: "", openingAmount: Number(lastOpen.value || lastOpen.amount || 0), sangrias });
+    }
   }
 
 
@@ -1913,7 +2053,11 @@ function App() {
     loadProducts();
     loadClients();
     loadCouriers();
+    loadPromotions();
+    loadKits();
     loadDeliveries();
+    loadTabsAccounts();
+    loadCashData();
 
     // Mantém o PVD Entregas sincronizado com pedidos feitos em outro celular/computador.
     // Antes o sistema carregava os pedidos só uma vez ao abrir a tela; por isso
@@ -1936,6 +2080,11 @@ function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => { if (isMounted) loadProducts(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => { if (isMounted) loadClients(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "couriers" }, () => { if (isMounted) loadCouriers(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "promotions" }, () => { if (isMounted) loadPromotions(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "kits" }, () => { if (isMounted) loadKits(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "kit_items" }, () => { if (isMounted) loadKits(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tab_accounts" }, () => { if (isMounted) loadTabsAccounts(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "cash_movements" }, () => { if (isMounted) loadCashData(); })
       .subscribe();
 
     return () => {
@@ -1954,7 +2103,7 @@ function App() {
   const todayInput = getDateInputValue(new Date());
   const [courierReportRange, setCourierReportRange] = useState({ startDate: todayInput, endDate: todayInput });
   const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], price: "", cost: "", stock: "", minStock: "", ncm: "", barcode: "", imageUrl: "" });
-  const [productGroups, setProductGroups] = useState(() => readStoredValue("productGroups", initialProductGroups));
+  const [productGroups, setProductGroups] = useState(initialProductGroups);
   const [newProductGroup, setNewProductGroup] = useState("");
   const [newPromotion, setNewPromotion] = useState({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
   const [promotionProductSearch, setPromotionProductSearch] = useState("");
@@ -1972,24 +2121,25 @@ function App() {
   const [courierSearch, setCourierSearch] = useState("");
   const [editingCourierId, setEditingCourierId] = useState(null);
   const [editingProductId, setEditingProductId] = useState(null);
-  const [notifications, setNotifications] = useState(() => readStoredValue("notifications", []));
-  const [cashSession, setCashSession] = useState(() => readStoredValue("cashSession", { isOpen: false, openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] }));
+  const [notifications, setNotifications] = useState([]);
+  const [cashSession, setCashSession] = useState({ isOpen: false, openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [sangriaDraft, setSangriaDraft] = useState({ value: "", reason: "" });
   const [closingCashCounted, setClosingCashCounted] = useState("");
-  const [tabsAccounts, setTabsAccounts] = useState(() => readStoredValue("tabsAccounts", []));
-  const [tabCreditLimits, setTabCreditLimits] = useState(() => readStoredValue("tabCreditLimits", {}));
+  const [tabsAccounts, setTabsAccounts] = useState([]);
+  const [tabCreditLimits, setTabCreditLimits] = useState({});
   const [tabDraft, setTabDraft] = useState({ customerName: "", phone: "", creditLimit: DEFAULT_TAB_CREDIT_LIMIT });
   const [tabProductSearch, setTabProductSearch] = useState("");
   const [tabProductSearchByTab, setTabProductSearchByTab] = useState({});
   const [tabLimitDrafts, setTabLimitDrafts] = useState({});
   const [tabProductSelectByTab, setTabProductSelectByTab] = useState({});
+  const [tabProductQuantityByTab, setTabProductQuantityByTab] = useState({});
   const [closingTabId, setClosingTabId] = useState(null);
   const [tabClosingPayment, setTabClosingPayment] = useState("Dinheiro");
   const [tabClosingChangeFor, setTabClosingChangeFor] = useState("");
   const [tabClosingMixedPayment, setTabClosingMixedPayment] = useState(createEmptyMixedPayment());
   const [pendingCancellation, setPendingCancellation] = useState({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
-  const [cashClosings, setCashClosings] = useState(() => pruneRecordsByMonths(readStoredValue("cashClosings", []), ["closedAt", "createdAt"]));
+  const [cashClosings, setCashClosings] = useState([]);
   const [reportRange, setReportRange] = useState({ startDate: todayInput.slice(0, 7) + "-01", endDate: todayInput });
 
   const filteredProducts = useMemo(() => {
@@ -2160,16 +2310,6 @@ function App() {
     total: cancelledDeliveryOrdersForStore.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
   }), [cancelledDeliveryOrdersForStore]);
 
-  useEffect(() => { writeStoredValue("promotions", promotions); }, [promotions]);
-  useEffect(() => { writeStoredValue("kits", kits); }, [kits]);
-  useEffect(() => { writeStoredValue("productGroups", productGroups); }, [productGroups]);
-  useEffect(() => { writeStoredValue("couriers", couriers); }, [couriers]);
-  useEffect(() => { writeStoredValue("notifications", notifications.slice(0, 250)); }, [notifications]);
-  useEffect(() => { writeStoredValue("cashSession", cashSession); }, [cashSession]);
-  useEffect(() => { writeStoredValue("tabsAccounts", tabsAccounts); }, [tabsAccounts]);
-  useEffect(() => { writeStoredValue("tabCreditLimits", tabCreditLimits); }, [tabCreditLimits]);
-  useEffect(() => { writeStoredValue("cashClosings", pruneRecordsByMonths(cashClosings, ["closedAt", "createdAt"])); }, [cashClosings]);
-
   useEffect(() => {
     if (!showCustomerPromo) return;
     setCanCloseCustomerPromo(false);
@@ -2205,9 +2345,8 @@ function App() {
 
     let courier = findCourierByLogin(couriers, courierLogin, courierPassword);
     if (!courier) {
-      await loadCouriers();
-      const latestCouriers = readStoredValue("couriers", couriers);
-      courier = findCourierByLogin(latestCouriers, courierLogin, courierPassword);
+      const latestCouriers = await loadCouriers();
+      courier = findCourierByLogin(latestCouriers || [], courierLogin, courierPassword);
     }
 
     if (courier) {
@@ -2288,15 +2427,21 @@ function App() {
       endDate: newPromotion.endDate,
       active: true,
     };
+    const { error } = await insertWithSchemaRetry("promotions", { id: promotionToSave.id, title: promotionToSave.title, description: promotionToSave.description, product_id: promotionToSave.productId, badge: promotionToSave.badge, image_url: promotionToSave.imageUrl, discount_percent: promotionToSave.discountPercent, promotional_price: promotionToSave.promotionalPrice, start_date: promotionToSave.startDate || null, end_date: promotionToSave.endDate || null, active: true }, false);
+    if (error) return setLastAction(`Promoção não salva no Supabase: ${error.message || "verifique promotions."}`);
     setPromotions((previousPromotions) => [...previousPromotions, promotionToSave]);
-    await insertWithSchemaRetry("promotions", { id: promotionToSave.id, title: promotionToSave.title, description: promotionToSave.description, product_id: promotionToSave.productId, badge: promotionToSave.badge, image_url: promotionToSave.imageUrl, discount_percent: promotionToSave.discountPercent, promotional_price: promotionToSave.promotionalPrice, start_date: promotionToSave.startDate || null, end_date: promotionToSave.endDate || null, active: true }, false);
     setNewPromotion({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
-    setLastAction(`Promoção cadastrada: ${product.name} de ${money(product.price)} por ${money(promotionalPrice)}.`);
+    setLastAction(`Promoção cadastrada no Supabase: ${product.name} de ${money(product.price)} por ${money(promotionalPrice)}.`);
   }
 
-  function togglePromotionStatus(id) {
-    setPromotions((previousPromotions) => previousPromotions.map((promotion) => (promotion.id === id ? { ...promotion, active: !promotion.active } : promotion)));
-    setLastAction("Status da promoção atualizado.");
+  async function togglePromotionStatus(id) {
+    const promotion = promotions.find((item) => item.id === id);
+    if (!promotion) return;
+    const nextActive = !promotion.active;
+    const { error } = await updateWithSchemaRetry("promotions", id, { active: nextActive });
+    if (error) return setLastAction(`Status da promoção não salvo no Supabase: ${error.message || "verifique promotions."}`);
+    setPromotions((previousPromotions) => previousPromotions.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
+    setLastAction("Status da promoção atualizado no Supabase.");
   }
 
   function updatePromotionField(id, field, value) {
@@ -2304,7 +2449,7 @@ function App() {
     setPromotions((previousPromotions) => previousPromotions.map((promotion) => (promotion.id === id ? { ...promotion, [field]: finalValue } : promotion)));
   }
 
-  function savePromotionEdits(id) {
+  async function savePromotionEdits(id) {
     const promotion = promotions.find((item) => item.id === id);
     if (!promotion) return;
     if (!promotion.title.trim()) return setLastAction("Promoção não salva: informe a chamada da promoção.");
@@ -2313,8 +2458,10 @@ function App() {
     if (!product) return setLastAction("Promoção não salva: produto não encontrado.");
     const promotionPrice = getPromotionPrice(product, promotion);
     if (!(promotionPrice > 0) || promotionPrice >= Number(product.price || 0)) return setLastAction("Promoção não salva: informe desconto ou preço menor que o normal.");
+    const { error } = await updateWithSchemaRetry("promotions", id, { title: promotion.title, description: promotion.description, product_id: promotion.productId, badge: promotion.badge, image_url: promotion.imageUrl, discount_percent: promotion.discountPercent, promotional_price: getPromotionPrice(product, promotion), start_date: promotion.startDate || null, end_date: promotion.endDate || null, active: promotion.active });
+    if (error) return setLastAction(`Promoção não salva no Supabase: ${error.message || "verifique promotions."}`);
     setEditingPromotionId(null);
-    setLastAction("Promoção atualizada com sucesso.");
+    setLastAction("Promoção atualizada no Supabase.");
   }
 
   function handlePromotionImageUpload(event) {
@@ -2386,18 +2533,25 @@ function App() {
     const baseTotal = buildKitProductsTotal(newKit.items, products);
     const finalPrice = newKit.price === "" ? baseTotal : Number(newKit.price || 0);
     const kitToSave = { id: Date.now(), name: newKit.name.trim(), description: newKit.description.trim(), items: newKit.items, price: finalPrice, endDate: newKit.endDate, active: true };
+    const { error: kitError } = await insertWithSchemaRetry("kits", { id: kitToSave.id, name: kitToSave.name, description: kitToSave.description, price: kitToSave.price, end_date: kitToSave.endDate || null, active: true }, false);
+    if (kitError) return setLastAction(`Kit não salvo no Supabase: ${kitError.message || "verifique kits."}`);
+    const { error: kitItemsError } = await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: Date.now() + Math.floor(Math.random() * 1000000), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
+    if (kitItemsError) return setLastAction(`Itens do kit não salvos no Supabase: ${kitItemsError.message || "verifique kit_items."}`);
     setKits((previousKits) => [...previousKits, kitToSave]);
-    await insertWithSchemaRetry("kits", { id: kitToSave.id, name: kitToSave.name, description: kitToSave.description, price: kitToSave.price, end_date: kitToSave.endDate || null, active: true }, false);
-    await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: Date.now() + Math.floor(Math.random() * 1000000), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
     setNewKit({ name: "", description: "", items: [], price: "", endDate: "", active: true });
     setNewKitPriceEdited(false);
     setKitProductSearch("");
     setLastAction("Kit cadastrado com sucesso.");
   }
 
-  function toggleKitStatus(id) {
-    setKits((previousKits) => previousKits.map((kit) => (kit.id === id ? { ...kit, active: !kit.active } : kit)));
-    setLastAction("Status do kit atualizado.");
+  async function toggleKitStatus(id) {
+    const kit = kits.find((item) => item.id === id);
+    if (!kit) return;
+    const nextActive = !kit.active;
+    const { error } = await updateWithSchemaRetry("kits", id, { active: nextActive });
+    if (error) return setLastAction(`Status do kit não salvo no Supabase: ${error.message || "verifique kits."}`);
+    setKits((previousKits) => previousKits.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
+    setLastAction("Status do kit atualizado no Supabase.");
   }
 
   function updateKitField(id, field, value) {
@@ -3041,60 +3195,82 @@ function App() {
         ${bodyHtml}
       </section>
     `).join("");
-    printWindow.document.write(`
+    const html = `
+      <!doctype html>
       <html>
         <head>
+          <meta charset="utf-8" />
           <title>${escapeHtml(title)}</title>
           <style>
-            @page { size: 80mm auto; margin: 2.5mm; }
+            @page { size: 80mm auto; margin: 3mm; }
             * { box-sizing: border-box; }
-            body { width: 76mm; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; color: #000; font-size: ${options.delivery ? "15px" : "14px"}; font-weight: 500; }
-            .receipt-copy { padding: 2mm 1mm 5mm; page-break-after: always; }
+            html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+            body { width: 76mm; font-family: Arial, Helvetica, sans-serif; font-size: ${options.delivery ? "15px" : "14px"}; font-weight: 500; }
+            .receipt-copy { padding: 2mm 1mm 6mm; page-break-after: always; }
             .receipt-copy:last-child { page-break-after: auto; }
             h1 { font-size: ${options.delivery ? "24px" : "21px"}; margin: 0 0 3mm; text-align: center; letter-spacing: .5px; font-weight: 900; }
             .brand { font-size: 26px; border: 2px solid #000; padding: 3mm 1mm; }
             .copy-title { text-align: center; font-weight: 900; font-size: 15px; margin: 0 0 2mm; }
-            p { margin: 1.6mm 0; line-height: 1.25; }
+            p { margin: 1.7mm 0; line-height: 1.28; }
             .muted { text-align: center; font-size: 13px; }
             .center { text-align: center; }
             .thanks { font-size: 15px; font-weight: 900; }
-            .line { border-top: 1px dashed #000; margin: 2.5mm 0; }
+            .line { border-top: 1px dashed #000; margin: 2.7mm 0; }
             table { width: 100%; border-collapse: collapse; font-size: ${options.delivery ? "13px" : "12px"}; }
-            th, td { padding: 1.2mm 0; border-bottom: 1px dotted #bbb; vertical-align: top; text-align: left; }
+            th, td { padding: 1.2mm 0; border-bottom: 1px dotted #aaa; vertical-align: top; text-align: left; }
             th:last-child, td:last-child { text-align: right; }
             .total { font-size: ${options.delivery ? "22px" : "19px"}; font-weight: 900; text-align: right; margin-top: 2mm; }
+            .big { font-size: 18px; font-weight: 900; }
           </style>
         </head>
-        <body>${copyBlocks}<script>window.onload = () => { window.focus(); window.print(); };<\/script></body>
+        <body>${copyBlocks}</body>
       </html>
-    `);
-    printWindow.document.close();
-    return true;
+    `;
+    try {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => { try { printWindow.print(); } catch (error) { console.error("Erro ao imprimir:", error); } }, 300);
+      return true;
+    } catch (error) {
+      console.error("Erro ao preparar impressão:", error);
+      setLastAction("Não foi possível preparar a impressão. Tente novamente.");
+      return false;
+    }
   }
 
-  function openCashRegister() {
+
+  async function openCashRegister() {
     if (cashSession.isOpen) return setLastAction("O caixa já está aberto.");
     const openingAmount = Math.max(0, Number(openingCashInput || 0));
-    setCashSession({ isOpen: true, openedAt: new Date().toISOString(), closedAt: "", openingAmount, sangrias: [] });
+    const openedAt = new Date().toISOString();
+    const payload = { id: Date.now(), movement_type: "cash_open", type: "cash_open", value: openingAmount, amount: openingAmount, reason: "Abertura de caixa", created_at: openedAt, opened_at: openedAt };
+    const { error } = await insertWithSchemaRetry("cash_movements", payload, false);
+    if (error) return setLastAction(`Caixa não aberto no Supabase: ${error.message || "verifique cash_movements."}`);
+    setCashSession({ isOpen: true, openedAt, closedAt: "", openingAmount, sangrias: [] });
     setOpeningCashInput("");
     setClosingCashCounted("");
-    setLastAction(`Caixa aberto com fundo inicial de ${money(openingAmount)}.`);
+    setLastAction(`Caixa aberto no Supabase com fundo inicial de ${money(openingAmount)}.`);
   }
 
-  function addSangria() {
+  async function addSangria() {
     if (!cashSession.isOpen) return setLastAction("Abra o caixa antes de lançar sangria.");
     const value = Math.max(0, Number(sangriaDraft.value || 0));
     if (value <= 0) return setLastAction("Informe o valor da sangria.");
     const movement = { id: Date.now(), value, reason: sangriaDraft.reason?.trim() || "Sangria", createdAt: new Date().toISOString() };
+    const payload = { id: movement.id, movement_type: "sangria", type: "sangria", value, amount: value, reason: movement.reason, created_at: movement.createdAt, opened_at: cashSession.openedAt || null, notes: JSON.stringify(movement) };
+    const { error } = await insertWithSchemaRetry("cash_movements", payload, false);
+    if (error) return setLastAction(`Sangria não salva no Supabase: ${error.message || "verifique cash_movements."}`);
     setCashSession((previous) => ({ ...previous, sangrias: [movement, ...(previous.sangrias || [])] }));
     setSangriaDraft({ value: "", reason: "" });
-    setLastAction(`Sangria registrada: ${money(value)}.`);
+    setLastAction(`Sangria registrada no Supabase: ${money(value)}.`);
   }
 
   function printCashClosingReceipt(report, countedCash, difference) {
     const body = `
       <h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>
-      <p class="muted">FECHAMENTO DE CAIXA PROFISSIONAL</p>
+      <p class="muted">FECHAMENTO DE CAIXA</p>
       <p class="muted">${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
       <div class="line"></div>
       <p><b>Abertura:</b> ${escapeHtml(cashSession.openedAt ? new Date(cashSession.openedAt).toLocaleString("pt-BR") : "-")}</p>
@@ -3106,8 +3282,10 @@ function App() {
       <p><b>Dinheiro contado:</b> ${escapeHtml(money(countedCash))}</p>
       <p><b>Diferença:</b> ${escapeHtml(money(difference))}</p>
       <div class="line"></div>
-      <p><b>Total vendido bruto:</b> ${escapeHtml(money(report.totalSold))}</p>
-      <p><b>Total recebido confirmado:</b> ${escapeHtml(money(report.totalReceived))}</p>
+      <p><b>Total vendido:</b> ${escapeHtml(money(report.totalSold))}</p>
+      <p><b>Total recebido:</b> ${escapeHtml(money(report.totalReceived))}</p>
+      <p><b>Vendas entrega:</b> ${escapeHtml(String(report.deliveryOrders || 0))} • ${escapeHtml(money(report.deliverySold || 0))}</p>
+      <p><b>Vendas balcão/comanda:</b> ${escapeHtml(String(report.counterOrders || 0))} • ${escapeHtml(money(report.counterSold || 0))}</p>
       <p><b>Pix:</b> ${escapeHtml(money(report.byPayment.Pix || 0))}</p>
       <p><b>Débito:</b> ${escapeHtml(money(report.byPayment["Cartão débito"] || 0))}</p>
       <p><b>Crédito:</b> ${escapeHtml(money(report.byPayment["Cartão crédito"] || 0))}</p>
@@ -3122,7 +3300,6 @@ function App() {
   }
 
   async function persistCashClosing(record) {
-    setCashClosings((previous) => pruneRecordsByMonths([record, ...(previous || [])], ["closedAt", "createdAt"]));
     const payload = {
       id: record.id,
       movement_type: "closing",
@@ -3145,8 +3322,10 @@ function App() {
     };
     const { error } = await insertWithSchemaRetry("cash_movements", payload, false);
     if (error) {
-      console.warn("Fechamento salvo localmente, mas não no Supabase cash_movements:", error);
+      throw new Error(error.message || "Fechamento não salvo no Supabase cash_movements.");
     }
+    setCashClosings((previous) => pruneRecordsByMonths([record, ...(previous || [])], ["closedAt", "createdAt"]));
+    return true;
   }
 
   function printDeliveryReceipt(delivery, copies = 1, printOptions = {}) {
@@ -3521,11 +3700,16 @@ function App() {
       ...report,
       sangrias: cashSession.sangrias || [],
     };
+    try {
+      await persistCashClosing(record);
+    } catch (error) {
+      return setLastAction(`Caixa não fechado: ${error.message || "não salvou no Supabase."}`);
+    }
     printCashClosingReceipt(report, countedCash, difference);
-    await persistCashClosing(record);
-    setCashSession((previous) => ({ ...previous, isOpen: false, closedAt }));
+    setCashSession({ isOpen: false, openedAt: "", closedAt, openingAmount: 0, sangrias: [] });
     setClosingCashCounted("");
-    setLastAction(`Caixa fechado e salvo. Esperado ${money(report.expectedDrawerCash)}, contado ${money(countedCash)}, diferença ${money(difference)}.`);
+    setLastAction(`Caixa fechado no Supabase. Esperado ${money(report.expectedDrawerCash)}, contado ${money(countedCash)}, diferença ${money(difference)}.`);
+    await loadCashData();
   }
 
   function getTabCustomerKey(tabOrDraft) {
@@ -3554,7 +3738,7 @@ function App() {
     return availableProducts.filter((product) => `${product.name || ""} ${product.barcode || ""} ${product.category || ""} ${product.ncm || ""}`.toLowerCase().includes(term));
   }
 
-  function applyManualTabLimit(tabId) {
+  async function applyManualTabLimit(tabId) {
     const tab = tabsAccounts.find((item) => item.id === tabId);
     if (!tab) return setLastAction("Comanda não encontrada.");
     const nextLimit = toSafeNumber(tabLimitDrafts[tabId], NaN);
@@ -3562,9 +3746,11 @@ function App() {
     const used = getTabCreditUsed(tab);
     if (nextLimit < used) return setLastAction(`Limite não alterado: a comanda já tem ${money(used)} em produtos.`);
     const key = getTabCustomerKey(tab);
+    const nextTab = { ...tab, creditLimit: nextLimit };
+    try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Limite não salvo no Supabase: ${error.message || "verifique tab_accounts."}`); }
     setTabCreditLimits((previous) => ({ ...previous, [key]: nextLimit }));
-    setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? { ...item, creditLimit: nextLimit } : item));
-    setLastAction(`Limite da comanda de ${tab.customerName} ajustado para ${money(nextLimit)}.`);
+    setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
+    setLastAction(`Limite da comanda de ${tab.customerName} ajustado no Supabase para ${money(nextLimit)}.`);
   }
 
   function adjustTabCreditLimitAfterClose(tab, total, payment) {
@@ -3584,7 +3770,7 @@ function App() {
     return nextLimit;
   }
 
-  function createTabAccount() {
+  async function createTabAccount() {
     const name = tabDraft.customerName.trim();
     if (!name) return setLastAction("Informe o nome do cliente da comanda.");
     const phone = tabDraft.phone ? formatBrazilMobilePhone(tabDraft.phone) : "";
@@ -3592,58 +3778,58 @@ function App() {
     const creditLimit = toSafeNumber(tabDraft.creditLimit, toSafeNumber(tabCreditLimits[key], DEFAULT_TAB_CREDIT_LIMIT));
     if (creditLimit < 0) return setLastAction("Informe um limite válido para a comanda.");
     const tab = { id: Date.now(), customerName: name, phone, creditLimit, payment: tabDraft.payment || "Dinheiro", items: [], openedAt: new Date().toISOString(), notes: "Comanda/fiado" };
+    try { await persistTabAccount(tab, "open"); } catch (error) { return setLastAction(`Comanda não aberta no Supabase: ${error.message || "verifique tab_accounts."}`); }
     setTabCreditLimits((previous) => ({ ...previous, [key]: creditLimit }));
     setTabsAccounts((previous) => [tab, ...previous]);
     setTabDraft({ customerName: "", phone: "", creditLimit: DEFAULT_TAB_CREDIT_LIMIT });
-    setLastAction(`Comanda aberta para ${name} com limite de ${money(creditLimit)}.`);
+    setLastAction(`Comanda aberta no Supabase para ${name} com limite de ${money(creditLimit)}.`);
   }
 
-  function addProductToTab(tabId, product) {
+  async function addProductToTab(tabId, product, quantity = 1) {
     if (!product || !product.active) return setLastAction("Produto indisponível para comanda.");
-    setTabsAccounts((previous) => previous.map((tab) => {
-      if (tab.id !== tabId) return tab;
-      const existing = tab.items.find((item) => item.id === product.id);
-      const nextItems = existing
-        ? tab.items.map((item) => item.id === product.id ? { ...item, quantity: Number(item.quantity || 0) + 1 } : item)
-        : [...tab.items, { id: product.id, name: product.name, price: Number(product.price || 0), quantity: 1, barcode: product.barcode }];
-      const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return tab;
-      }
-      const nextTotal = buildOrderTotal(nextItems);
-      const currentLimit = getCurrentTabCreditLimit(tab);
-      if (nextTotal > currentLimit) {
-        setLastAction(`Limite da comanda excedido. Limite: ${money(currentLimit)} • total tentado: ${money(nextTotal)}.`);
-        return tab;
-      }
-      return { ...tab, items: nextItems };
-    }));
+    const safeQuantity = toPositiveInteger(quantity, 1);
+    const tab = tabsAccounts.find((item) => item.id === tabId);
+    if (!tab) return setLastAction("Comanda não encontrada.");
+    const existing = (tab.items || []).find((item) => Number(item.id) === Number(product.id));
+    const nextItems = existing
+      ? (tab.items || []).map((item) => Number(item.id) === Number(product.id) ? { ...item, quantity: toPositiveInteger(item.quantity, 1) + safeQuantity } : item)
+      : [...(tab.items || []), { id: product.id, name: product.name, price: Number(product.price || 0), quantity: safeQuantity, barcode: product.barcode }];
+    const validation = validateOrderItems(nextItems, products);
+    if (!validation.valid) return setLastAction(validation.message);
+    const nextTotal = buildOrderTotal(nextItems);
+    const currentLimit = getCurrentTabCreditLimit(tab);
+    if (nextTotal > currentLimit) return setLastAction(`Limite da comanda excedido. Limite: ${money(currentLimit)} • total tentado: ${money(nextTotal)}.`);
+    const nextTab = { ...tab, items: nextItems };
+    try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Item não salvo na comanda: ${error.message || "verifique tab_accounts."}`); }
+    setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
+    setLastAction(`${safeQuantity}x ${product.name} adicionado à comanda de ${tab.customerName}.`);
   }
 
-  function updateTabItemQuantity(tabId, productId, quantity) {
-    const safeQuantity = Math.max(1, Number(quantity || 1));
-    setTabsAccounts((previous) => previous.map((tab) => {
-      if (tab.id !== tabId) return tab;
-      const nextItems = tab.items.map((item) => item.id === productId ? { ...item, quantity: safeQuantity } : item);
-      const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return tab;
-      }
-      const nextTotal = buildOrderTotal(nextItems);
-      const currentLimit = getCurrentTabCreditLimit(tab);
-      if (nextTotal > currentLimit) {
-        setLastAction(`Limite da comanda excedido. Limite: ${money(currentLimit)} • total tentado: ${money(nextTotal)}.`);
-        return tab;
-      }
-      return { ...tab, items: nextItems };
-    }));
+
+  async function updateTabItemQuantity(tabId, productId, quantity) {
+    const safeQuantity = toPositiveInteger(quantity, 1);
+    const tab = tabsAccounts.find((item) => item.id === tabId);
+    if (!tab) return setLastAction("Comanda não encontrada.");
+    const nextItems = (tab.items || []).map((item) => Number(item.id) === Number(productId) ? { ...item, quantity: safeQuantity } : item);
+    const validation = validateOrderItems(nextItems, products);
+    if (!validation.valid) return setLastAction(validation.message);
+    const nextTotal = buildOrderTotal(nextItems);
+    const currentLimit = getCurrentTabCreditLimit(tab);
+    if (nextTotal > currentLimit) return setLastAction(`Limite da comanda excedido. Limite: ${money(currentLimit)} • total tentado: ${money(nextTotal)}.`);
+    const nextTab = { ...tab, items: nextItems };
+    try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Quantidade não salva no Supabase: ${error.message || "verifique tab_accounts."}`); }
+    setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
   }
 
-  function removeTabItem(tabId, productId) {
-    setTabsAccounts((previous) => previous.map((tab) => tab.id === tabId ? { ...tab, items: tab.items.filter((item) => item.id !== productId) } : tab));
+
+  async function removeTabItem(tabId, productId) {
+    const tab = tabsAccounts.find((item) => item.id === tabId);
+    if (!tab) return setLastAction("Comanda não encontrada.");
+    const nextTab = { ...tab, items: (tab.items || []).filter((item) => Number(item.id) !== Number(productId)) };
+    try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Item não removido no Supabase: ${error.message || "verifique tab_accounts."}`); }
+    setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
   }
+
 
   function updateTabPayment(tabId, payment) {
     setTabsAccounts((previous) => previous.map((tab) => tab.id === tabId ? { ...tab, payment } : tab));
@@ -3663,13 +3849,18 @@ function App() {
     setTabClosingMixedPayment(createEmptyMixedPayment());
   }
 
-  function addSelectedProductToTab(tabId) {
-    const productId = tabProductSelectByTab[tabId];
-    const product = products.find((item) => Number(item.id) === Number(productId));
-    if (!product) return setLastAction("Selecione um produto para adicionar à comanda.");
-    addProductToTab(tabId, product);
-    setTabProductSelectByTab((previous) => ({ ...previous, [tabId]: "" }));
+  async function addSelectedProductToTab(tabId) {
+    const term = String(tabProductSearchByTab[tabId] || "").trim().toLowerCase();
+    if (!term) return setLastAction("Pesquise o produto por nome ou código de barras.");
+    const matches = getTabProductResults(tabId);
+    const product = matches.find((item) => String(item.barcode || "").toLowerCase() === term) || matches[0];
+    if (!product) return setLastAction("Nenhum produto encontrado para essa busca.");
+    const quantity = toPositiveInteger(tabProductQuantityByTab[tabId], 1);
+    await addProductToTab(tabId, product, quantity);
+    setTabProductSearchByTab((previous) => ({ ...previous, [tabId]: "" }));
+    setTabProductQuantityByTab((previous) => ({ ...previous, [tabId]: 1 }));
   }
+
 
   async function closeTabAccount(tabId) {
     const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
@@ -3729,9 +3920,10 @@ function App() {
     let savedClosedOrder;
     try {
       savedClosedOrder = await saveDeliveryToSupabase(closedOrder);
+      await persistTabAccount({ ...tab, closedAt: closedOrder.closedAt, payment: tabClosingPayment, items: syncedItems }, "closed");
     } catch (error) {
       preOpenedPrintWindow.close();
-      return setLastAction(`Comanda não salva no Supabase: ${error.message || "verifique Supabase."}`);
+      return setLastAction(`Comanda não salva no Supabase: ${error.message || "verifique Supabase/tab_accounts."}`);
     }
 
     setDeliveries((previous) => [savedClosedOrder, ...previous]);
@@ -4946,7 +5138,8 @@ function App() {
                             <div className="rounded-2xl border border-zinc-100 bg-white p-3">
                               <p className="text-xs font-bold text-zinc-600 mb-2">Adicionar produto direto nesta comanda</p>
                               <input value={tabProductSearchByTab[tab.id] || ""} onChange={(event) => setTabProductSearchByTab((previous) => ({ ...previous, [tab.id]: event.target.value }))} placeholder="Pesquisar por nome ou código de barras" className="mb-2 w-full rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none" />
-                              <div className="flex flex-col md:flex-row gap-2"><select value={tabProductSelectByTab[tab.id] || ""} onChange={(event) => setTabProductSelectByTab((previous) => ({ ...previous, [tab.id]: event.target.value }))} className="flex-1 rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none"><option value="">Selecione um produto</option>{getTabProductResults(tab.id).map((product) => <option key={product.id} value={product.id}>{product.name} - {money(product.price)} - estoque {product.stock}</option>)}</select><Button onClick={() => addSelectedProductToTab(tab.id)} variant="secondary" className="rounded-2xl">Adicionar</Button></div>
+                              {String(tabProductSearchByTab[tab.id] || "").trim() && <div className="mb-2 rounded-2xl bg-zinc-50 p-2 text-xs text-zinc-600">{getTabProductResults(tab.id)[0] ? <>Encontrado: <b>{getTabProductResults(tab.id)[0].name}</b> • {money(getTabProductResults(tab.id)[0].price)} • estoque {getTabProductResults(tab.id)[0].stock}</> : "Nenhum produto encontrado."}</div>}
+                              <div className="flex flex-col md:flex-row gap-2"><input type="number" min="1" value={tabProductQuantityByTab[tab.id] || 1} onChange={(event) => setTabProductQuantityByTab((previous) => ({ ...previous, [tab.id]: event.target.value }))} className="md:w-28 rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none" placeholder="Qtd" /><Button onClick={() => addSelectedProductToTab(tab.id)} variant="secondary" className="rounded-2xl">Adicionar</Button></div>
                             </div>
                             <div className="space-y-2">
                               {tab.items.length === 0 && <p className="text-sm text-zinc-500">Adicione produtos pela lista ao lado.</p>}
