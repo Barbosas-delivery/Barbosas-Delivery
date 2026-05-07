@@ -76,7 +76,7 @@ const ICONS = {
   bell: "🔔",
 };
 
-const APP_VERSION = "5.0.0-bloco5";
+const APP_VERSION = "5.1.0-revisado";
 const DELIVERY_FEE = 5;
 const COURIER_DELIVERY_SHARE = 0.7;
 const STORE_DELIVERY_SHARE = 0.3;
@@ -2457,7 +2457,7 @@ function App() {
 
     if (error) {
       console.error("Erro ao atualizar pedido no Supabase:", error);
-      setLastAction(`Pedido atualizado na tela, mas não no Supabase: ${error.message || "verifique policies de UPDATE."}`);
+      setLastAction(`Pedido não foi atualizado no Supabase: ${error.message || "verifique policies de UPDATE."}`);
       return false;
     }
 
@@ -3299,13 +3299,13 @@ function App() {
     const courier = couriers.find((item) => item.id === id);
     if (!courier) return;
     const nextActive = !courier.active;
-    const { error } = await updateWithSchemaRetry("courier", id, { active: nextActive });
+    const { error } = await updateWithSchemaRetry("couriers", id, { active: nextActive });
     if (error) {
       console.error("Erro ao atualizar entregador no Supabase:", error);
-      setLastAction(`Status alterado neste navegador, mas não no Supabase: ${error.message || "verifique UPDATE em couriers."}`);
+      return setLastAction(`Status do entregador não foi alterado: ${error.message || "verifique UPDATE em couriers."}`);
     }
     setCouriers((previousCouriers) => previousCouriers.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
-    if (!error) setLastAction("Status do entregador atualizado e salvo.");
+    setLastAction("Status do entregador atualizado e salvo no Supabase.");
   }
 
   async function toggleProductStatus(id) {
@@ -3399,7 +3399,7 @@ function App() {
     }
     const formattedCourier = mapCourierToDatabase(courier);
     const { id: _ignoredId, ...courierPatch } = formattedCourier;
-    const { error, ignoredColumns } = await updateWithSchemaRetry("courier", id, courierPatch);
+    const { error, ignoredColumns } = await updateWithSchemaRetry("couriers", id, courierPatch);
     if (error || ignoredColumns.includes("password")) {
       console.error("Erro ao salvar entregador no Supabase:", error, ignoredColumns);
       return setLastAction(error ? `Entregador não atualizado no Supabase: ${error.message || "verifique UPDATE em couriers."}` : "Entregador não atualizado: a tabela couriers precisa ter a coluna password para manter a senha salva.");
@@ -4125,7 +4125,8 @@ function App() {
     if (rpcResult.error) return setLastAction(`Não foi possível aceitar a entrega: ${rpcResult.error.message || "verifique função accept_delivery_order."}`);
     if (rpcResult.data?.success === false) return setLastAction(rpcResult.data.message || "Entrega já aceita por outro entregador.");
     const patch = { status: DELIVERY_STATUS.OUT_FOR_DELIVERY, acceptedByUsername: loggedCourier?.username || "", acceptedByName: loggedCourier?.name || "", acceptedAt: new Date().toISOString(), pickedUpByUsername: loggedCourier?.username || "", pickedUpByName: loggedCourier?.name || "", pickedUpAt: new Date().toISOString() };
-    await updateDeliveryInSupabase(id, patch);
+    const updated = await updateDeliveryInSupabase(id, patch);
+    if (!updated) return;
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((delivery) => {
         if (delivery.id !== id) return delivery;
@@ -4151,7 +4152,8 @@ function App() {
       courierFee: calculateCourierFee(deliveryToApprove.deliveryFee, loggedCourier?.motorcycleType || "Moto própria"),
       storeFee: calculateStoreFee(deliveryToApprove.deliveryFee, loggedCourier?.motorcycleType || "Moto própria"),
     };
-    await updateDeliveryInSupabase(id, patch);
+    const updated = await updateDeliveryInSupabase(id, patch);
+    if (!updated) return;
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((delivery) => {
         if (delivery.id !== id) return delivery;
@@ -4187,7 +4189,8 @@ function App() {
     if (loggedCourier && !canCourierControlDelivery(deliveryToUpdate, loggedCourier.username)) return setLastAction("Essa entrega está vinculada a outro entregador.");
 
     const statusPatch = status === DELIVERY_STATUS.DELIVERY_PROBLEM ? { status, problemReason: "Problema informado pelo entregador", problemAt: new Date().toISOString() } : { status };
-    await updateDeliveryInSupabase(id, statusPatch);
+    const updated = await updateDeliveryInSupabase(id, statusPatch);
+    if (!updated) return;
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((delivery) => {
         if (delivery.id !== id) return delivery;
@@ -4268,7 +4271,8 @@ function App() {
       const confirmed = window.confirm(`Confirmar pagamento da ${orderLabel} #${id} no valor de ${money(delivery.value)}?`);
       if (!confirmed) return setLastAction("Marcação de pagamento cancelada.");
     }
-    await updateDeliveryInSupabase(id, { paymentStatus });
+    const updated = await updateDeliveryInSupabase(id, { paymentStatus });
+    if (!updated) return;
     if (paymentStatus === PAYMENT_STATUS.PAID && delivery.cashSessionId) {
       try { await saveOrderPayments({ ...delivery, paymentStatus }); await loadOrderPayments(); } catch (error) { console.error("Pagamento adicional não salvo:", error); }
     }
@@ -4626,7 +4630,8 @@ function App() {
       finalizedAt: new Date().toISOString(),
       finalizedBy: getCurrentStoreUserName(),
     };
-    await updateDeliveryInSupabase(id, patch);
+    const updated = await updateDeliveryInSupabase(id, patch);
+    if (!updated) return;
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((item) =>
         item.id === id
