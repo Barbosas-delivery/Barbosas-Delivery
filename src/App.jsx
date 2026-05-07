@@ -1522,16 +1522,26 @@ export default function App() {
   }
 
   async function loadDeliveries() {
+    // Leitura do PDV Entregas: não usa .order("launched_at") no Supabase
+    // porque algumas tabelas antigas não têm essa coluna no cache do schema.
+    // A ordenação é feita no navegador para evitar bloquear a listagem inteira.
     const { data: ordersData, error: ordersError } = await supabase
       .from("orders")
-      .select("*")
-      .order("launched_at", { ascending: false });
+      .select("*");
 
     if (ordersError) {
       console.error("Erro ao carregar pedidos:", ordersError);
-      setLastAction(`Erro ao carregar pedidos do Supabase: ${ordersError.message || "verifique policies de SELECT em orders."}`);
+      setLastAction(
+        `PVD Entregas não conseguiu ler a tabela orders: ${ordersError.message || "verifique a policy SELECT de orders no Supabase."}`
+      );
       return;
     }
+
+    const sortedOrders = (Array.isArray(ordersData) ? ordersData : []).slice().sort((a, b) => {
+      const aTime = new Date(a.launched_at || a.created_at || 0).getTime() || Number(a.id || 0);
+      const bTime = new Date(b.launched_at || b.created_at || 0).getTime() || Number(b.id || 0);
+      return bTime - aTime;
+    });
 
     const { data: itemsData, error: itemsError } = await supabase
       .from("order_items")
@@ -1539,8 +1549,10 @@ export default function App() {
 
     if (itemsError) {
       console.error("Erro ao carregar itens dos pedidos:", itemsError);
-      setDeliveries((ordersData || []).map((order) => mapOrderFromDatabase(order, [])));
-      setLastAction(`Pedidos carregados, mas os itens não foram lidos: ${itemsError.message || "verifique SELECT em order_items."}`);
+      setDeliveries(sortedOrders.map((order) => mapOrderFromDatabase(order, [])));
+      setLastAction(
+        `Pedidos carregados, mas os itens não foram lidos: ${itemsError.message || "verifique a policy SELECT de order_items."}`
+      );
       return;
     }
 
@@ -1551,7 +1563,13 @@ export default function App() {
       return acc;
     }, {});
 
-    setDeliveries((ordersData || []).map((order) => mapOrderFromDatabase(order, itemsByOrder[order.id] || [])));
+    const nextDeliveries = sortedOrders.map((order) => mapOrderFromDatabase(order, itemsByOrder[order.id] || []));
+    setDeliveries(nextDeliveries);
+    console.log("PVD Entregas sincronizado:", {
+      orders: sortedOrders.length,
+      items: Array.isArray(itemsData) ? itemsData.length : 0,
+      deliveries: nextDeliveries.length,
+    });
   }
 
   async function saveDeliveryToSupabase(delivery) {
