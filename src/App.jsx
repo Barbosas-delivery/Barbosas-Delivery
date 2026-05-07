@@ -402,10 +402,27 @@ function isCounterOrder(order) {
 
 function needsStoreApprovalBeforeCourier(order) {
   if (!isDeliveryOrder(order)) return false;
+
+  // A única situação que deve bloquear o painel do entregador é o pedido ainda
+  // estar explicitamente aguardando aprovação da loja. Depois que a loja muda
+  // o status para "Aguardando retirada", o pedido precisa aparecer para os
+  // entregadores mesmo se colunas antigas como store_order_approved não existirem
+  // ou não tiverem sido gravadas no Supabase.
   if (order.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return true;
+
+  const releasedStatuses = [
+    DELIVERY_STATUS.WAITING_PICKUP,
+    DELIVERY_STATUS.OUT_FOR_DELIVERY,
+    DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
+    DELIVERY_STATUS.DELIVERY_PROBLEM,
+    DELIVERY_STATUS.CONFIRMED_DELIVERED,
+  ];
+
+  if (releasedStatuses.includes(order.status)) return false;
+
   if (order.needsStoreApproval === true && order.storeOrderApproved !== true) return true;
-  if (order.origin === "customer" && order.storeOrderApproved !== true) return true;
-  if (String(order.notes || "").toLowerCase().includes("pedido enviado pelo cliente") && order.storeOrderApproved !== true) return true;
+  if (order.origin === "customer" && order.storeOrderApproved !== true && !order.approvedAt) return true;
+  if (String(order.notes || "").toLowerCase().includes("pedido enviado pelo cliente") && order.storeOrderApproved !== true && !order.approvedAt) return true;
   return false;
 }
 
@@ -1313,7 +1330,7 @@ function runSelfTests() {
     { name: "Usuário duplicado de entregador é bloqueado", passed: hasDuplicateCourierUsername(initialCouriers, "MOTO01") === true },
     { name: "Login do entregador só funciona se estiver ativo", passed: isValidCourierLogin(initialCouriers, "moto01", "B4rb@2026!") === true },
     { name: "Painel do entregador ignora pedidos cancelados", passed: getCourierDeliveries([...initialDeliveries, { status: DELIVERY_STATUS.CANCELLED }]).length === 2 },
-    { name: "Pedido do cliente não aparece para entregador antes da aprovação", passed: getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: true, storeOrderApproved: false }]).length === 0 && getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: false, storeOrderApproved: true }]).length === 1 },
+    { name: "Pedido do cliente não aparece para entregador antes da aprovação", passed: getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_STORE_APPROVAL, needsStoreApproval: true, storeOrderApproved: false }]).length === 0 && getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: true, storeOrderApproved: false }]).length === 1 },
     { name: "Fechamento ignora pedidos cancelados", passed: buildCashClosingReport([{ value: 100, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CANCELLED }]).totalSold === 0 },
     { name: "Fechamento conta pendência só de entregas", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PENDING, status: DELIVERY_STATUS.WAITING_PICKUP }]).pendingOrders === 1 },
     { name: "Fechamento separa venda balcão de entrega", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).counterSold === 10 && buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).deliverySold === 20 },
@@ -1881,6 +1898,8 @@ function App() {
   }
 
   function mapOrderFromDatabase(order, items = []) {
+    const orderStatus = order.status || DELIVERY_STATUS.WAITING_PICKUP;
+    const isReleasedToCourier = orderStatus !== DELIVERY_STATUS.WAITING_STORE_APPROVAL;
     return {
       id: order.id,
       orderType: order.order_type || ORDER_TYPE.DELIVERY,
@@ -1897,11 +1916,11 @@ function App() {
       storeFee: Number(order.store_fee || 0),
       motorcycleType: order.motorcycle_type || "",
       value: Number(order.value || 0),
-      status: order.status || DELIVERY_STATUS.WAITING_PICKUP,
+      status: orderStatus,
       origin: order.origin || "store",
-      needsStoreApproval: order.needs_store_approval === true,
-      storeOrderApproved: order.store_order_approved === true,
-      approvedAt: order.approved_at || "",
+      needsStoreApproval: orderStatus === DELIVERY_STATUS.WAITING_STORE_APPROVAL || (order.needs_store_approval === true && !isReleasedToCourier),
+      storeOrderApproved: order.store_order_approved === true || isReleasedToCourier,
+      approvedAt: order.approved_at || (isReleasedToCourier ? order.updated_at || order.created_at || "" : ""),
       cashSessionId: order.cash_session_id || "",
       originType: order.origin_type || order.origin || "",
       tabAccountId: order.tab_account_id || null,
@@ -1963,6 +1982,10 @@ function App() {
       motorcycle_type: delivery.motorcycleType || "",
       value: Number(delivery.value || 0),
       status: delivery.status || DELIVERY_STATUS.WAITING_PICKUP,
+      origin: delivery.origin || "store",
+      needs_store_approval: delivery.needsStoreApproval === true,
+      store_order_approved: delivery.storeOrderApproved === true,
+      approved_at: delivery.approvedAt || null,
       reference: delivery.reference || "",
       courier_username: delivery.courierUsername || "ALL",
       courier_name: delivery.courierName || "Todos os motoboys",
@@ -2418,6 +2441,10 @@ function App() {
       courierFee: "courier_fee",
       storeFee: "store_fee",
       motorcycleType: "motorcycle_type",
+      origin: "origin",
+      needsStoreApproval: "needs_store_approval",
+      storeOrderApproved: "store_order_approved",
+      approvedAt: "approved_at",
       courierUsername: "courier_username",
       courierName: "courier_name",
       pickedUpByUsername: "picked_up_by_username",
@@ -2443,7 +2470,7 @@ function App() {
       launchedAt: "launched_at",
     };
 
-    const unsupportedOrderPatchKeys = new Set(["origin", "needsStoreApproval", "storeOrderApproved", "approvedAt"]);
+    const unsupportedOrderPatchKeys = new Set();
 
     Object.entries(patch).forEach(([key, value]) => {
       if (unsupportedOrderPatchKeys.has(key)) return;
@@ -4209,7 +4236,16 @@ function App() {
 
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
       if (!isCashOpen) return setLastAction("Abra o caixa antes de aprovar pedidos recebidos pelo cliente.");
-      const dbPatch = { status: DELIVERY_STATUS.WAITING_PICKUP, cashSessionId: currentDelivery.cashSessionId || cashSession.id || "" };
+      const approvedAt = new Date().toISOString();
+      const dbPatch = {
+        status: DELIVERY_STATUS.WAITING_PICKUP,
+        cashSessionId: currentDelivery.cashSessionId || cashSession.id || "",
+        needsStoreApproval: false,
+        storeOrderApproved: true,
+        approvedAt,
+        courierUsername: currentDelivery.courierUsername || "ALL",
+        courierName: currentDelivery.courierName || "Todos os motoboys",
+      };
       const updated = await updateDeliveryInSupabase(id, dbPatch);
       if (!updated) {
         setLastAction("Não consegui aprovar no Supabase. Verifique a policy UPDATE da tabela orders.");
@@ -4221,7 +4257,7 @@ function App() {
         cashSessionId: currentDelivery.cashSessionId || cashSession.id || "",
         needsStoreApproval: false,
         storeOrderApproved: true,
-        approvedAt: new Date().toISOString(),
+        approvedAt,
       };
       setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...localPatch } : delivery));
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "courier", id);
