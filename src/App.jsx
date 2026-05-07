@@ -76,6 +76,7 @@ const ICONS = {
   bell: "🔔",
 };
 
+const APP_VERSION = "5.0.0-bloco5";
 const DELIVERY_FEE = 5;
 const COURIER_DELIVERY_SHARE = 0.7;
 const STORE_DELIVERY_SHARE = 0.3;
@@ -992,31 +993,100 @@ function isOrderInPeriod(order, startDate, endDate) {
   return time >= start && time <= end;
 }
 
-function buildPeriodSalesReport(deliveries, startDate, endDate) {
+function buildPeriodSalesReport(deliveries, startDate, endDate, orderPayments = []) {
   const periodDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => isOrderInPeriod(delivery, startDate, endDate));
   const activeOrders = periodDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
   const cancelledOrders = periodDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED);
-  const byPayment = ["Pix", "Dinheiro", "Cartão débito", "Cartão crédito"].reduce((acc, payment) => {
-    acc[payment] = activeOrders.filter((delivery) => delivery.payment === payment && delivery.paymentStatus === PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0);
-    return acc;
-  }, {});
-  activeOrders.forEach((delivery) => {
-    if (delivery.payment === "Misto" && delivery.mixedPayment) {
-      byPayment.Pix += Number(delivery.mixedPayment.pix || 0);
-      byPayment.Dinheiro += Number(delivery.mixedPayment.cash || 0);
-      byPayment["Cartão débito"] += Number(delivery.mixedPayment.debit || 0);
-      byPayment["Cartão crédito"] += Number(delivery.mixedPayment.credit || 0);
-    }
-  });
+  const activeOrderIds = new Set(activeOrders.map((delivery) => String(delivery.id)));
+  const byPayment = { Pix: 0, Dinheiro: 0, "Cartão débito": 0, "Cartão crédito": 0 };
+  const matchingPayments = (Array.isArray(orderPayments) ? orderPayments : []).filter((payment) => activeOrderIds.has(String(payment.orderId)) && String(payment.status || "paid") === "paid");
+
+  if (matchingPayments.length > 0) {
+    matchingPayments.forEach((payment) => {
+      if (Object.prototype.hasOwnProperty.call(byPayment, payment.method)) {
+        byPayment[payment.method] += toSafeMoneyNumber(payment.amount, 0);
+      }
+    });
+  } else {
+    activeOrders.forEach((delivery) => {
+      if (delivery.payment === "Misto" && delivery.mixedPayment) {
+        byPayment.Pix += Number(delivery.mixedPayment.pix || 0);
+        byPayment.Dinheiro += Number(delivery.mixedPayment.cash || 0);
+        byPayment["Cartão débito"] += Number(delivery.mixedPayment.debit || 0);
+        byPayment["Cartão crédito"] += Number(delivery.mixedPayment.credit || 0);
+        return;
+      }
+      if (delivery.paymentStatus === PAYMENT_STATUS.PAID && Object.prototype.hasOwnProperty.call(byPayment, delivery.payment)) {
+        byPayment[delivery.payment] += Number(delivery.value || 0);
+      }
+    });
+  }
+
+  const totalPaid = Object.values(byPayment).reduce((sum, value) => sum + toSafeMoneyNumber(value, 0), 0);
   return {
     orders: periodDeliveries,
     activeOrders,
     cancelledOrders,
     totalSold: activeOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    totalPaid: activeOrders.filter((delivery) => delivery.paymentStatus === PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+    totalPaid,
     pendingAmount: activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
     byPayment,
+    deliveryOrders: activeOrders.filter((delivery) => isDeliveryOrder(delivery)).length,
+    counterOrders: activeOrders.filter((delivery) => isCounterOrder(delivery)).length,
   };
+}
+
+function buildProductSalesReport(deliveries, startDate = "", endDate = "") {
+  const periodDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
+    if (startDate || endDate) return isOrderInPeriod(delivery, startDate, endDate);
+    return true;
+  });
+  const rowsByProduct = new Map();
+  periodDeliveries
+    .filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED)
+    .forEach((delivery) => {
+      (delivery.items || []).forEach((item) => {
+        if (item.isKit && Array.isArray(item.kitItems)) {
+          const key = `kit:${item.kitId || item.id}`;
+          const current = rowsByProduct.get(key) || { key, name: item.name || "Kit", quantity: 0, total: 0, orders: new Set(), kind: "Kit" };
+          current.quantity += toPositiveInteger(item.quantity, 1);
+          current.total += toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1);
+          current.orders.add(delivery.id);
+          rowsByProduct.set(key, current);
+          return;
+        }
+        const key = String(item.id || item.productId || item.barcode || item.name || "produto");
+        const current = rowsByProduct.get(key) || { key, name: item.name || "Produto", quantity: 0, total: 0, orders: new Set(), kind: "Produto" };
+        current.quantity += toPositiveInteger(item.quantity, 1);
+        current.total += toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1);
+        current.orders.add(delivery.id);
+        rowsByProduct.set(key, current);
+      });
+    });
+
+  return Array.from(rowsByProduct.values())
+    .map((row) => ({ ...row, orders: row.orders.size, averageTicket: row.orders.size ? row.total / row.orders.size : 0 }))
+    .sort((a, b) => b.total - a.total);
+}
+
+function buildCategorySalesReport(deliveries, products = [], startDate = "", endDate = "") {
+  const categoryByProduct = new Map(products.map((product) => [String(product.id), product.category || "Sem categoria"]));
+  const productRows = buildProductSalesReport(deliveries, startDate, endDate);
+  const rowsByCategory = new Map();
+  productRows.forEach((row) => {
+    const category = row.kind === "Kit" ? "Kits" : (categoryByProduct.get(String(row.key)) || "Sem categoria");
+    const current = rowsByCategory.get(category) || { category, quantity: 0, total: 0, products: 0 };
+    current.quantity += row.quantity;
+    current.total += row.total;
+    current.products += 1;
+    rowsByCategory.set(category, current);
+  });
+  return Array.from(rowsByCategory.values()).sort((a, b) => b.total - a.total);
+}
+
+function buildPrintableRowsHtml(rows, columns) {
+  if (!Array.isArray(rows) || rows.length === 0) return `<tr><td colspan="${columns.length}">Sem registros no período.</td></tr>`;
+  return rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(column.render ? column.render(row) : row[column.key])}</td>`).join("")}</tr>`).join("");
 }
 
 function isCustomerFormComplete(customer) {
@@ -2673,7 +2743,9 @@ function App() {
   const customerNotifications = useMemo(() => getAudienceNotifications(notifications, "customer"), [notifications]);
   const ownerUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "loja"), [notifications]);
   const courierUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "courier"), [notifications]);
-  const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
+  const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate, orderPayments), [deliveries, reportRange, orderPayments]);
+  const productSalesReport = useMemo(() => buildProductSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
+  const categorySalesReport = useMemo(() => buildCategorySalesReport(deliveries, products, reportRange.startDate, reportRange.endDate), [deliveries, products, reportRange]);
   const cancelledDeliveryOrdersForStore = useMemo(() => deliveries.filter((delivery) => isDeliveryOrder(delivery) && delivery.status === DELIVERY_STATUS.CANCELLED), [deliveries]);
   const cancelledDeliveryReportForStore = useMemo(() => ({
     count: cancelledDeliveryOrdersForStore.length,
@@ -3712,36 +3784,132 @@ function App() {
     setLastAction(`Sangria registrada no Supabase: ${money(value)}.`);
   }
 
-  function printCashClosingReceipt(report, countedCash, difference) {
+  function printCashClosingReceipt(report, countedCash, difference, options = {}) {
+    const paymentRows = [
+      ["Pix", report.byPayment?.Pix || 0],
+      ["Dinheiro", report.byPayment?.Dinheiro || 0],
+      ["Débito", report.byPayment?.["Cartão débito"] || 0],
+      ["Crédito", report.byPayment?.["Cartão crédito"] || 0],
+    ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td class="right">${escapeHtml(money(value))}</td></tr>`).join("");
+
     const body = `
       <h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>
-      <p class="muted">FECHAMENTO DE CAIXA</p>
-      <p class="muted">${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
-      <div class="line"></div>
-      <p><b>Abertura:</b> ${escapeHtml(cashSession.openedAt ? new Date(cashSession.openedAt).toLocaleString("pt-BR") : "-")}</p>
+      <p class="center muted">FECHAMENTO DE CAIXA</p>
+      ${options.reprint ? `<p class="center danger"><b>REIMPRESSÃO</b></p>` : ""}
+      <p><b>Operador:</b> ${escapeHtml(getCurrentStoreDisplayName())}</p>
+      <p><b>Abertura:</b> ${escapeHtml(report.openedAt ? new Date(report.openedAt).toLocaleString("pt-BR") : "-")}</p>
       <p><b>Fechamento:</b> ${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
-      <p><b>Fundo inicial:</b> ${escapeHtml(money(report.openingAmount))}</p>
-      <p><b>Dinheiro recebido em vendas:</b> ${escapeHtml(money(report.expectedCash))}</p>
-      <p><b>Sangrias/retiradas:</b> -${escapeHtml(money(report.sangriaTotal))}</p>
-      <p><b>DINHEIRO ESPERADO NA GAVETA:</b> ${escapeHtml(money(report.expectedDrawerCash))}</p>
-      <p><b>Dinheiro contado:</b> ${escapeHtml(money(countedCash))}</p>
-      <p><b>Diferença:</b> ${escapeHtml(money(difference))}</p>
       <div class="line"></div>
-      <p><b>Total vendido:</b> ${escapeHtml(money(report.totalSold))}</p>
-      <p><b>Total recebido:</b> ${escapeHtml(money(report.totalReceived))}</p>
-      <p><b>Vendas entrega:</b> ${escapeHtml(String(report.deliveryOrders || 0))} • ${escapeHtml(money(report.deliverySold || 0))}</p>
-      <p><b>Vendas balcão/comanda:</b> ${escapeHtml(String(report.counterOrders || 0))} • ${escapeHtml(money(report.counterSold || 0))}</p>
-      <p><b>Pix:</b> ${escapeHtml(money(report.byPayment.Pix || 0))}</p>
-      <p><b>Débito:</b> ${escapeHtml(money(report.byPayment["Cartão débito"] || 0))}</p>
-      <p><b>Crédito:</b> ${escapeHtml(money(report.byPayment["Cartão crédito"] || 0))}</p>
-      <p><b>Dinheiro:</b> ${escapeHtml(money(report.byPayment.Dinheiro || 0))}</p>
-      <p><b>Pendente/fiado:</b> ${escapeHtml(money(report.pendingAmount))}</p>
-      <p><b>Cancelados:</b> ${escapeHtml(String(report.cancelledOrders || 0))}</p>
+      <h2>Resumo financeiro</h2>
+      <table>
+        <tbody>
+          <tr><td>Total vendido</td><td class="right"><b>${escapeHtml(money(report.totalSold))}</b></td></tr>
+          <tr><td>Total recebido</td><td class="right"><b>${escapeHtml(money(report.totalReceived))}</b></td></tr>
+          <tr><td>Pendente/fiado</td><td class="right">${escapeHtml(money(report.pendingAmount))}</td></tr>
+          <tr><td>Cancelados</td><td class="right">${escapeHtml(String(report.cancelledOrders || 0))} • ${escapeHtml(money(report.cancelledAmount || 0))}</td></tr>
+        </tbody>
+      </table>
+      <div class="line"></div>
+      <h2>Formas de pagamento</h2>
+      <table><tbody>${paymentRows}</tbody></table>
+      <div class="line"></div>
+      <h2>Conferência da gaveta</h2>
+      <table>
+        <tbody>
+          <tr><td>Fundo inicial</td><td class="right">${escapeHtml(money(report.openingAmount))}</td></tr>
+          <tr><td>Dinheiro recebido</td><td class="right">${escapeHtml(money(report.expectedCash))}</td></tr>
+          <tr><td>Sangrias/retiradas</td><td class="right">-${escapeHtml(money(report.sangriaTotal))}</td></tr>
+          <tr><td><b>Dinheiro esperado</b></td><td class="right"><b>${escapeHtml(money(report.expectedDrawerCash))}</b></td></tr>
+          <tr><td>Dinheiro contado</td><td class="right">${escapeHtml(money(countedCash))}</td></tr>
+          <tr><td><b>Diferença</b></td><td class="right"><b>${escapeHtml(money(difference))}</b></td></tr>
+        </tbody>
+      </table>
+      <div class="line"></div>
+      <h2>Operação</h2>
+      <p><b>Entregas:</b> ${escapeHtml(String(report.deliveryOrders || 0))} • ${escapeHtml(money(report.deliverySold || 0))}</p>
+      <p><b>Balcão/comandas:</b> ${escapeHtml(String(report.counterOrders || 0))} • ${escapeHtml(money(report.counterSold || 0))}</p>
+      <p><b>Pedidos pagos:</b> ${escapeHtml(String(report.paidOrders || 0))}</p>
       <p><b>Pedidos pendentes:</b> ${escapeHtml(String(report.pendingOrders || 0))}</p>
       <div class="line"></div>
-      <p class="center"><b>Conferência de caixa concluída</b></p>
+      <p class="center"><b>Conferido por:</b> __________________</p>
+      <p class="center muted">Versão ${escapeHtml(APP_VERSION)}</p>
     `;
-    return printThermalHtml("FECHAMENTO DE CAIXA", body, 1, { delivery: true });
+    const printed = printThermalHtml("FECHAMENTO DE CAIXA", body, 1, { delivery: true });
+    if (printed) auditAction(options.reprint ? "reprint_cash_closing" : "print_cash_closing", "cash_sessions", cashSession.id || options.cashSessionId || "", { totalSold: report.totalSold, totalReceived: report.totalReceived, difference });
+    return printed;
+  }
+
+  function printPeriodSalesReport() {
+    const paymentRows = [
+      ["Pix", periodSalesReport.byPayment?.Pix || 0],
+      ["Dinheiro", periodSalesReport.byPayment?.Dinheiro || 0],
+      ["Débito", periodSalesReport.byPayment?.["Cartão débito"] || 0],
+      ["Crédito", periodSalesReport.byPayment?.["Cartão crédito"] || 0],
+    ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td class="right">${escapeHtml(money(value))}</td></tr>`).join("");
+    const body = `
+      <h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>
+      <p class="center muted">RELATÓRIO DE VENDAS POR PERÍODO</p>
+      <p><b>Período:</b> ${escapeHtml(reportRange.startDate || "início")} até ${escapeHtml(reportRange.endDate || "hoje")}</p>
+      <p><b>Emitido por:</b> ${escapeHtml(getCurrentStoreDisplayName())}</p>
+      <p><b>Emissão:</b> ${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
+      <div class="line"></div>
+      <table><tbody>
+        <tr><td>Total vendido</td><td class="right"><b>${escapeHtml(money(periodSalesReport.totalSold))}</b></td></tr>
+        <tr><td>Total recebido</td><td class="right"><b>${escapeHtml(money(periodSalesReport.totalPaid))}</b></td></tr>
+        <tr><td>Pendente/fiado</td><td class="right">${escapeHtml(money(periodSalesReport.pendingAmount))}</td></tr>
+        <tr><td>Cancelados</td><td class="right">${escapeHtml(String(periodSalesReport.cancelledOrders.length))}</td></tr>
+        <tr><td>Entregas</td><td class="right">${escapeHtml(String(periodSalesReport.deliveryOrders || 0))}</td></tr>
+        <tr><td>Balcão/comandas</td><td class="right">${escapeHtml(String(periodSalesReport.counterOrders || 0))}</td></tr>
+      </tbody></table>
+      <div class="line"></div>
+      <h2>Formas de pagamento</h2>
+      <table><tbody>${paymentRows}</tbody></table>
+      <p class="center muted">Versão ${escapeHtml(APP_VERSION)}</p>
+    `;
+    const printed = printThermalHtml("RELATÓRIO DE VENDAS", body, 1, { delivery: true });
+    if (printed) auditAction("print_period_sales_report", "reports", `${reportRange.startDate}_${reportRange.endDate}`, { ...periodSalesReport, orders: periodSalesReport.orders?.length || 0 });
+  }
+
+  function printProductSalesReport() {
+    const topProducts = productSalesReport.slice(0, 40);
+    const rows = buildPrintableRowsHtml(topProducts, [
+      { key: "name", render: (row) => row.name },
+      { key: "quantity", render: (row) => String(row.quantity) },
+      { key: "total", render: (row) => money(row.total) },
+    ]);
+    const body = `
+      <h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>
+      <p class="center muted">RELATÓRIO DE PRODUTOS VENDIDOS</p>
+      <p><b>Período:</b> ${escapeHtml(reportRange.startDate || "início")} até ${escapeHtml(reportRange.endDate || "hoje")}</p>
+      <div class="line"></div>
+      <table><thead><tr><th>Produto</th><th>Qtd</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="center muted">Versão ${escapeHtml(APP_VERSION)}</p>
+    `;
+    const printed = printThermalHtml("PRODUTOS VENDIDOS", body, 1, { delivery: true });
+    if (printed) auditAction("print_product_sales_report", "reports", `${reportRange.startDate}_${reportRange.endDate}`, { products: topProducts.length });
+  }
+
+  function printCashClosingFromRecord(closing) {
+    const report = closing.closingSnapshot || {
+      totalSold: closing.totalSold || 0,
+      totalReceived: closing.totalReceived || 0,
+      pendingAmount: closing.pendingAmount || 0,
+      cancelledOrders: 0,
+      cancelledAmount: closing.cancelledAmount || 0,
+      byPayment: closing.byPayment || {},
+      openingAmount: closing.openingAmount || 0,
+      expectedCash: closing.byPayment?.Dinheiro || 0,
+      sangriaTotal: closing.sangriaTotal || 0,
+      expectedDrawerCash: (closing.openingAmount || 0) + (closing.byPayment?.Dinheiro || 0) - (closing.sangriaTotal || 0),
+      deliveryOrders: 0,
+      deliverySold: 0,
+      counterOrders: 0,
+      counterSold: 0,
+      paidOrders: 0,
+      pendingOrders: 0,
+      openedAt: closing.openedAt || "",
+    };
+    printCashClosingReceipt(report, closing.countedCash || report.expectedDrawerCash || 0, closing.difference || 0, { reprint: true, cashSessionId: closing.id });
   }
 
   async function persistCashClosing(record) {
@@ -5540,6 +5708,49 @@ function App() {
                 </CardBox>
 
                 <CardBox>
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                    <div>
+                      <h3 className="font-bold text-lg">Produtos mais vendidos</h3>
+                      <p className="text-sm text-zinc-500">Ranking por quantidade e valor vendido no período pesquisado.</p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Button onClick={printPeriodSalesReport} className="rounded-2xl">Imprimir relatório de vendas</Button>
+                      <Button onClick={printProductSalesReport} variant="secondary" className="rounded-2xl">Imprimir produtos</Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <div className="rounded-3xl border border-zinc-100 overflow-hidden">
+                      <div className="grid grid-cols-[1fr_80px_110px] bg-zinc-50 px-4 py-3 text-xs font-bold text-zinc-600 uppercase">
+                        <span>Produto</span><span>Qtd</span><span className="text-right">Total</span>
+                      </div>
+                      <div className="max-h-80 overflow-auto divide-y divide-zinc-100">
+                        {productSalesReport.length === 0 ? <p className="p-4 text-sm text-zinc-500">Nenhum produto vendido no período.</p> : productSalesReport.slice(0, 25).map((row) => (
+                          <div key={row.key} className="grid grid-cols-[1fr_80px_110px] px-4 py-3 text-sm items-center">
+                            <span className="font-medium truncate">{row.name}</span>
+                            <span>{row.quantity}</span>
+                            <span className="text-right font-bold">{money(row.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-3xl border border-zinc-100 overflow-hidden">
+                      <div className="grid grid-cols-[1fr_80px_110px] bg-zinc-50 px-4 py-3 text-xs font-bold text-zinc-600 uppercase">
+                        <span>Categoria</span><span>Itens</span><span className="text-right">Total</span>
+                      </div>
+                      <div className="max-h-80 overflow-auto divide-y divide-zinc-100">
+                        {categorySalesReport.length === 0 ? <p className="p-4 text-sm text-zinc-500">Nenhuma categoria vendida no período.</p> : categorySalesReport.slice(0, 25).map((row) => (
+                          <div key={row.category} className="grid grid-cols-[1fr_80px_110px] px-4 py-3 text-sm items-center">
+                            <span className="font-medium truncate">{row.category}</span>
+                            <span>{row.quantity}</span>
+                            <span className="text-right font-bold">{money(row.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </CardBox>
+
+                <CardBox>
                   <h3 className="font-bold text-lg mb-4">Caixas fechados salvos</h3>
                   <p className="text-sm text-zinc-500 mb-4">O sistema usa o Supabase como base principal. O fechamento é salvo em cash_sessions e os pagamentos em order_payments.</p>
                   {cashClosings.length === 0 ? (
@@ -5548,8 +5759,11 @@ function App() {
                     <div className="grid gap-2 max-h-80 overflow-auto pr-1">
                       {cashClosings.slice(0, 60).map((closing) => (
                         <div key={closing.id} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                          <span><b>{closing.closedAt ? new Date(closing.closedAt).toLocaleString("pt-BR") : "Fechamento"}</b> • vendido {money(closing.totalSold)} • recebido {money(closing.totalReceived)}</span>
-                          <span className="font-bold">Pix {money(closing.byPayment?.Pix || 0)} • Déb {money(closing.byPayment?.["Cartão débito"] || 0)} • Créd {money(closing.byPayment?.["Cartão crédito"] || 0)} • Din {money(closing.byPayment?.Dinheiro || 0)}</span>
+                          <span><b>{closing.closedAt ? new Date(closing.closedAt).toLocaleString("pt-BR") : "Fechamento"}</b> • vendido {money(closing.totalSold)} • recebido {money(closing.totalReceived)} • diferença {money(closing.difference || 0)}</span>
+                          <div className="flex flex-col md:flex-row md:items-center gap-2">
+                            <span className="font-bold">Pix {money(closing.byPayment?.Pix || 0)} • Déb {money(closing.byPayment?.["Cartão débito"] || 0)} • Créd {money(closing.byPayment?.["Cartão crédito"] || 0)} • Din {money(closing.byPayment?.Dinheiro || 0)}</span>
+                            <Button onClick={() => printCashClosingFromRecord(closing)} variant="secondary" className="rounded-xl px-3 py-2 text-xs">Reimprimir</Button>
+                          </div>
                         </div>
                       ))}
                     </div>
