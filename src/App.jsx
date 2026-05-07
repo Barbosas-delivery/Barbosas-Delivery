@@ -1289,6 +1289,51 @@ export default function App() {
     setLastAction("Produtos carregados do Supabase.");
   }
 
+  function mapClientFromDatabase(client) {
+    return {
+      id: client.id,
+      name: client.name || "",
+      phone: client.phone || "",
+      cep: client.cep || "",
+      street: client.street || "",
+      number: client.number || "",
+      district: client.district || "",
+      city: client.city || "",
+      state: client.state || "",
+      reference: client.reference || "",
+    };
+  }
+
+  function mapClientToDatabase(client) {
+    return {
+      id: client.id,
+      name: String(client.name || "").trim(),
+      phone: formatBrazilMobilePhone(client.phone),
+      cep: formatCep(client.cep),
+      street: String(client.street || "").trim(),
+      number: String(client.number || "").trim(),
+      district: String(client.district || "").trim(),
+      city: String(client.city || "").trim(),
+      state: String(client.state || "").toUpperCase().slice(0, 2),
+      reference: String(client.reference || "").trim(),
+    };
+  }
+
+  async function loadClients() {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Erro ao carregar clientes:", error);
+      setLastAction(`Clientes não carregados do Supabase: ${error.message || "verifique SELECT em clients."}`);
+      return;
+    }
+
+    setClients(Array.isArray(data) ? data.map(mapClientFromDatabase) : []);
+  }
+
 
   function mapOrderFromDatabase(order, items = []) {
     return {
@@ -1616,6 +1661,7 @@ export default function App() {
     let isMounted = true;
 
     loadProducts();
+    loadClients();
     loadDeliveries();
 
     // Mantém o PVD Entregas sincronizado com pedidos feitos em outro celular/computador.
@@ -1634,10 +1680,17 @@ export default function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "order_items" }, refreshDeliveries)
       .subscribe();
 
+    const productsClientsChannel = supabase
+      .channel("products-clients-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => { if (isMounted) loadProducts(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => { if (isMounted) loadClients(); })
+      .subscribe();
+
     return () => {
       isMounted = false;
       window.clearInterval(refreshInterval);
       supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(productsClientsChannel);
     };
   }, []);
   const [deliveryProductSearch, setDeliveryProductSearch] = useState("");
@@ -2150,7 +2203,9 @@ export default function App() {
     if (!normalizeGroupName(newProduct.category)) return setLastAction("Selecione um grupo para o produto.");
     if (hasDuplicateBarcode(products, barcode)) return setLastAction("Código de barras já cadastrado em outro produto.");
 
+    const productId = Date.now();
     const productToInsert = {
+      id: productId,
       name: newProduct.name.trim(),
       category: newProduct.category,
       price: toNonNegativeNumber(newProduct.price, 0),
@@ -2164,66 +2219,54 @@ export default function App() {
       active: true,
     };
 
-    const { data, error } = await supabase
-      .from("products")
-      .insert(productToInsert)
-      .select()
-      .single();
-
-    let savedProduct = null;
+    // Importante: não usamos .select().single() aqui.
+    // Algumas policies permitem INSERT público, mas bloqueiam SELECT no retorno.
+    // Isso fazia o produto parecer que "não salvou", mesmo quando o INSERT podia ter passado.
+    const { error, ignoredColumns } = await insertWithSchemaRetry("products", productToInsert, false);
 
     if (error) {
       console.error("Erro ao cadastrar produto no Supabase:", error);
-      savedProduct = {
-        id: Date.now(),
-        name: productToInsert.name,
-        category: productToInsert.category || "",
-        price: productToInsert.price,
-        cost: productToInsert.cost,
-        stock: productToInsert.stock,
-        minStock: productToInsert.min_stock,
-        ncm: productToInsert.ncm || "",
-        barcode: productToInsert.barcode || "",
-        expirationDate: productToInsert.expiration_date || "",
-        imageUrl: productToInsert.image_url || "",
-        active: true,
-        localOnly: true,
-      };
-      setProducts((previousProducts) => [...previousProducts, savedProduct]);
-      setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", ncm: "", barcode: "", imageUrl: "" });
-      return setLastAction(`Produto cadastrado na tela, mas o Supabase bloqueou o salvamento: ${error.message || "verifique RLS/policies da tabela products."}`);
+      return setLastAction(`Produto não salvo no Supabase: ${error.message || "verifique RLS/policies de INSERT em products."}`);
     }
 
-    savedProduct = data
-      ? {
-          id: data.id,
-          name: data.name,
-          category: data.category || "",
-          price: Number(data.price || 0),
-          cost: Number(data.cost || 0),
-          stock: Number(data.stock || 0),
-          minStock: Number(data.min_stock || 0),
-          ncm: data.ncm || "",
-          barcode: data.barcode || "",
-          expirationDate: data.expiration_date || "",
-          imageUrl: data.image_url || "",
-          active: data.active === true,
-        }
-      : null;
+    const savedProduct = {
+      id: productId,
+      name: productToInsert.name,
+      category: productToInsert.category || "",
+      price: productToInsert.price,
+      cost: productToInsert.cost,
+      stock: productToInsert.stock,
+      minStock: productToInsert.min_stock,
+      ncm: productToInsert.ncm || "",
+      barcode: productToInsert.barcode || "",
+      expirationDate: productToInsert.expiration_date || "",
+      imageUrl: productToInsert.image_url || "",
+      active: true,
+    };
 
-    if (savedProduct) setProducts((previousProducts) => [...previousProducts, savedProduct]);
-    await loadProducts();
+    setProducts((previousProducts) => [...previousProducts, savedProduct]);
     setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", ncm: "", barcode: "", imageUrl: "" });
-    setLastAction("Produto cadastrado com sucesso no Supabase.");
+    await loadProducts();
+    setLastAction(ignoredColumns.length > 0 ? `Produto cadastrado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto cadastrado com sucesso no Supabase.");
   }
 
-  function addClient() {
+  async function addClient() {
     if (!newClient.name || !newClient.phone || !newClient.cep || !newClient.street || !newClient.number || !newClient.district || !newClient.city || !newClient.state) return setLastAction("Cliente não salvo: nome, telefone, CEP, rua, número, bairro, cidade e estado são obrigatórios.");
     if (!isValidCep(newClient.cep)) return setLastAction("Cliente não salvo: CEP inválido. Digite 8 números.");
     if (!isValidBrazilMobilePhone(newClient.phone)) return setLastAction("Telefone inválido. Use DDD entre parênteses + número 9 obrigatório. Exemplo: (43) 98873-6791.");
-    setClients((previousClients) => [...previousClients, { id: Date.now(), ...newClient, cep: formatCep(newClient.cep), phone: formatBrazilMobilePhone(newClient.phone) }]);
+
+    const clientToInsert = mapClientToDatabase({ id: Date.now(), ...newClient });
+    const { error, ignoredColumns } = await insertWithSchemaRetry("clients", clientToInsert, false);
+
+    if (error) {
+      console.error("Erro ao cadastrar cliente no Supabase:", error);
+      return setLastAction(`Cliente não salvo no Supabase: ${error.message || "verifique RLS/policies de INSERT em clients."}`);
+    }
+
+    setClients((previousClients) => [...previousClients, mapClientFromDatabase(clientToInsert)]);
     setNewClient({ name: "", phone: "", cep: "", street: "", number: "", district: "", city: "", state: "", reference: "" });
-    setLastAction("Cliente cadastrado com sucesso.");
+    await loadClients();
+    setLastAction(ignoredColumns.length > 0 ? `Cliente cadastrado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Cliente cadastrado com sucesso no Supabase.");
   }
 
   function updateClientField(id, field, value) {
@@ -2266,7 +2309,7 @@ export default function App() {
     }
   }
 
-  function saveClientEdits(id) {
+  async function saveClientEdits(id) {
     const client = clients.find((item) => item.id === id);
     if (!client) return;
     if (!client.name || !client.phone || !client.cep || !client.street || !client.number || !client.district || !client.city || !client.state) {
@@ -2281,12 +2324,18 @@ export default function App() {
       setLastAction("Telefone inválido. Use DDD + 9 + 8 dígitos. Exemplo: (43) 98873-6791.");
       return;
     }
-    setClients((previousClients) =>
-      previousClients.map((item) =>
-        item.id === id ? { ...item, cep: formatCep(item.cep), phone: formatBrazilMobilePhone(item.phone) } : item
-      )
-    );
-    setLastAction("Dados do cliente atualizados com sucesso.");
+
+    const formattedClient = mapClientToDatabase(client);
+    const { id: _ignoredId, ...clientPatch } = formattedClient;
+    const { error, ignoredColumns } = await updateWithSchemaRetry("clients", id, clientPatch);
+
+    if (error) {
+      console.error("Erro ao atualizar cliente no Supabase:", error);
+      return setLastAction(`Cliente não atualizado no Supabase: ${error.message || "verifique RLS/policies de UPDATE em clients."}`);
+    }
+
+    setClients((previousClients) => previousClients.map((item) => (item.id === id ? mapClientFromDatabase(formattedClient) : item)));
+    setLastAction(ignoredColumns.length > 0 ? `Cliente atualizado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Dados do cliente atualizados com sucesso no Supabase.");
     setEditingClientId(null);
   }
 
@@ -2358,14 +2407,14 @@ export default function App() {
       active: product.active === true,
     };
 
-    const { error } = await supabase.from("products").update(productPatch).eq("id", id);
+    const { error, ignoredColumns } = await updateWithSchemaRetry("products", id, productPatch);
     if (error) {
       console.error("Erro ao salvar edição do produto:", error);
       return setLastAction(`Produto não salvo no Supabase: ${error.message || "verifique policies de UPDATE em products."}`);
     }
 
     await loadProducts();
-    setLastAction("Produto atualizado com sucesso no Supabase.");
+    setLastAction(ignoredColumns.length > 0 ? `Produto atualizado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto atualizado com sucesso no Supabase.");
     setEditingProductId(null);
   }
 
