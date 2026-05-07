@@ -1003,10 +1003,12 @@ function isCustomerFormComplete(customer) {
 }
 
 function generateStrongPassword() {
+  // Senha forte, mas simples para copiar e enviar ao entregador.
+  // Evita caracteres que costumam confundir no WhatsApp ou teclado do celular.
   const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
   const lower = "abcdefghijkmnopqrstuvwxyz";
   const numbers = "23456789";
-  const symbols = "!@#$%&*";
+  const symbols = "@#%*";
   const all = upper + lower + numbers + symbols;
   const required = [upper, lower, numbers, symbols].map((group) => group[Math.floor(Math.random() * group.length)]);
   const remaining = Array.from({ length: 8 }, () => all[Math.floor(Math.random() * all.length)]);
@@ -2138,9 +2140,11 @@ function App() {
   const [tabClosingPayment, setTabClosingPayment] = useState("Dinheiro");
   const [tabClosingChangeFor, setTabClosingChangeFor] = useState("");
   const [tabClosingMixedPayment, setTabClosingMixedPayment] = useState(createEmptyMixedPayment());
+  const [tabClosingStorePassword, setTabClosingStorePassword] = useState("");
   const [pendingCancellation, setPendingCancellation] = useState({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
   const [cashClosings, setCashClosings] = useState([]);
   const [reportRange, setReportRange] = useState({ startDate: todayInput.slice(0, 7) + "-01", endDate: todayInput });
+  const isCashOpen = cashSession.isOpen === true;
 
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase();
@@ -2780,24 +2784,25 @@ function App() {
       id: Date.now(),
       name: newCourier.name,
       username: newCourier.username,
-      password: newCourier.password,
+      password: newCourier.password || generateStrongPassword(),
       active: true,
       createdAt: new Date().toISOString(),
       motorcycleType: newCourier.motorcycleType,
     });
     if (!courierToInsert.name || !courierToInsert.username) return setLastAction("Entregador não salvo: nome e usuário são obrigatórios.");
     if (hasDuplicateCourierUsername(couriers, courierToInsert.username)) return setLastAction("Esse usuário de entregador já existe. Escolha outro usuário.");
-    if (!isStrongPassword(courierToInsert.password)) return setLastAction("A senha gerada não está forte o suficiente. Gere outra senha.");
+    if (!isStrongPassword(courierToInsert.password)) return setLastAction("Senha fraca. Clique em gerar senha forte ou informe uma senha com maiúscula, minúscula, número e símbolo.");
 
     const { error, ignoredColumns } = await insertWithSchemaRetry("couriers", courierToInsert, false);
-    if (error) {
-      console.error("Erro ao cadastrar entregador no Supabase:", error);
-      setLastAction(`Entregador salvo neste navegador, mas não no Supabase: ${error.message || "verifique RLS/policies de INSERT em couriers."}`);
+    if (error || ignoredColumns.includes("password")) {
+      console.error("Erro ao cadastrar entregador no Supabase:", error, ignoredColumns);
+      return setLastAction(error ? `Entregador não salvo no Supabase: ${error.message || "verifique RLS/policies de INSERT em couriers."}` : "Entregador não salvo: a tabela couriers precisa ter a coluna password para guardar a senha.");
     }
 
-    setCouriers((previousCouriers) => [...previousCouriers, mapCourierFromDatabase(courierToInsert)]);
+    const savedCourier = mapCourierFromDatabase(courierToInsert);
+    setCouriers((previousCouriers) => [...previousCouriers, savedCourier]);
     setNewCourier({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
-    if (!error) setLastAction(ignoredColumns.length > 0 ? `Entregador cadastrado. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Entregador cadastrado e salvo no Supabase.");
+    setLastAction(`Entregador cadastrado no Supabase. Usuário: ${savedCourier.username} • Senha: ${savedCourier.password}`);
   }
 
   function regenerateCourierPassword() {
@@ -2910,13 +2915,13 @@ function App() {
     const formattedCourier = mapCourierToDatabase(courier);
     const { id: _ignoredId, ...courierPatch } = formattedCourier;
     const { error, ignoredColumns } = await updateWithSchemaRetry("couriers", id, courierPatch);
-    if (error) {
-      console.error("Erro ao salvar entregador no Supabase:", error);
-      setLastAction(`Entregador atualizado neste navegador, mas não no Supabase: ${error.message || "verifique UPDATE em couriers."}`);
+    if (error || ignoredColumns.includes("password")) {
+      console.error("Erro ao salvar entregador no Supabase:", error, ignoredColumns);
+      return setLastAction(error ? `Entregador não atualizado no Supabase: ${error.message || "verifique UPDATE em couriers."}` : "Entregador não atualizado: a tabela couriers precisa ter a coluna password para manter a senha salva.");
     }
     setCouriers((previousCouriers) => previousCouriers.map((item) => (item.id === id ? mapCourierFromDatabase(formattedCourier) : item)));
     setEditingCourierId(null);
-    if (!error) setLastAction(ignoredColumns.length > 0 ? `Entregador atualizado. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Dados do entregador atualizados e salvos.");
+    setLastAction(`Dados do entregador atualizados e salvos. Senha atual: ${formattedCourier.password}`);
   }
 
   async function searchCep() {
@@ -3359,6 +3364,7 @@ function App() {
   }
 
   async function launchCounterSale() {
+    if (!isCashOpen) return setLastAction("Abra o caixa antes de usar o PDV Balcão.");
     const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
     if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão. Libere pop-ups para finalizar e imprimir a venda.");
     if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) { preOpenedPrintWindow.close(); return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco."); }
@@ -3429,6 +3435,7 @@ function App() {
   }
 
   async function launchDeliveryOrder() {
+    if (!isCashOpen) return setLastAction("Abra o caixa antes de lançar pedidos no PDV Entregas.");
     if (!selectedDeliveryClient) return setLastAction("Selecione o cliente antes de lançar a entrega.");
     const validation = validateOrderItems(deliveryDraft.items, products);
     if (!validation.valid) return setLastAction(validation.message);
@@ -3771,6 +3778,7 @@ function App() {
   }
 
   async function createTabAccount() {
+    if (!isCashOpen) return setLastAction("Abra o caixa antes de abrir uma comanda.");
     const name = tabDraft.customerName.trim();
     if (!name) return setLastAction("Informe o nome do cliente da comanda.");
     const phone = tabDraft.phone ? formatBrazilMobilePhone(tabDraft.phone) : "";
@@ -3786,6 +3794,7 @@ function App() {
   }
 
   async function addProductToTab(tabId, product, quantity = 1) {
+    if (!isCashOpen) return setLastAction("Abra o caixa antes de adicionar itens à comanda.");
     if (!product || !product.active) return setLastAction("Produto indisponível para comanda.");
     const safeQuantity = toPositiveInteger(quantity, 1);
     const tab = tabsAccounts.find((item) => item.id === tabId);
@@ -3840,6 +3849,7 @@ function App() {
     setTabClosingPayment("Dinheiro");
     setTabClosingChangeFor("");
     setTabClosingMixedPayment(createEmptyMixedPayment());
+    setTabClosingStorePassword("");
   }
 
   function cancelClosingTab() {
@@ -3847,6 +3857,7 @@ function App() {
     setTabClosingPayment("Dinheiro");
     setTabClosingChangeFor("");
     setTabClosingMixedPayment(createEmptyMixedPayment());
+    setTabClosingStorePassword("");
   }
 
   async function addSelectedProductToTab(tabId) {
@@ -3863,6 +3874,12 @@ function App() {
 
 
   async function closeTabAccount(tabId) {
+    if (!isCashOpen) return setLastAction("Abra o caixa antes de fechar comanda.");
+    const typedStorePassword = String(tabClosingStorePassword || "").trim();
+    const currentStorePassword = String(password || "").trim();
+    if (!typedStorePassword || (currentStorePassword && typedStorePassword !== currentStorePassword) || (!currentStorePassword && !isValidLogin(login || "loja", typedStorePassword))) {
+      return setLastAction("Senha da loja incorreta. Use a mesma senha do login da loja para fechar a comanda.");
+    }
     const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
     if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão da comanda. Libere pop-ups e tente novamente.");
     const tab = tabsAccounts.find((item) => item.id === tabId);
@@ -3972,7 +3989,7 @@ function App() {
           : item
       )
     );
-    setLastAction(`Pedido #${id} confirmado manualmente pela loja. Sem entregador vinculado, não gera comissão.`);
+    setLastAction(`Pedido #${id} finalizado pela loja. Sem entregador vinculado, não gera comissão.`);
   }
 
   const tabs = [
@@ -5092,7 +5109,7 @@ function App() {
                       <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">Limite padrão: {money(DEFAULT_TAB_CREDIT_LIMIT)}. Após pagamentos rápidos, o limite sobe automaticamente; se atrasar ou fechar como fiado, o limite pode diminuir. Você também pode alterar manualmente em cada comanda.</p>
                       <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">A forma de pagamento aparece somente quando a comanda for fechada.</p>
                     </div>
-                    <Button onClick={createTabAccount} className="mt-4 rounded-2xl bg-zinc-950 text-white hover:bg-zinc-800">Abrir comanda</Button>
+                    <Button onClick={createTabAccount} disabled={!isCashOpen} className="mt-4 rounded-2xl bg-zinc-950 text-white hover:bg-zinc-800">Abrir comanda</Button>
                     <div className="mt-4 rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Comandas abertas: <b>{tabsAccounts.length}</b></div>
                   </CardBox>
 
@@ -5139,7 +5156,7 @@ function App() {
                               <p className="text-xs font-bold text-zinc-600 mb-2">Adicionar produto direto nesta comanda</p>
                               <input value={tabProductSearchByTab[tab.id] || ""} onChange={(event) => setTabProductSearchByTab((previous) => ({ ...previous, [tab.id]: event.target.value }))} placeholder="Pesquisar por nome ou código de barras" className="mb-2 w-full rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none" />
                               {String(tabProductSearchByTab[tab.id] || "").trim() && <div className="mb-2 rounded-2xl bg-zinc-50 p-2 text-xs text-zinc-600">{getTabProductResults(tab.id)[0] ? <>Encontrado: <b>{getTabProductResults(tab.id)[0].name}</b> • {money(getTabProductResults(tab.id)[0].price)} • estoque {getTabProductResults(tab.id)[0].stock}</> : "Nenhum produto encontrado."}</div>}
-                              <div className="flex flex-col md:flex-row gap-2"><input type="number" min="1" value={tabProductQuantityByTab[tab.id] || 1} onChange={(event) => setTabProductQuantityByTab((previous) => ({ ...previous, [tab.id]: event.target.value }))} className="md:w-28 rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none" placeholder="Qtd" /><Button onClick={() => addSelectedProductToTab(tab.id)} variant="secondary" className="rounded-2xl">Adicionar</Button></div>
+                              <div className="flex flex-col md:flex-row gap-2"><input type="number" min="1" value={tabProductQuantityByTab[tab.id] || 1} onChange={(event) => setTabProductQuantityByTab((previous) => ({ ...previous, [tab.id]: event.target.value }))} className="md:w-28 rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none" placeholder="Qtd" /><Button onClick={() => addSelectedProductToTab(tab.id)} disabled={!isCashOpen} variant="secondary" className="rounded-2xl">Adicionar</Button></div>
                             </div>
                             <div className="space-y-2">
                               {tab.items.length === 0 && <p className="text-sm text-zinc-500">Adicione produtos pela lista ao lado.</p>}
@@ -5150,9 +5167,10 @@ function App() {
                                 <label className="block"><span className="text-xs font-medium text-zinc-600">Forma de pagamento para fechar</span><select value={tabClosingPayment} onChange={(event) => { setTabClosingPayment(event.target.value); setTabClosingMixedPayment(createEmptyMixedPayment()); setTabClosingChangeFor(""); }} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-2 outline-none"><option>Dinheiro</option><option>Pix</option><option>Cartão débito</option><option>Cartão crédito</option><option>Misto</option><option>Fiado/anotado</option></select></label>
                                 {tabClosingPayment === "Dinheiro" && <div className="space-y-2"><Input label="Valor recebido / troco para quanto?" type="number" value={tabClosingChangeFor} onChange={setTabClosingChangeFor} placeholder="Ex: 100" />{tabClosingChangeFor && <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-emerald-800"><p className="text-xs font-bold">Troco da comanda</p><p className="text-2xl font-black">{money(calculateChangeDue(tabClosingChangeFor, total))}</p></div>}</div>}
                                 {tabClosingPayment === "Misto" && <div className="grid grid-cols-2 gap-2"><Input label="Pix" type="number" value={tabClosingMixedPayment.pix} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, pix: value })} /><Input label="Dinheiro" type="number" value={tabClosingMixedPayment.cash} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, cash: value })} /><Input label="Débito" type="number" value={tabClosingMixedPayment.debit} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, debit: value })} /><Input label="Crédito" type="number" value={tabClosingMixedPayment.credit} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, credit: value })} /><p className="col-span-2 text-xs font-bold text-zinc-600">Informado: {money(getMixedPaymentTotal(tabClosingMixedPayment))} de {money(total)}</p></div>}
-                                <div className="flex gap-2"><Button onClick={() => closeTabAccount(tab.id)} disabled={tab.items.length === 0} className="flex-1 rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Confirmar e imprimir 2 vias</Button><Button onClick={cancelClosingTab} variant="secondary" className="rounded-2xl">Cancelar</Button></div>
+                                <Input label="Senha de login da loja para fechar" type="password" value={tabClosingStorePassword} onChange={setTabClosingStorePassword} placeholder="Digite a senha da loja" />
+                                <div className="flex gap-2"><Button onClick={() => closeTabAccount(tab.id)} disabled={tab.items.length === 0 || !tabClosingStorePassword} className="flex-1 rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Confirmar e imprimir 2 vias</Button><Button onClick={cancelClosingTab} variant="secondary" className="rounded-2xl">Cancelar</Button></div>
                               </div>
-                            ) : <Button onClick={() => startClosingTab(tab.id)} disabled={tab.items.length === 0} className="w-full rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Fechar comanda</Button>}
+                            ) : <Button onClick={() => startClosingTab(tab.id)} disabled={tab.items.length === 0 || !isCashOpen} className="w-full rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Fechar comanda</Button>}
                           </div>
                         );
                       })}
@@ -5316,7 +5334,7 @@ function App() {
                               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                 <div>
                                   <p className="font-bold">{courier.name}</p>
-                                  <p className="text-sm text-zinc-600">Usuário: {courier.username} • {courier.motorcycleType || "Moto própria"}</p>
+                                  <p className="text-sm text-zinc-600">Usuário: {courier.username} • Senha: <b>{courier.password || "sem senha salva"}</b> • {courier.motorcycleType || "Moto própria"}</p>
                                   <p className="text-sm text-zinc-500">Status: {courier.active ? "Ativo" : "Bloqueado"} • Criado em: {courier.createdAt}</p>
                                 </div>
                                 <Button onClick={() => setEditingCourierId(courier.id)} variant="secondary" className="rounded-2xl">Editar entregador</Button>
@@ -5457,13 +5475,11 @@ function OwnerDeliveryCard({ delivery, onPrint, onApprove, onManualConfirm, onCa
           <span className="text-xs text-zinc-500">Produtos: {money(delivery.productsTotal ?? Number(delivery.value || 0) - (isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee)))} • Desconto: -{money(delivery.discount || 0)} • Entrega: {money(isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee))}</span>
           <span className="text-sm text-zinc-500">Pagamento: {getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails)}</span>
           {delivery.paymentStatus === PAYMENT_STATUS.PAID && <span className="rounded-2xl border px-3 py-2 text-xs font-bold bg-emerald-50 text-emerald-700 border-emerald-100">Recebimento confirmado</span>}
-          <div className="flex flex-wrap gap-2">
-            {canConfirmPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} variant="secondary" className="rounded-2xl text-emerald-700">Confirmar recebimento</Button>}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full md:w-auto">
+            <Button onClick={() => onApprove(delivery.id)} disabled={!isDeliveryOrder(delivery) || (!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>
             <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
-            {isDeliveryOrder(delivery) && isWaitingOrderApproval && <Button onClick={() => onApprove(delivery.id)} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar pedido</Button>}
-            {isDeliveryOrder(delivery) && isWaitingDeliveryApproval && <Button onClick={() => onApprove(delivery.id)} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>}
-            {isDeliveryOrder(delivery) && !isWaitingOrderApproval && !isWaitingDeliveryApproval && <Button onClick={() => onManualConfirm(delivery.id)} disabled={delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Confirmar manual</Button>}
-            <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">Cancelar {isCounterOrder(delivery) ? "venda" : "pedido"}</Button>
+            <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">Cancelar pedido</Button>
+            <Button onClick={() => onManualConfirm(delivery.id)} disabled={!isDeliveryOrder(delivery) || isWaitingOrderApproval || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>
           </div>
         </div>
       </CardContent>
