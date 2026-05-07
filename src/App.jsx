@@ -1,5 +1,4 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import { supabase } from "./supabaseClient";
 // Bloco 4: ajustes de layout e experiência por perfil. Cliente/entregador mobile-first; caixa/admin otimizados para tablet e desktop.
 const Card = memo(function Card({ className = "", children, ...props }) {
@@ -4565,7 +4564,7 @@ function App() {
   if (!isLogged) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex items-start md:items-center justify-center p-3 md:p-4 overflow-x-hidden">
-        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className={customerSubmitted ? "w-full max-w-6xl" : "w-full max-w-2xl"}>
+        <div className={customerSubmitted ? "w-full max-w-6xl" : "w-full max-w-2xl"}>
           <Card className="bg-zinc-900 border-zinc-800 shadow-2xl rounded-3xl">
             <CardContent className="p-4 sm:p-6 md:p-8">
               <div className={customerSubmitted ? "flex flex-col md:flex-row md:items-center gap-4 mb-8 justify-center" : "flex flex-col md:flex-row md:items-center gap-4 mb-8 md:justify-between"}>
@@ -4613,11 +4612,7 @@ function App() {
                   )}
 
                   {showCustomerPromo && activeCustomerPromotions.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-                    >
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
                       <div className="relative w-full max-w-sm">
                         {canCloseCustomerPromo ? (
                           <button
@@ -4634,11 +4629,9 @@ function App() {
                           </div>
                         )}
 
-                        <motion.button
+                        <button
                           type="button"
                           onClick={() => goToPromotionProduct(activeCustomerPromotions[0])}
-                          initial={{ scale: 0.92, y: 18 }}
-                          animate={{ scale: 1, y: 0 }}
                           className={`relative w-full overflow-hidden rounded-[2rem] text-zinc-950 shadow-2xl border text-left ${activeCustomerPromotions[0].imageUrl ? "bg-black border-zinc-800" : "bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-yellow-200"}`}
                         >
                           {activeCustomerPromotions[0].imageUrl ? (
@@ -4666,9 +4659,9 @@ function App() {
                               <p className="mt-4 text-xs font-semibold text-zinc-800">O botão de fechar aparece após 3 segundos.</p>
                             </div>
                           )}
-                        </motion.button>
+                        </button>
                       </div>
-                    </motion.div>
+                    </div>
                   )}
                   <div className="rounded-3xl bg-white text-zinc-950 p-4 md:p-5 shadow-sm">
                     <h2 className="text-xl font-black mb-1">Monte seu pedido</h2>
@@ -4875,7 +4868,7 @@ function App() {
               )}
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       </div>
     );
   }
@@ -4908,7 +4901,7 @@ function App() {
               />
             )}
 
-            {lastAction && <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="bg-white border border-zinc-200 rounded-3xl px-5 py-4 flex items-center gap-3 shadow-sm"><Icon name="check" className="text-emerald-600" /><p className="text-sm text-zinc-700">{lastAction}</p></motion.div>}
+            {lastAction && <div className="bg-white border border-zinc-200 rounded-3xl px-5 py-4 flex items-center gap-3 shadow-sm"><Icon name="check" className="text-emerald-600" /><p className="text-sm text-zinc-700">{lastAction}</p></div>}
 
             {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} onInactivateProduct={toggleProductStatus} />}
 
