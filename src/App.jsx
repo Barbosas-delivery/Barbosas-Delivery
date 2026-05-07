@@ -1613,8 +1613,32 @@ export default function App() {
   }
 
   useEffect(() => {
+    let isMounted = true;
+
     loadProducts();
     loadDeliveries();
+
+    // Mantém o PVD Entregas sincronizado com pedidos feitos em outro celular/computador.
+    // Antes o sistema carregava os pedidos só uma vez ao abrir a tela; por isso
+    // pedidos de cliente podiam salvar no Supabase, mas não aparecer no painel aberto.
+    const refreshDeliveries = () => {
+      if (!isMounted) return;
+      loadDeliveries();
+    };
+
+    const refreshInterval = window.setInterval(refreshDeliveries, 5000);
+
+    const ordersChannel = supabase
+      .channel("orders-pvd-entregas-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, refreshDeliveries)
+      .on("postgres_changes", { event: "*", schema: "public", table: "order_items" }, refreshDeliveries)
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(refreshInterval);
+      supabase.removeChannel(ordersChannel);
+    };
   }, []);
   const [deliveryProductSearch, setDeliveryProductSearch] = useState("");
   const [deliveryDraft, setDeliveryDraft] = useState({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: initialStoreSettings.defaultDeliveryFee, discount: 0 });
@@ -2895,9 +2919,15 @@ export default function App() {
     const currentDelivery = deliveries.find((item) => item.id === id);
     if (!currentDelivery) return setLastAction("Pedido não encontrado.");
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
-      const patch = { status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: false, storeOrderApproved: true, approvedAt: new Date().toISOString() };
-      await updateDeliveryInSupabase(id, patch);
-      setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...patch } : delivery));
+      const dbPatch = { status: DELIVERY_STATUS.WAITING_PICKUP };
+      const localPatch = {
+        status: DELIVERY_STATUS.WAITING_PICKUP,
+        needsStoreApproval: false,
+        storeOrderApproved: true,
+        approvedAt: new Date().toISOString(),
+      };
+      await updateDeliveryInSupabase(id, dbPatch);
+      setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...localPatch } : delivery));
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "couriers", id);
       setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
       return;
@@ -4120,7 +4150,10 @@ export default function App() {
                     <div className="mt-5 flex flex-col md:flex-row md:items-center justify-between gap-3 border-t border-zinc-100 pt-4"><div><p className="text-sm text-zinc-500">Produtos</p><p className="text-2xl font-black">{money(deliveryDraftTotal)}</p><p className="text-sm text-zinc-500">Desconto: -{money(deliveryDraftDiscount)}</p><p className="text-sm text-zinc-500">Subtotal com desconto: {money(buildDiscountedProductsTotal(deliveryDraftTotal, deliveryDraftDiscount))}</p><p className="text-sm text-zinc-500 mt-1">Taxa de entrega: {money(deliveryDraftFee)}</p><p className="text-sm text-zinc-500">Divisão final: moto própria = 100% entregador; moto do estabelecimento = valor do entregador + parte da loja.</p><p className="text-3xl font-black mt-2">Total: {money(deliveryDraftFinalTotal)}</p></div><Button onClick={launchDeliveryOrder} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6 px-6">Lançar entrega e imprimir</Button></div>
                   </CardBox>
                 </div>
-                <Title title="Entregas lançadas" subtitle="Mostra somente entregas em aberto. Entregas aprovadas saem daqui e entram no relatório abaixo." />
+                <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+                  <Title title="Entregas lançadas" subtitle="Mostra somente entregas em aberto. Pedidos de clientes entram aqui automaticamente." />
+                  <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
+                </div>
                 {activeDeliveryOrdersForStore.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega em aberto no momento.</p></CardBox>}
                 <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} />)}</div>
 
