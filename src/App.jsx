@@ -294,6 +294,31 @@ function toSafeMoneyNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function normalizeCustomerCartItem(item, index = 0) {
+  if (!item || typeof item !== "object") return null;
+  const isKit = item.isKit === true;
+  const itemId = item.id ?? item.productId ?? `item-${index}`;
+  const quantity = toPositiveInteger(item.quantity, 1);
+  const price = toSafeMoneyNumber(item.price, 0);
+  return {
+    ...item,
+    id: itemId,
+    name: String(item.name || (isKit ? "Kit" : "Produto")),
+    price,
+    quantity,
+    barcode: item.barcode || "",
+    isKit,
+    cartKey: String(item.cartKey || `${isKit ? "kit" : "prod"}-${itemId}-${item.kitId || ""}-${index}`),
+    kitItems: isKit && Array.isArray(item.kitItems) ? item.kitItems.filter(Boolean) : item.kitItems,
+  };
+}
+
+function sanitizeCustomerCart(cart) {
+  return (Array.isArray(cart) ? cart : [])
+    .map((item, index) => normalizeCustomerCartItem(item, index))
+    .filter((item) => item && item.quantity > 0 && item.price >= 0);
+}
+
 function normalizeBarcode(value) {
   return String(value || "").replace(/\D/g, "").trim();
 }
@@ -397,7 +422,7 @@ function buildDayReport(products, deliveries) {
 }
 
 function buildOrderTotal(items) {
-  return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + toSafeMoneyNumber(item?.price, 0) * toPositiveInteger(item?.quantity, 0), 0);
+  return sanitizeCustomerCart(items).reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1), 0);
 }
 
 function getPaymentLabel(payment, changeFor, mixedPaymentDetails = "") {
@@ -1862,7 +1887,8 @@ export default function App() {
   const shouldShowCustomerProducts = selectedCustomerGroup !== "Kits";
   const newKitProductsTotal = useMemo(() => buildKitProductsTotal(newKit.items, products), [newKit.items, products]);
 
-  const customerCartTotal = useMemo(() => buildOrderTotal(customerCart), [customerCart]);
+  const safeCustomerCart = useMemo(() => sanitizeCustomerCart(customerCart), [customerCart]);
+  const customerCartTotal = useMemo(() => buildOrderTotal(safeCustomerCart), [safeCustomerCart]);
   const filteredClients = useMemo(() => {
     const term = clientSearch.toLowerCase().trim();
     if (!term) return clients;
@@ -2511,56 +2537,90 @@ export default function App() {
     setShowCustomerNeedMoreMessage(false);
     setCustomerOrderConfirmation(null);
 
-    if (!product || product.active !== true) return setCustomerError("Produto indisponível no momento.");
-    if (Number(product.stock || 0) <= 0) return setCustomerError(`${product.name || "Produto"} está sem estoque.`);
+    const productId = product?.id;
+    if (productId === undefined || productId === null || product?.active !== true) {
+      setCustomerError("Produto indisponível no momento.");
+      return;
+    }
+
+    const availableStock = Math.max(0, Number(product.stock || 0));
+    if (availableStock <= 0) {
+      setCustomerError(`${product.name || "Produto"} está sem estoque.`);
+      return;
+    }
 
     setCustomerCart((previousCart) => {
-      const currentCart = Array.isArray(previousCart) ? previousCart : [];
-      const existingItem = currentCart.find((item) => Number(item.id) === Number(product.id) && item.isKit !== true);
-      const simulatedCart = existingItem
-        ? currentCart.map((item) => (Number(item.id) === Number(product.id) && item.isKit !== true ? { ...item, quantity: toPositiveInteger(item.quantity, 1) + 1 } : item))
+      const currentCart = sanitizeCustomerCart(previousCart);
+      const existingQuantity = currentCart
+        .filter((item) => item.isKit !== true && Number(item.id) === Number(productId))
+        .reduce((sum, item) => sum + toPositiveInteger(item.quantity, 1), 0);
+
+      if (existingQuantity + 1 > availableStock) {
+        setCustomerError(`Estoque insuficiente para ${product.name || "produto"}. Disponível: ${availableStock}.`);
+        return currentCart;
+      }
+
+      const existingItem = currentCart.find((item) => item.isKit !== true && Number(item.id) === Number(productId));
+      const nextCart = existingItem
+        ? currentCart.map((item) =>
+            item.isKit !== true && Number(item.id) === Number(productId)
+              ? { ...item, quantity: toPositiveInteger(item.quantity, 1) + 1 }
+              : item
+          )
         : [
             ...currentCart,
             {
-              id: product.id,
-              name: product.name || "Produto",
-              price: toSafeMoneyNumber(getProductSalePrice(product, promotions), 0),
+              id: productId,
+              name: String(product.name || "Produto"),
+              price: toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0)),
               originalPrice: toSafeMoneyNumber(product.price, 0),
               promotionId: getProductActivePromotion(product, promotions)?.id || null,
               quantity: 1,
               barcode: product.barcode || "",
+              isKit: false,
+              cartKey: `prod-${productId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             },
           ];
 
-      const validation = validateOrderItems(simulatedCart, products);
+      const validation = validateOrderItems(nextCart, products);
       if (!validation.valid) {
         setCustomerError(validation.message);
         return currentCart;
       }
 
       setCustomerError(`${product.name || "Produto"} adicionado ao pedido.`);
-      return simulatedCart;
+      return nextCart;
     });
   }
 
   function updateCustomerCartQuantity(productId, quantity) {
     const safeQuantity = toPositiveInteger(quantity, 1);
     setCustomerCart((previousCart) => {
-      const currentCart = Array.isArray(previousCart) ? previousCart : [];
-      const simulatedCart = currentCart.map((item) => (item.id === productId ? { ...item, quantity: safeQuantity } : item));
-      const validation = validateOrderItems(simulatedCart, products);
+      const currentCart = sanitizeCustomerCart(previousCart);
+      const targetItem = currentCart.find((item) => String(item.id) === String(productId));
+      if (!targetItem) return currentCart;
+
+      const relatedProduct = products.find((product) => Number(product.id) === Number(targetItem.id));
+      if (targetItem.isKit !== true && relatedProduct && safeQuantity > Number(relatedProduct.stock || 0)) {
+        setCustomerError(`Estoque insuficiente para ${targetItem.name}. Disponível: ${relatedProduct.stock}.`);
+        return currentCart;
+      }
+
+      const nextCart = currentCart.map((item) => (String(item.id) === String(productId) ? { ...item, quantity: safeQuantity } : item));
+      const validation = validateOrderItems(nextCart, products);
       if (!validation.valid) {
         setCustomerError(validation.message);
         return currentCart;
       }
       setCustomerError("");
-      return simulatedCart;
+      return nextCart;
     });
   }
 
   function removeCustomerCartItem(productId) {
     setCustomerCart((previousCart) => {
-      const nextCart = previousCart.filter((item) => item.id !== productId);
+      const currentCart = sanitizeCustomerCart(previousCart);
+      const nextCart = currentCart.filter((item) => String(item.id) !== String(productId));
       if (nextCart.length === 0) setShowCustomerCheckout(false);
       return nextCart;
     });
@@ -2569,10 +2629,11 @@ export default function App() {
 
   async function submitCustomerOrder() {
     if (!storeSettings.isOpen) return setCustomerError("A loja está fechada no momento. Tente novamente dentro do horário de atendimento.");
-    const validation = validateOrderItems(customerCart, products);
+    const cartForSubmit = sanitizeCustomerCart(safeCustomerCart);
+    const validation = validateOrderItems(cartForSubmit, products);
     if (!validation.valid) return setCustomerError(validation.message);
 
-    const syncedItems = syncOrderItemsWithProducts(customerCart, products);
+    const syncedItems = syncOrderItemsWithProducts(cartForSubmit, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);
     if (!isOrderAboveMinimum(syncedProductsTotal, storeSettings.minimumOrderValue)) {
       return setCustomerError(`Pedido mínimo de ${money(storeSettings.minimumOrderValue)} em produtos. Adicione mais itens para finalizar.`);
@@ -3554,13 +3615,13 @@ export default function App() {
 
               {entryMode === "customer" && customerSubmitted && (
                 <div className="space-y-4 pb-24">
-                  {customerCart.length > 0 && (
+                  {safeCustomerCart.length > 0 && (
                     <button
                       type="button"
                       onClick={() => { setShowCustomerNeedMoreMessage(true); setShowCustomerCheckout(false); }}
                       className="fixed left-4 right-4 bottom-4 z-40 rounded-2xl bg-emerald-600 px-5 py-4 text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700"
                     >
-                      <span className="block text-xs font-semibold opacity-90">{customerCart.length} item{customerCart.length > 1 ? "s" : ""} no pedido</span>
+                      <span className="block text-xs font-semibold opacity-90">{safeCustomerCart.length} item{safeCustomerCart.length > 1 ? "s" : ""} no pedido</span>
                       <span className="block text-base font-black">Finalizar pedido</span>
                       <span className="block text-xs font-semibold opacity-90">Total: {money(buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee))}</span>
                     </button>
@@ -3747,19 +3808,23 @@ export default function App() {
                       <h3 className="font-bold text-lg">Finalizar pedido</h3>
                       <button type="button" onClick={() => setShowCustomerCheckout(false)} className="h-9 w-9 rounded-full bg-zinc-100 text-zinc-950 text-xl font-black">×</button>
                     </div>
-                    {customerCart.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto adicionado ainda.</p>}
-                    {customerCart.map((item) => (
-                      <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 border-b border-zinc-100 pb-3">
-                        <div className="min-w-0">
-                          <p className="font-semibold leading-tight break-words">{item.name}</p>
-                          <p className="text-xs text-zinc-500">{money(item.price)} unidade</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2 shrink-0">
-                          <div className="flex items-center gap-2">
-                            <input type="number" inputMode="numeric" min="1" value={item.quantity} onChange={(event) => updateCustomerCartQuantity(item.id, event.target.value)} className="w-16 rounded-xl border border-zinc-200 px-2 py-2 text-center text-base" />
-                            <span className="font-bold min-w-20 text-right">{money(toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1))}</span>
+                    {safeCustomerCart.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto adicionado ainda.</p>}
+                    {safeCustomerCart.map((item, index) => (
+                      <div key={item.cartKey || `${item.id}-${index}`} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-black leading-tight text-sm break-words">{item.name}</p>
+                            <p className="mt-1 text-xs text-zinc-500">{money(item.price)} cada</p>
                           </div>
-                          <button type="button" onClick={() => removeCustomerCartItem(item.id)} className="rounded-xl bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600">Remover</button>
+                          <p className="shrink-0 text-right text-sm font-black">{money(toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1))}</p>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                          <div className="inline-flex items-center rounded-2xl border border-zinc-200 bg-white p-1">
+                            <button type="button" onClick={() => updateCustomerCartQuantity(item.id, Math.max(1, toPositiveInteger(item.quantity, 1) - 1))} className="h-9 w-9 rounded-xl bg-zinc-100 text-lg font-black text-zinc-950">−</button>
+                            <input type="text" inputMode="numeric" pattern="[0-9]*" value={item.quantity} onChange={(event) => updateCustomerCartQuantity(item.id, event.target.value.replace(/\D/g, ""))} className="h-9 w-12 bg-white text-center text-base font-black outline-none" />
+                            <button type="button" onClick={() => updateCustomerCartQuantity(item.id, toPositiveInteger(item.quantity, 1) + 1)} className="h-9 w-9 rounded-xl bg-zinc-950 text-lg font-black text-white">+</button>
+                          </div>
+                          <button type="button" onClick={() => removeCustomerCartItem(item.id)} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-600">Excluir</button>
                         </div>
                       </div>
                     ))}
