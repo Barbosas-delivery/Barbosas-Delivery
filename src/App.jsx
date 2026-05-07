@@ -328,6 +328,10 @@ function toSafeMoneyNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function toSafeNumber(value, fallback = 0) {
+  return toSafeMoneyNumber(value, fallback);
+}
+
 function normalizeCustomerCartItem(item, index = 0) {
   if (!item || typeof item !== "object") return null;
   const isKit = item.isKit === true;
@@ -561,6 +565,26 @@ function buildOrderConfirmation(delivery) {
     total: delivery.value,
     payment: getPaymentLabel(delivery.payment, delivery.changeFor),
   };
+}
+
+function calculateChangeDue(changeFor, total) {
+  const received = toSafeMoneyNumber(changeFor, 0);
+  const saleTotal = toSafeMoneyNumber(total, 0);
+  if (received <= 0 || received < saleTotal) return 0;
+  return received - saleTotal;
+}
+
+function getCartMatchKey(item) {
+  if (!item) return "";
+  return String(item.cartKey || item.id || item.productId || "");
+}
+
+function normalizeCourierCredential(value) {
+  return String(value || "").trim();
+}
+
+function isTruthyActive(value) {
+  return value === true || value === "true" || value === 1 || value === "1" || value === undefined || value === null;
 }
 
 function buildKitProductsTotal(kitItems, products) {
@@ -993,17 +1017,17 @@ function hasDuplicateCourierUsername(couriers, username) {
 }
 
 function isValidCourierLogin(couriers, username, password) {
-  const normalizedUsername = String(username || "").trim().toLowerCase();
-  return couriers.some(
-    (courier) => courier.active && courier.username.toLowerCase() === normalizedUsername && courier.password === password
-  );
+  return Boolean(findCourierByLogin(couriers, username, password));
 }
 
 function findCourierByLogin(couriers, username, password) {
-  const normalizedUsername = String(username || "").trim().toLowerCase();
-  return couriers.find(
-    (courier) => courier.active && courier.username.toLowerCase() === normalizedUsername && courier.password === password
-  );
+  const normalizedUsername = normalizeCourierCredential(username).toLowerCase();
+  const normalizedPassword = normalizeCourierCredential(password);
+  return (Array.isArray(couriers) ? couriers : []).find((courier) => {
+    const courierUsername = normalizeCourierCredential(courier.username).toLowerCase();
+    const courierPassword = normalizeCourierCredential(courier.password);
+    return isTruthyActive(courier.active) && courierUsername === normalizedUsername && courierPassword === normalizedPassword;
+  });
 }
 
 function getCourierDeliveries(deliveries) {
@@ -1357,7 +1381,35 @@ function SearchBox({ value, onChange, placeholder }) {
   );
 }
 
-export default function App() {
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("Erro crítico capturado no aplicativo:", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen bg-zinc-950 text-white p-6 flex items-center justify-center">
+          <div className="max-w-md rounded-3xl bg-zinc-900 border border-zinc-800 p-6 space-y-4">
+            <h1 className="text-2xl font-black">O app encontrou um erro na tela.</h1>
+            <p className="text-sm text-zinc-300">Atualize a página. O carrinho foi protegido para evitar tela branca, mas esta mensagem ajuda a não travar o cliente.</p>
+            <pre className="text-xs whitespace-pre-wrap rounded-2xl bg-black/30 p-3 text-red-200">{String(this.state.error?.message || this.state.error)}</pre>
+            <button onClick={() => { this.setState({ error: null }); window.location.reload(); }} className="w-full rounded-2xl bg-white px-4 py-3 font-black text-zinc-950">Recarregar aplicativo</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App() {
   const [isLogged, setIsLogged] = useState(false);
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -1476,9 +1528,9 @@ export default function App() {
     return {
       id: courier.id,
       name: courier.name || "",
-      username: courier.username || "",
-      password: courier.password || "",
-      active: courier.active !== false,
+      username: normalizeCourierCredential(courier.username).toLowerCase(),
+      password: normalizeCourierCredential(courier.password),
+      active: isTruthyActive(courier.active),
       createdAt: courier.created_at || courier.createdAt || "",
       motorcycleType: courier.motorcycle_type || courier.motorcycleType || "Moto própria",
     };
@@ -1488,9 +1540,9 @@ export default function App() {
     return {
       id: courier.id,
       name: String(courier.name || "").trim(),
-      username: String(courier.username || "").trim().toLowerCase(),
-      password: String(courier.password || ""),
-      active: courier.active !== false,
+      username: normalizeCourierCredential(courier.username).toLowerCase(),
+      password: normalizeCourierCredential(courier.password),
+      active: isTruthyActive(courier.active),
       motorcycle_type: courier.motorcycleType || "Moto própria",
       created_at: courier.createdAt || new Date().toISOString(),
     };
@@ -2147,16 +2199,24 @@ export default function App() {
     setLoginError("Dados inválidos. Tente novamente.");
   }
 
-  function handleCourierLogin(event) {
+  async function handleCourierLogin(event) {
     event.preventDefault();
     if (!courierLogin.trim() || !courierPassword.trim()) return setCourierLoginError("Preencha usuário e senha do entregador.");
-    const courier = findCourierByLogin(couriers, courierLogin, courierPassword);
+
+    let courier = findCourierByLogin(couriers, courierLogin, courierPassword);
+    if (!courier) {
+      await loadCouriers();
+      const latestCouriers = readStoredValue("couriers", couriers);
+      courier = findCourierByLogin(latestCouriers, courierLogin, courierPassword);
+    }
+
     if (courier) {
       setCourierLoginError("");
       setLoggedCourier(courier);
+      setCourierPassword("");
       return;
     }
-    setCourierLoginError("Usuário ou senha do entregador inválidos, ou entregador inativo.");
+    setCourierLoginError("Usuário ou senha do entregador inválidos, ou entregador inativo. Confira se a loja salvou o entregador.");
   }
 
   async function searchCustomerCep() {
@@ -2205,7 +2265,7 @@ export default function App() {
     setLastAction("Grupo de produtos criado com sucesso.");
   }
 
-  function addPromotion() {
+  async function addPromotion() {
     if (!newPromotion.title.trim()) return setLastAction("Digite o título da promoção.");
     if (!newPromotion.productId) return setLastAction("Selecione o produto da promoção.");
     const product = products.find((item) => Number(item.id) === Number(newPromotion.productId));
@@ -2215,22 +2275,21 @@ export default function App() {
     const promotionalPrice = typedPromotionalPrice > 0 ? typedPromotionalPrice : calculatePromotionFromPercent(product.price, discountPercent);
     if (!(promotionalPrice > 0) || promotionalPrice >= toNonNegativeNumber(product.price, 0)) return setLastAction("Informe uma porcentagem de desconto ou preço promocional menor que o preço normal.");
 
-    setPromotions((previousPromotions) => [
-      ...previousPromotions,
-      {
-        id: Date.now(),
-        title: newPromotion.title.trim(),
-        description: newPromotion.description.trim(),
-        productId: Number(newPromotion.productId),
-        badge: newPromotion.badge.trim() || "Promoção da loja",
-        imageUrl: newPromotion.imageUrl,
-        discountPercent,
-        promotionalPrice,
-        startDate: newPromotion.startDate,
-        endDate: newPromotion.endDate,
-        active: true,
-      },
-    ]);
+    const promotionToSave = {
+      id: Date.now(),
+      title: newPromotion.title.trim(),
+      description: newPromotion.description.trim(),
+      productId: Number(newPromotion.productId),
+      badge: newPromotion.badge.trim() || "Promoção da loja",
+      imageUrl: newPromotion.imageUrl,
+      discountPercent,
+      promotionalPrice,
+      startDate: newPromotion.startDate,
+      endDate: newPromotion.endDate,
+      active: true,
+    };
+    setPromotions((previousPromotions) => [...previousPromotions, promotionToSave]);
+    await insertWithSchemaRetry("promotions", { id: promotionToSave.id, title: promotionToSave.title, description: promotionToSave.description, product_id: promotionToSave.productId, badge: promotionToSave.badge, image_url: promotionToSave.imageUrl, discount_percent: promotionToSave.discountPercent, promotional_price: promotionToSave.promotionalPrice, start_date: promotionToSave.startDate || null, end_date: promotionToSave.endDate || null, active: true }, false);
     setNewPromotion({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
     setLastAction(`Promoção cadastrada: ${product.name} de ${money(product.price)} por ${money(promotionalPrice)}.`);
   }
@@ -2321,23 +2380,15 @@ export default function App() {
     });
   }
 
-  function addKit() {
+  async function addKit() {
     if (!newKit.name.trim()) return setLastAction("Digite o nome do kit.");
     if (newKit.items.length === 0) return setLastAction("Adicione produtos cadastrados para montar o kit.");
     const baseTotal = buildKitProductsTotal(newKit.items, products);
     const finalPrice = newKit.price === "" ? baseTotal : Number(newKit.price || 0);
-    setKits((previousKits) => [
-      ...previousKits,
-      {
-        id: Date.now(),
-        name: newKit.name.trim(),
-        description: newKit.description.trim(),
-        items: newKit.items,
-        price: finalPrice,
-        endDate: newKit.endDate,
-        active: true,
-      },
-    ]);
+    const kitToSave = { id: Date.now(), name: newKit.name.trim(), description: newKit.description.trim(), items: newKit.items, price: finalPrice, endDate: newKit.endDate, active: true };
+    setKits((previousKits) => [...previousKits, kitToSave]);
+    await insertWithSchemaRetry("kits", { id: kitToSave.id, name: kitToSave.name, description: kitToSave.description, price: kitToSave.price, end_date: kitToSave.endDate || null, active: true }, false);
+    await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: Date.now() + Math.floor(Math.random() * 1000000), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
     setNewKit({ name: "", description: "", items: [], price: "", endDate: "", active: true });
     setNewKitPriceEdited(false);
     setKitProductSearch("");
@@ -2397,8 +2448,8 @@ export default function App() {
     const kitPrice = toSafeMoneyNumber(kit.price || buildKitProductsTotal(kit.items, products), 0);
 
     setCustomerCart((previousCart) => {
-      const currentCart = Array.isArray(previousCart) ? previousCart : [];
-      const nextCart = [...currentCart, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name || "Kit", price: kitPrice, quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems }];
+      const currentCart = sanitizeCustomerCart(previousCart);
+      const nextCart = [...currentCart, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name || "Kit", price: kitPrice, quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems, cartKey: `kit-${kit.id}-${Date.now()}-${Math.random().toString(36).slice(2)}` }];
       const validation = validateOrderItems(nextCart, products);
       if (!validation.valid) {
         setCustomerError(validation.message);
@@ -2790,11 +2841,11 @@ export default function App() {
     });
   }
 
-  function updateCustomerCartQuantity(productId, quantity) {
+  function updateCustomerCartQuantity(cartKeyOrProductId, quantity) {
     const safeQuantity = toPositiveInteger(quantity, 1);
     setCustomerCart((previousCart) => {
       const currentCart = sanitizeCustomerCart(previousCart);
-      const targetItem = currentCart.find((item) => String(item.id) === String(productId));
+      const targetItem = currentCart.find((item) => getCartMatchKey(item) === String(cartKeyOrProductId) || String(item.id) === String(cartKeyOrProductId));
       if (!targetItem) return currentCart;
 
       const relatedProduct = products.find((product) => Number(product.id) === Number(targetItem.id));
@@ -2803,7 +2854,7 @@ export default function App() {
         return currentCart;
       }
 
-      const nextCart = currentCart.map((item) => (String(item.id) === String(productId) ? { ...item, quantity: safeQuantity } : item));
+      const nextCart = currentCart.map((item) => (getCartMatchKey(item) === getCartMatchKey(targetItem) ? { ...item, quantity: safeQuantity } : item));
       const validation = validateOrderItems(nextCart, products);
       if (!validation.valid) {
         setCustomerError(validation.message);
@@ -2814,10 +2865,10 @@ export default function App() {
     });
   }
 
-  function removeCustomerCartItem(productId) {
+  function removeCustomerCartItem(cartKeyOrProductId) {
     setCustomerCart((previousCart) => {
       const currentCart = sanitizeCustomerCart(previousCart);
-      const nextCart = currentCart.filter((item) => String(item.id) !== String(productId));
+      const nextCart = currentCart.filter((item) => getCartMatchKey(item) !== String(cartKeyOrProductId) && String(item.id) !== String(cartKeyOrProductId));
       if (nextCart.length === 0) setShowCustomerCheckout(false);
       return nextCart;
     });
@@ -2979,7 +3030,7 @@ export default function App() {
   }
 
   function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
-    const printWindow = window.open("about:blank", "_blank", "width=420,height=760");
+    const printWindow = options.printWindow || window.open("about:blank", "_blank", "width=420,height=760");
     if (!printWindow) {
       setLastAction("Navegador bloqueou a impressão. Libere pop-ups e tente novamente.");
       return false;
@@ -3014,7 +3065,7 @@ export default function App() {
             .total { font-size: ${options.delivery ? "22px" : "19px"}; font-weight: 900; text-align: right; margin-top: 2mm; }
           </style>
         </head>
-        <body>${copyBlocks}<script>window.onload = () => { window.print(); setTimeout(() => window.close(), 700); };<\/script></body>
+        <body>${copyBlocks}<script>window.onload = () => { window.focus(); window.print(); };<\/script></body>
       </html>
     `);
     printWindow.document.close();
@@ -3043,28 +3094,31 @@ export default function App() {
   function printCashClosingReceipt(report, countedCash, difference) {
     const body = `
       <h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>
-      <p class="muted">FECHAMENTO DE CAIXA</p>
+      <p class="muted">FECHAMENTO DE CAIXA PROFISSIONAL</p>
       <p class="muted">${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
       <div class="line"></div>
       <p><b>Abertura:</b> ${escapeHtml(cashSession.openedAt ? new Date(cashSession.openedAt).toLocaleString("pt-BR") : "-")}</p>
+      <p><b>Fechamento:</b> ${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
       <p><b>Fundo inicial:</b> ${escapeHtml(money(report.openingAmount))}</p>
-      <p><b>Dinheiro recebido:</b> ${escapeHtml(money(report.expectedCash))}</p>
-      <p><b>Sangrias:</b> -${escapeHtml(money(report.sangriaTotal))}</p>
-      <p><b>Esperado na gaveta:</b> ${escapeHtml(money(report.expectedDrawerCash))}</p>
-      <p><b>Contado:</b> ${escapeHtml(money(countedCash))}</p>
+      <p><b>Dinheiro recebido em vendas:</b> ${escapeHtml(money(report.expectedCash))}</p>
+      <p><b>Sangrias/retiradas:</b> -${escapeHtml(money(report.sangriaTotal))}</p>
+      <p><b>DINHEIRO ESPERADO NA GAVETA:</b> ${escapeHtml(money(report.expectedDrawerCash))}</p>
+      <p><b>Dinheiro contado:</b> ${escapeHtml(money(countedCash))}</p>
       <p><b>Diferença:</b> ${escapeHtml(money(difference))}</p>
       <div class="line"></div>
-      <p><b>Total vendido:</b> ${escapeHtml(money(report.totalSold))}</p>
-      <p><b>Total recebido:</b> ${escapeHtml(money(report.totalReceived))}</p>
+      <p><b>Total vendido bruto:</b> ${escapeHtml(money(report.totalSold))}</p>
+      <p><b>Total recebido confirmado:</b> ${escapeHtml(money(report.totalReceived))}</p>
       <p><b>Pix:</b> ${escapeHtml(money(report.byPayment.Pix || 0))}</p>
       <p><b>Débito:</b> ${escapeHtml(money(report.byPayment["Cartão débito"] || 0))}</p>
       <p><b>Crédito:</b> ${escapeHtml(money(report.byPayment["Cartão crédito"] || 0))}</p>
       <p><b>Dinheiro:</b> ${escapeHtml(money(report.byPayment.Dinheiro || 0))}</p>
       <p><b>Pendente/fiado:</b> ${escapeHtml(money(report.pendingAmount))}</p>
+      <p><b>Cancelados:</b> ${escapeHtml(String(report.cancelledOrders || 0))}</p>
+      <p><b>Pedidos pendentes:</b> ${escapeHtml(String(report.pendingOrders || 0))}</p>
       <div class="line"></div>
-      <p class="center">Conferência de caixa concluída</p>
+      <p class="center"><b>Conferência de caixa concluída</b></p>
     `;
-    return printThermalHtml("FECHAMENTO DE CAIXA", body, 1);
+    return printThermalHtml("FECHAMENTO DE CAIXA", body, 1, { delivery: true });
   }
 
   async function persistCashClosing(record) {
@@ -3095,7 +3149,7 @@ export default function App() {
     }
   }
 
-  function printDeliveryReceipt(delivery, copies = 1) {
+  function printDeliveryReceipt(delivery, copies = 1, printOptions = {}) {
     const itemsHtml = buildReceiptItemsHtml(delivery.items || []);
     const isDelivery = isDeliveryOrder(delivery);
     const body = `
@@ -3107,6 +3161,7 @@ export default function App() {
       <p><b>Telefone:</b> ${escapeHtml(delivery.phone ? formatBrazilMobilePhone(delivery.phone) : "-")}</p>
       <p><b>Endereço:</b> ${escapeHtml(delivery.address || "-")}</p>
       <p><b>Pagamento:</b> ${escapeHtml(getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails))}</p>
+      ${delivery.payment === "Dinheiro" && calculateChangeDue(delivery.changeFor, delivery.value) > 0 ? `<p><b>Troco:</b> ${escapeHtml(money(calculateChangeDue(delivery.changeFor, delivery.value)))}</p>` : ""}
       <div class="line"></div>
       <table><thead><tr><th>Qtd</th><th>Produto</th><th>Un.</th><th>Total</th></tr></thead><tbody>${itemsHtml}</tbody></table>
       <div class="line"></div>
@@ -3119,20 +3174,26 @@ export default function App() {
       <p class="center">${isDelivery ? "Via de entrega • Conferir endereço e itens" : "Conferir venda no balcão"}</p>
       ${isDelivery ? `<p class="center thanks">Barbosas Delivery agradece!</p>` : ""}
     `;
-    const printed = printThermalHtml(`${isCounterOrder(delivery) ? "VENDA" : "ENTREGA"} #${delivery.id}`, body, copies, { delivery: isDelivery });
+    const printed = printThermalHtml(`${isCounterOrder(delivery) ? "VENDA" : "ENTREGA"} #${delivery.id}`, body, copies, { delivery: isDelivery, ...printOptions });
     if (printed) setLastAction(`Impressão aberta em ${copies} via${copies > 1 ? "s" : ""}.`);
     return printed;
   }
 
   async function launchCounterSale() {
-    if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco.");
+    const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
+    if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão. Libere pop-ups para finalizar e imprimir a venda.");
+    if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) { preOpenedPrintWindow.close(); return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco."); }
     const validation = validateOrderItems(counterDraft.items, products);
-    if (!validation.valid) return setLastAction(validation.message);
+    if (!validation.valid) { if (typeof preOpenedPrintWindow !== "undefined" && preOpenedPrintWindow) preOpenedPrintWindow.close(); return setLastAction(validation.message); }
 
     const syncedItems = syncOrderItemsWithProducts(counterDraft.items, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);
     const syncedDiscount = normalizeDiscount(counterDraft.discount, syncedProductsTotal);
     const syncedFinalTotal = buildDiscountedProductsTotal(syncedProductsTotal, syncedDiscount);
+    if (counterDraft.payment === "Dinheiro" && counterDraft.changeFor && toSafeMoneyNumber(counterDraft.changeFor, 0) < syncedFinalTotal) {
+      preOpenedPrintWindow.close();
+      return setLastAction(`Valor recebido menor que o total. Total: ${money(syncedFinalTotal)} • recebido: ${money(counterDraft.changeFor)}.`);
+    }
 
     const newSale = {
       id: Date.now(),
@@ -3171,6 +3232,7 @@ export default function App() {
     try {
       savedSale = await saveDeliveryToSupabase(newSale);
     } catch (error) {
+      preOpenedPrintWindow.close();
       return setLastAction(`Venda não salva no Supabase: ${error.message || "verifique Supabase."}`);
     }
 
@@ -3180,7 +3242,7 @@ export default function App() {
       persistProductStocks(nextProducts);
       return nextProducts;
     });
-    printDeliveryReceipt(savedSale);
+    printDeliveryReceipt(savedSale, 1, { printWindow: preOpenedPrintWindow });
     setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
     setCounterProductSearch("");
     setCounterKitSearch("");
@@ -3610,14 +3672,21 @@ export default function App() {
   }
 
   async function closeTabAccount(tabId) {
+    const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
+    if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão da comanda. Libere pop-ups e tente novamente.");
     const tab = tabsAccounts.find((item) => item.id === tabId);
-    if (!tab) return setLastAction("Comanda não encontrada.");
+    if (!tab) { preOpenedPrintWindow.close(); return setLastAction("Comanda não encontrada."); }
     const validation = validateOrderItems(tab.items, products);
-    if (!validation.valid) return setLastAction(validation.message);
+    if (!validation.valid) { preOpenedPrintWindow.close(); return setLastAction(validation.message); }
     const syncedItems = syncOrderItemsWithProducts(tab.items, products);
     const total = buildOrderTotal(syncedItems);
     if (tabClosingPayment === "Misto" && !isMixedPaymentBalanced(tabClosingMixedPayment, total)) {
+      preOpenedPrintWindow.close();
       return setLastAction(`Pagamento misto da comanda precisa fechar ${money(total)}. Informado: ${money(getMixedPaymentTotal(tabClosingMixedPayment))}.`);
+    }
+    if (tabClosingPayment === "Dinheiro" && tabClosingChangeFor && toSafeMoneyNumber(tabClosingChangeFor, 0) < total) {
+      preOpenedPrintWindow.close();
+      return setLastAction(`Troco da comanda inválido: recebido ${money(tabClosingChangeFor)} é menor que ${money(total)}.`);
     }
     const mixedPaymentDetails = tabClosingPayment === "Misto" ? getMixedPaymentDetails(tabClosingMixedPayment) : "";
     const paymentStatus = tabClosingPayment === "Fiado/anotado" ? PAYMENT_STATUS.STORE_CREDIT : PAYMENT_STATUS.PAID;
@@ -3661,6 +3730,7 @@ export default function App() {
     try {
       savedClosedOrder = await saveDeliveryToSupabase(closedOrder);
     } catch (error) {
+      preOpenedPrintWindow.close();
       return setLastAction(`Comanda não salva no Supabase: ${error.message || "verifique Supabase."}`);
     }
 
@@ -3672,7 +3742,7 @@ export default function App() {
     });
     setTabsAccounts((previous) => previous.filter((item) => item.id !== tabId));
     cancelClosingTab();
-    printDeliveryReceipt(savedClosedOrder, 2);
+    printDeliveryReceipt(savedClosedOrder, 2, { printWindow: preOpenedPrintWindow });
     setLastAction(`Comanda de ${tab.customerName} fechada em ${money(total)} e salva no Supabase. Novo limite sugerido: ${money(nextLimit)}. Foram abertas 2 vias para impressão.`);
   }
 
@@ -4061,11 +4131,11 @@ export default function App() {
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-2">
                           <div className="inline-flex items-center rounded-2xl border border-zinc-200 bg-white p-1">
-                            <button type="button" onClick={() => updateCustomerCartQuantity(item.id, Math.max(1, toPositiveInteger(item.quantity, 1) - 1))} className="h-9 w-9 rounded-xl bg-zinc-100 text-lg font-black text-zinc-950">−</button>
-                            <input type="text" inputMode="numeric" pattern="[0-9]*" value={item.quantity} onChange={(event) => updateCustomerCartQuantity(item.id, event.target.value.replace(/\D/g, ""))} className="h-9 w-12 bg-white text-center text-base font-black outline-none" />
-                            <button type="button" onClick={() => updateCustomerCartQuantity(item.id, toPositiveInteger(item.quantity, 1) + 1)} className="h-9 w-9 rounded-xl bg-zinc-950 text-lg font-black text-white">+</button>
+                            <button type="button" onClick={() => updateCustomerCartQuantity(item.cartKey || item.id, Math.max(1, toPositiveInteger(item.quantity, 1) - 1))} className="h-9 w-9 rounded-xl bg-zinc-100 text-lg font-black text-zinc-950">−</button>
+                            <input type="text" inputMode="numeric" pattern="[0-9]*" value={item.quantity} onChange={(event) => updateCustomerCartQuantity(item.cartKey || item.id, event.target.value.replace(/\D/g, ""))} className="h-9 w-12 bg-white text-center text-base font-black outline-none" />
+                            <button type="button" onClick={() => updateCustomerCartQuantity(item.cartKey || item.id, toPositiveInteger(item.quantity, 1) + 1)} className="h-9 w-9 rounded-xl bg-zinc-950 text-lg font-black text-white">+</button>
                           </div>
-                          <button type="button" onClick={() => removeCustomerCartItem(item.id)} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-600">Excluir</button>
+                          <button type="button" onClick={() => removeCustomerCartItem(item.cartKey || item.id)} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-600">Excluir</button>
                         </div>
                       </div>
                     ))}
@@ -4701,7 +4771,7 @@ export default function App() {
                       <Input label="Telefone opcional" value={counterDraft.phone} onChange={(value) => setCounterDraft({ ...counterDraft, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
                     </div>
                     <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={counterDraft.payment} onChange={(event) => setCounterDraft({ ...counterDraft, payment: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
-                    {counterDraft.payment === "Dinheiro" && <div className="mb-4"><Input label="Precisa de troco para quanto?" type="number" value={counterDraft.changeFor} onChange={(value) => setCounterDraft({ ...counterDraft, changeFor: value })} placeholder="Ex: 100,00" /></div>}
+                    {counterDraft.payment === "Dinheiro" && <div className="mb-4 space-y-2"><Input label="Valor recebido / troco para quanto?" type="number" value={counterDraft.changeFor} onChange={(value) => setCounterDraft({ ...counterDraft, changeFor: value })} placeholder="Ex: 100,00" />{counterDraft.changeFor && <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-emerald-800"><p className="text-xs font-bold">Troco para devolver ao cliente</p><p className="text-3xl font-black">{money(calculateChangeDue(counterDraft.changeFor, counterDraftFinalTotal))}</p></div>}</div>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                       <Input label="Desconto" type="number" value={counterDraft.discount} onChange={(value) => setCounterDraft({ ...counterDraft, discount: Math.max(0, Number(value || 0)) })} placeholder="0,00" />
                       <Input label="Observação" value={counterDraft.notes} onChange={(value) => setCounterDraft({ ...counterDraft, notes: value })} placeholder="Ex: retirada no balcão" />
@@ -4885,7 +4955,7 @@ export default function App() {
                             {closingTabId === tab.id ? (
                               <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 space-y-3">
                                 <label className="block"><span className="text-xs font-medium text-zinc-600">Forma de pagamento para fechar</span><select value={tabClosingPayment} onChange={(event) => { setTabClosingPayment(event.target.value); setTabClosingMixedPayment(createEmptyMixedPayment()); setTabClosingChangeFor(""); }} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-2 outline-none"><option>Dinheiro</option><option>Pix</option><option>Cartão débito</option><option>Cartão crédito</option><option>Misto</option><option>Fiado/anotado</option></select></label>
-                                {tabClosingPayment === "Dinheiro" && <Input label="Troco para quanto?" type="number" value={tabClosingChangeFor} onChange={setTabClosingChangeFor} placeholder="Ex: 100" />}
+                                {tabClosingPayment === "Dinheiro" && <div className="space-y-2"><Input label="Valor recebido / troco para quanto?" type="number" value={tabClosingChangeFor} onChange={setTabClosingChangeFor} placeholder="Ex: 100" />{tabClosingChangeFor && <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-emerald-800"><p className="text-xs font-bold">Troco da comanda</p><p className="text-2xl font-black">{money(calculateChangeDue(tabClosingChangeFor, total))}</p></div>}</div>}
                                 {tabClosingPayment === "Misto" && <div className="grid grid-cols-2 gap-2"><Input label="Pix" type="number" value={tabClosingMixedPayment.pix} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, pix: value })} /><Input label="Dinheiro" type="number" value={tabClosingMixedPayment.cash} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, cash: value })} /><Input label="Débito" type="number" value={tabClosingMixedPayment.debit} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, debit: value })} /><Input label="Crédito" type="number" value={tabClosingMixedPayment.credit} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, credit: value })} /><p className="col-span-2 text-xs font-bold text-zinc-600">Informado: {money(getMixedPaymentTotal(tabClosingMixedPayment))} de {money(total)}</p></div>}
                                 <div className="flex gap-2"><Button onClick={() => closeTabAccount(tab.id)} disabled={tab.items.length === 0} className="flex-1 rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Confirmar e imprimir 2 vias</Button><Button onClick={cancelClosingTab} variant="secondary" className="rounded-2xl">Cancelar</Button></div>
                               </div>
@@ -5345,4 +5415,12 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
 }
 
 
+}
+
+export default function SafeApp() {
+  return (
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
+  );
 }
