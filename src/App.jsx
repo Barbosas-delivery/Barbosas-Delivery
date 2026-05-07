@@ -283,6 +283,17 @@ function toNullableNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function toPositiveInteger(value, fallback = 1) {
+  const number = Number(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(1, Math.floor(number));
+}
+
+function toSafeMoneyNumber(value, fallback = 0) {
+  const number = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(number) ? number : fallback;
+}
+
 function normalizeBarcode(value) {
   return String(value || "").replace(/\D/g, "").trim();
 }
@@ -386,7 +397,7 @@ function buildDayReport(products, deliveries) {
 }
 
 function buildOrderTotal(items) {
-  return (items || []).reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0);
+  return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + toSafeMoneyNumber(item?.price, 0) * toPositiveInteger(item?.quantity, 0), 0);
 }
 
 function getPaymentLabel(payment, changeFor, mixedPaymentDetails = "") {
@@ -524,9 +535,13 @@ function getActiveKits(kits, products) {
   });
 }
 
-function getCustomerVisibleKits(kits) {
+function getCustomerVisibleKits(kits, products = []) {
   return (Array.isArray(kits) ? kits : []).filter((kit) => {
-    return kit && kit.active && isKitInPeriod(kit) && Array.isArray(kit.items) && kit.items.length > 0;
+    if (!kit || !kit.active || !isKitInPeriod(kit) || !Array.isArray(kit.items) || kit.items.length === 0) return false;
+    return kit.items.every((item) => {
+      const product = products.find((currentProduct) => Number(currentProduct.id) === Number(item.productId));
+      return product && product.active === true && Number(product.stock || 0) >= Number(item.quantity || 0);
+    });
   });
 }
 
@@ -556,7 +571,7 @@ function describeKitItems(kit, products) {
 function expandItemsForStock(items) {
   return (items || []).flatMap((item) => {
     if (item.isKit && Array.isArray(item.kitItems)) {
-      return item.kitItems.map((kitItem) => ({ ...kitItem, quantity: Number(kitItem.quantity || 0) * Number(item.quantity || 1) }));
+      return item.kitItems.map((kitItem) => ({ ...kitItem, quantity: toPositiveInteger(kitItem.quantity, 0) * toPositiveInteger(item.quantity, 1) }));
     }
     return item;
   });
@@ -566,11 +581,11 @@ function validateOrderItems(items, products) {
   if (!items || items.length === 0) return { valid: false, message: "Adicione pelo menos um produto ao pedido." };
 
   const stockItems = expandItemsForStock(items);
-  if (stockItems.some((item) => item.id === undefined || item.id === null || Number(item.quantity || 0) <= 0)) {
+  if (stockItems.some((item) => item.id === undefined || item.id === null || toPositiveInteger(item.quantity, 0) <= 0)) {
     return { valid: false, message: "Existe item inválido no pedido. Remova e adicione novamente." };
   }
   const quantitiesByProduct = stockItems.reduce((acc, item) => {
-    acc[item.id] = Number(acc[item.id] || 0) + Number(item.quantity || 0);
+    acc[item.id] = Number(acc[item.id] || 0) + toPositiveInteger(item.quantity, 0);
     return acc;
   }, {});
 
@@ -1819,7 +1834,7 @@ export default function App() {
   }, [products, kitProductSearch]);
 
   const activeCustomerKits = useMemo(() => getActiveKits(kits, products), [kits, products]);
-  const customerVisibleKits = useMemo(() => getCustomerVisibleKits(kits), [kits]);
+  const customerVisibleKits = useMemo(() => getCustomerVisibleKits(kits, products), [kits, products]);
   const pvdKitResults = useMemo(() => {
     const term = pvdKitSearch.toLowerCase().trim();
     if (!term) return activeCustomerKits;
@@ -2191,14 +2206,21 @@ export default function App() {
     setShowCustomerNeedMoreMessage(false);
     setCustomerOrderConfirmation(null);
     if (!kit || !Array.isArray(kit.items) || kit.items.length === 0) return setCustomerError("Kit indisponível no momento.");
-    const kitItems = getKitItemsForOrder(kit, products).filter((item) => item.id !== undefined && item.id !== null && Number(item.quantity || 0) > 0);
-    if (kitItems.length === 0 || kitItems.length !== kit.items.length) return setCustomerError("Kit com produto indisponível. Revise o cadastro do kit na loja.");
-    const kitPrice = Number(kit.price || buildKitProductsTotal(kit.items, products));
-    const nextCart = [...customerCart, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name, price: kitPrice, quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems }];
-    const validation = validateOrderItems(nextCart, products);
-    if (!validation.valid) return setCustomerError(validation.message);
-    setCustomerCart(nextCart);
-    setCustomerError(`${kit.name} adicionado ao pedido.`);
+    const kitItems = getKitItemsForOrder(kit, products).filter((item) => item.id !== undefined && item.id !== null && toPositiveInteger(item.quantity, 0) > 0);
+    if (kitItems.length === 0 || kitItems.length !== kit.items.length) return setCustomerError("Kit com produto indisponível ou sem estoque. Revise o cadastro do kit na loja.");
+    const kitPrice = toSafeMoneyNumber(kit.price || buildKitProductsTotal(kit.items, products), 0);
+
+    setCustomerCart((previousCart) => {
+      const currentCart = Array.isArray(previousCart) ? previousCart : [];
+      const nextCart = [...currentCart, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name || "Kit", price: kitPrice, quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems }];
+      const validation = validateOrderItems(nextCart, products);
+      if (!validation.valid) {
+        setCustomerError(validation.message);
+        return currentCart;
+      }
+      setCustomerError(`${kit.name || "Kit"} adicionado ao pedido.`);
+      return nextCart;
+    });
   }
 
   function addKitToDelivery(kit) {
@@ -2486,26 +2508,54 @@ export default function App() {
 
   function addProductToCustomerCart(product) {
     setShowCustomerCheckout(false);
+    setShowCustomerNeedMoreMessage(false);
     setCustomerOrderConfirmation(null);
-    const simulatedCart = (() => {
-      const existingItem = customerCart.find((item) => item.id === product.id);
-      if (existingItem) return customerCart.map((item) => (item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item));
-      return [...customerCart, { id: product.id, name: product.name, price: getProductSalePrice(product, promotions), originalPrice: Number(product.price || 0), promotionId: getProductActivePromotion(product, promotions)?.id || null, quantity: 1, barcode: product.barcode }];
-    })();
 
-    const validation = validateOrderItems(simulatedCart, products);
-    if (!validation.valid) return setCustomerError(validation.message);
-    setCustomerError("");
-    setCustomerCart(simulatedCart);
+    if (!product || product.active !== true) return setCustomerError("Produto indisponível no momento.");
+    if (Number(product.stock || 0) <= 0) return setCustomerError(`${product.name || "Produto"} está sem estoque.`);
+
+    setCustomerCart((previousCart) => {
+      const currentCart = Array.isArray(previousCart) ? previousCart : [];
+      const existingItem = currentCart.find((item) => Number(item.id) === Number(product.id) && item.isKit !== true);
+      const simulatedCart = existingItem
+        ? currentCart.map((item) => (Number(item.id) === Number(product.id) && item.isKit !== true ? { ...item, quantity: toPositiveInteger(item.quantity, 1) + 1 } : item))
+        : [
+            ...currentCart,
+            {
+              id: product.id,
+              name: product.name || "Produto",
+              price: toSafeMoneyNumber(getProductSalePrice(product, promotions), 0),
+              originalPrice: toSafeMoneyNumber(product.price, 0),
+              promotionId: getProductActivePromotion(product, promotions)?.id || null,
+              quantity: 1,
+              barcode: product.barcode || "",
+            },
+          ];
+
+      const validation = validateOrderItems(simulatedCart, products);
+      if (!validation.valid) {
+        setCustomerError(validation.message);
+        return currentCart;
+      }
+
+      setCustomerError(`${product.name || "Produto"} adicionado ao pedido.`);
+      return simulatedCart;
+    });
   }
 
   function updateCustomerCartQuantity(productId, quantity) {
-    const safeQuantity = Math.max(1, Number(quantity || 1));
-    const simulatedCart = customerCart.map((item) => (item.id === productId ? { ...item, quantity: safeQuantity } : item));
-    const validation = validateOrderItems(simulatedCart, products);
-    if (!validation.valid) return setCustomerError(validation.message);
-    setCustomerError("");
-    setCustomerCart(simulatedCart);
+    const safeQuantity = toPositiveInteger(quantity, 1);
+    setCustomerCart((previousCart) => {
+      const currentCart = Array.isArray(previousCart) ? previousCart : [];
+      const simulatedCart = currentCart.map((item) => (item.id === productId ? { ...item, quantity: safeQuantity } : item));
+      const validation = validateOrderItems(simulatedCart, products);
+      if (!validation.valid) {
+        setCustomerError(validation.message);
+        return currentCart;
+      }
+      setCustomerError("");
+      return simulatedCart;
+    });
   }
 
   function removeCustomerCartItem(productId) {
@@ -2985,36 +3035,59 @@ export default function App() {
   async function approveDelivery(id) {
     const currentDelivery = deliveries.find((item) => item.id === id);
     if (!currentDelivery) return setLastAction("Pedido não encontrado.");
+    if (currentDelivery.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Pedido cancelado não pode ser aprovado.");
+    if (currentDelivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return setLastAction("Pedido já está entregue e confirmado.");
+
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
       const dbPatch = { status: DELIVERY_STATUS.WAITING_PICKUP };
+      const updated = await updateDeliveryInSupabase(id, dbPatch);
+      if (!updated) {
+        setLastAction("Não consegui aprovar no Supabase. Verifique a policy UPDATE da tabela orders.");
+        return;
+      }
+
       const localPatch = {
         status: DELIVERY_STATUS.WAITING_PICKUP,
         needsStoreApproval: false,
         storeOrderApproved: true,
         approvedAt: new Date().toISOString(),
       };
-      await updateDeliveryInSupabase(id, dbPatch);
       setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...localPatch } : delivery));
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "couriers", id);
       setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
+      await loadDeliveries();
       return;
     }
+
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL) {
-      const patch = { status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, ownerApprovedAt: new Date().toISOString(), paymentStatus: PAYMENT_STATUS.PAID };
-      await updateDeliveryInSupabase(id, patch);
+      const patch = {
+        status: DELIVERY_STATUS.CONFIRMED_DELIVERED,
+        ownerApproved: true,
+        ownerApprovedAt: new Date().toISOString(),
+        paymentStatus: PAYMENT_STATUS.PAID,
+      };
+      const updated = await updateDeliveryInSupabase(id, patch);
+      if (!updated) {
+        setLastAction("Não consegui aprovar a entrega no Supabase. Verifique a policy UPDATE da tabela orders.");
+        return;
+      }
+
       setDeliveries((previousDeliveries) =>
         previousDeliveries.map((delivery) => {
           if (delivery.id !== id) return delivery;
           if (delivery.status === DELIVERY_STATUS.CANCELLED || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return delivery;
-          if (delivery.status !== DELIVERY_STATUS.WAITING_OWNER_APPROVAL) return delivery;
           return { ...delivery, ...patch };
         })
       );
+      if (currentDelivery.deliveredByName) {
+        addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} aprovado pela loja. Valor liberado no relatório.`, "couriers", id);
+      }
+      setLastAction(`Entrega #${id} aprovada e marcada como paga.`);
+      await loadDeliveries();
+      return;
     }
-    if (currentDelivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL && currentDelivery.deliveredByName) {
-      addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} aprovado pela loja. Valor liberado no relatório.`, "couriers", id);
-    }
-    setLastAction(currentDelivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL ? `Entrega #${id} aprovada e marcada como paga.` : "Apenas pedidos aguardando aprovação podem ser aprovados.");
+
+    setLastAction("Apenas pedidos aguardando aprovação ou entregas aguardando aprovação podem ser aprovados.");
   }
 
   async function updatePaymentStatus(id, paymentStatus) {
@@ -3043,16 +3116,29 @@ export default function App() {
   async function cancelDelivery() {
     const id = pendingCancellation.deliveryId;
     const delivery = deliveries.find((item) => item.id === id);
-    if (!delivery) return;
+    if (!delivery) return setLastAction("Pedido não encontrado para cancelamento.");
     if (delivery.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Esse pedido já está cancelado.");
-    if (delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) return setLastAction("Pedido entregue confirmado não pode ser cancelado pelo protótipo.");
+    if (delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) return setLastAction("Pedido entregue confirmado não pode ser cancelado.");
 
     const cancellationText = pendingCancellation.details.trim()
       ? `${pendingCancellation.reason}: ${pendingCancellation.details.trim()}`
       : pendingCancellation.reason;
 
-    const patch = { status: DELIVERY_STATUS.CANCELLED, paymentStatus: PAYMENT_STATUS.PENDING, cancelledAt: new Date().toISOString(), cancellationReason: cancellationText, courierFee: 0, storeFee: 0 };
-    await updateDeliveryInSupabase(id, patch);
+    const patch = {
+      status: DELIVERY_STATUS.CANCELLED,
+      paymentStatus: PAYMENT_STATUS.PENDING,
+      cancelledAt: new Date().toISOString(),
+      cancellationReason: cancellationText,
+      courierFee: 0,
+      storeFee: 0,
+    };
+
+    const updated = await updateDeliveryInSupabase(id, patch);
+    if (!updated) {
+      setLastAction("Não consegui cancelar no Supabase. Verifique a policy UPDATE da tabela orders.");
+      return;
+    }
+
     setProducts((previousProducts) => {
       const nextProducts = restoreProductStock(previousProducts, delivery.items || []);
       persistProductStocks(nextProducts);
@@ -3067,6 +3153,7 @@ export default function App() {
     );
     setPendingCancellation({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
     setLastAction(`${isCounterOrder(delivery) ? "Venda" : "Pedido"} #${id} cancelado, motivo registrado e estoque devolvido automaticamente.`);
+    await loadDeliveries();
   }
 
   function closeCashRegister() {
@@ -3471,7 +3558,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => { setShowCustomerNeedMoreMessage(true); setShowCustomerCheckout(false); }}
-                      className="fixed left-4 bottom-4 z-40 rounded-2xl bg-emerald-600 px-5 py-4 text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700"
+                      className="fixed left-4 right-4 bottom-4 z-40 rounded-2xl bg-emerald-600 px-5 py-4 text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700"
                     >
                       <span className="block text-xs font-semibold opacity-90">{customerCart.length} item{customerCart.length > 1 ? "s" : ""} no pedido</span>
                       <span className="block text-base font-black">Finalizar pedido</span>
@@ -3587,7 +3674,7 @@ export default function App() {
                   )}
 
                   {shouldShowCustomerProducts && (
-                    <div className="grid gap-3 max-h-[420px] overflow-auto pr-1">
+                    <div className="grid gap-3 max-h-[58vh] overflow-auto pr-1 pb-2">
                     {customerProductResults.length === 0 && (
                       <div className="rounded-3xl bg-white text-zinc-950 p-5 text-sm text-zinc-500">Nenhum produto encontrado nessa sessão.</div>
                     )}
@@ -3608,8 +3695,8 @@ export default function App() {
                                 <div className="text-right shrink-0">
                                   {getProductActivePromotion(product, promotions) && <p className="text-[11px] text-zinc-400 line-through">{money(product.price)}</p>}
                                   <p className="text-sm font-black text-emerald-700">{money(getProductSalePrice(product, promotions))}</p>
-                                  <Button onClick={() => addProductToCustomerCart(product)} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-1.5 h-auto text-xs">
-                                    Adicionar
+                                  <Button onClick={() => addProductToCustomerCart(product)} disabled={Number(product.stock || 0) <= 0} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-2 h-auto text-xs">
+                                    {Number(product.stock || 0) <= 0 ? "Sem estoque" : "Adicionar"}
                                   </Button>
                                 </div>
                               </div>
@@ -3662,15 +3749,17 @@ export default function App() {
                     </div>
                     {customerCart.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto adicionado ainda.</p>}
                     {customerCart.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-3 border-b border-zinc-100 pb-2">
-                        <div>
-                          <p className="font-semibold">{item.name}</p>
+                      <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 border-b border-zinc-100 pb-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold leading-tight break-words">{item.name}</p>
                           <p className="text-xs text-zinc-500">{money(item.price)} unidade</p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <input type="number" min="1" value={item.quantity} onChange={(event) => updateCustomerCartQuantity(item.id, event.target.value)} className="w-16 rounded-xl border border-zinc-200 px-2 py-2 text-center" />
-                          <span className="font-bold w-20 text-right">{money(item.price * item.quantity)}</span>
-                          <button onClick={() => removeCustomerCartItem(item.id)} className="text-red-600 text-sm">remover</button>
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                          <div className="flex items-center gap-2">
+                            <input type="number" inputMode="numeric" min="1" value={item.quantity} onChange={(event) => updateCustomerCartQuantity(item.id, event.target.value)} className="w-16 rounded-xl border border-zinc-200 px-2 py-2 text-center text-base" />
+                            <span className="font-bold min-w-20 text-right">{money(toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1))}</span>
+                          </div>
+                          <button type="button" onClick={() => removeCustomerCartItem(item.id)} className="rounded-xl bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600">Remover</button>
                         </div>
                       </div>
                     ))}
