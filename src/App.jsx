@@ -857,25 +857,6 @@ function isDateInRange(isoDate, startDate, endDate) {
   return true;
 }
 
-function buildCourierPeriodReport(deliveries, courierUsername, startDate, endDate) {
-  const normalizedUsername = String(courierUsername || "").trim().toLowerCase();
-  const delivered = deliveries.filter((delivery) => {
-    return (
-      isDeliveryOrder(delivery) &&
-      delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED &&
-      delivery.ownerApproved === true &&
-      String(delivery.deliveredByUsername || "").toLowerCase() === normalizedUsername &&
-      isDateInRange(delivery.deliveredAt, startDate, endDate)
-    );
-  });
-
-  const deliveryCount = delivered.length;
-  const totalDeliveryFees = delivered.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0);
-  const courierAmount = delivered.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0);
-  const storeAmount = delivered.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0);
-  return { deliveryCount, totalDeliveryFees, courierAmount, storeAmount, deliveries: delivered };
-}
-
 function buildDeliveryAddress(client) {
   if (!client) return "";
   return `${client.street}, ${client.number} - ${client.district}, ${client.city}/${client.state}`;
@@ -1089,25 +1070,6 @@ function isCourierUsernameAvailable(couriers, username, currentCourierId) {
   return !couriers.some((courier) => courier.id !== currentCourierId && courier.username.toLowerCase() === normalizedUsername);
 }
 
-function buildCourierFinancialSummary(deliveries, courierUsername) {
-  const normalizedUsername = String(courierUsername || "").trim().toLowerCase();
-  const confirmed = deliveries.filter((delivery) => {
-    return (
-      isDeliveryOrder(delivery) &&
-      delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED &&
-      delivery.ownerApproved === true &&
-      String(delivery.deliveredByUsername || "").toLowerCase() === normalizedUsername
-    );
-  });
-
-  return {
-    deliveryCount: confirmed.length,
-    totalDeliveryFees: confirmed.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0),
-    courierAmount: confirmed.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
-    storeAmount: confirmed.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
-  };
-}
-
 function buildStoreDeliveryFinancialSummary(deliveries) {
   const confirmed = deliveries.filter((delivery) => isDeliveryOrder(delivery) && delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.ownerApproved === true);
   return {
@@ -1188,14 +1150,13 @@ function runSelfTests() {
     { name: "Relatório soma entregas corretamente", passed: buildDayReport(initialProducts, initialDeliveries).totalDelivery === 71 },
     { name: "PDV balcão entra no caixa sem virar entrega pendente", passed: buildDayReport(initialProducts, [...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, value: 10, productsTotal: 10, deliveryFee: 0 }]).pending === 2 },
     { name: "Taxas lançadas contam somente entregas", passed: buildDayReport(initialProducts, [...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, value: 10, productsTotal: 10 }]).deliveryFeesTotal === 10 },
-    { name: "Entregas aguardando retirada ainda não têm comissão calculada", passed: initialDeliveries.every((delivery) => delivery.courierFee === 0 && delivery.storeFee === 0) },
     { name: "Notificação nova começa como não lida", passed: createNotification("pedido", "Teste", "Mensagem", "loja").read === false },
     { name: "Promoção ativa precisa apontar para produto ativo", passed: getActivePromotions(initialPromotions, initialProducts).length === 1 },
     { name: "Promoção sem período fica ativa até desativar manualmente", passed: isPromotionInPeriod({ startDate: "", endDate: "" }) === true },
     { name: "Kit soma valor dos produtos cadastrados", passed: buildKitProductsTotal([{ productId: 1, quantity: 2 }], initialProducts) === 34 },
     { name: "Kit sem data final fica ativo até retirar manualmente", passed: isKitInPeriod({ endDate: "" }) === true },
     { name: "Kit ativo precisa ter produtos ativos e estoque suficiente", passed: getActiveKits(initialKits, initialProducts).length === 1 },
-    { name: "Kit sem produto não aparece para cliente nem PVD", passed: getActiveKits([{ id: 99, active: true, endDate: "", items: [] }], initialProducts).length === 0 },
+    { name: "Kit sem produto não aparece para cliente nem PDV", passed: getActiveKits([{ id: 99, active: true, endDate: "", items: [] }], initialProducts).length === 0 },
     { name: "Kit mantém itens internos para baixar estoque", passed: syncOrderItemsWithProducts([{ isKit: true, price: 44, kitItems: [{ id: 1, quantity: 2 }] }], initialProducts)[0].kitItems[0].id === 1 },
     { name: "Relatório identifica estoque baixo", passed: buildDayReport(initialProducts, initialDeliveries).lowStock === 1 },
     { name: "CEP aceita somente 8 números válidos", passed: isValidCep("87000-000") === true && isValidCep("8700") === false },
@@ -1221,9 +1182,9 @@ function runSelfTests() {
     { name: "Rótulo diferencia venda de pedido", passed: getOrderLabel({ orderType: ORDER_TYPE.COUNTER }, true) === "Venda" && getOrderLabel({ orderType: ORDER_TYPE.DELIVERY }, true) === "Pedido" },
     { name: "Notificação de aprovação só faz sentido quando aguardava aprovação", passed: DELIVERY_STATUS.WAITING_OWNER_APPROVAL === "Aguardando aprovação da loja" },
     { name: "Taxa de entrega de R$5 é somada automaticamente", passed: buildDeliveryTotal(49) === 54 },
-    { name: "PVD permite alterar taxa de entrega", passed: buildDeliveryTotal(49, 8, 0) === 57 },
-    { name: "PVD usa R$5 quando taxa não for preenchida", passed: buildDeliveryTotal(49, "", 0) === 54 },
-    { name: "PVD aplica desconto no total", passed: buildDeliveryTotal(49, 5, 4) === 50 },
+    { name: "PDV permite alterar taxa de entrega", passed: buildDeliveryTotal(49, 8, 0) === 57 },
+    { name: "PDV usa R$5 quando taxa não for preenchida", passed: buildDeliveryTotal(49, "", 0) === 54 },
+    { name: "PDV aplica desconto no total", passed: buildDeliveryTotal(49, 5, 4) === 50 },
     { name: "Desconto nunca passa do valor dos produtos", passed: normalizeDiscount(999, 49) === 49 && normalizeDiscount(-10, 49) === 0 },
     { name: "Taxa de entrega divide 70% motoboy e 30% loja quando moto é do estabelecimento", passed: calculateCourierFee(5, "Moto do estabelecimento") === 3.5 && calculateStoreFee(5, "Moto do estabelecimento") === 1.5 },
     { name: "Moto própria não cobra 30% da loja", passed: calculateCourierFee(5, "Moto própria") === 5 && calculateStoreFee(5, "Moto própria") === 0 },
@@ -1256,16 +1217,6 @@ function runSelfTests() {
     { name: "Sincronizar pedido vazio não quebra", passed: Array.isArray(syncOrderItemsWithProducts(null, initialProducts)) && syncOrderItemsWithProducts(null, initialProducts).length === 0 },
     { name: "Usuário de entregador editado não pode duplicar outro", passed: isCourierUsernameAvailable(initialCouriers, "moto02", 1) === true && isCourierUsernameAvailable(initialCouriers, "moto01", 999) === false },
     {
-      name: "Relatório do entregador soma período pesquisado só com aprovação da loja",
-      passed:
-        buildCourierPeriodReport(
-          [{ status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, deliveredByUsername: "moto01", deliveredAt: "2026-05-02T10:00:00.000Z", deliveryFee: 5, courierFee: 3.5, storeFee: 1.5 }],
-          "moto01",
-          "2026-05-01",
-          "2026-05-03"
-        ).courierAmount === 3.5,
-    },
-    {
       name: "Resumo financeiro da loja soma 30% e 70% das entregas aprovadas",
       passed:
         buildStoreDeliveryFinancialSummary([
@@ -1274,16 +1225,6 @@ function runSelfTests() {
         buildStoreDeliveryFinancialSummary([
           { status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, deliveryFee: 5, courierFee: 3.5, storeFee: 1.5 },
         ]).courierAmount === 3.5,
-    },
-    {
-      name: "Entrega aguardando aprovação não entra no valor do entregador",
-      passed:
-        buildCourierPeriodReport(
-          [{ status: DELIVERY_STATUS.WAITING_OWNER_APPROVAL, ownerApproved: false, deliveredByUsername: "moto01", deliveredAt: "2026-05-02T10:00:00.000Z", deliveryFee: 5, courierFee: 3.5, storeFee: 1.5 }],
-          "moto01",
-          "2026-05-01",
-          "2026-05-03"
-        ).courierAmount === 0,
     },
   ];
 
@@ -2155,7 +2096,7 @@ function App() {
     if (ordersError) {
       console.error("Erro ao carregar pedidos:", ordersError);
       setLastAction(
-        `PVD Entregas não conseguiu ler a tabela orders: ${ordersError.message || "verifique a policy SELECT de orders no Supabase."}`
+        `PDV Entregas não conseguiu ler a tabela orders: ${ordersError.message || "verifique a policy SELECT de orders no Supabase."}`
       );
       return;
     }
@@ -2188,7 +2129,7 @@ function App() {
 
     const nextDeliveries = sortedOrders.map((order) => mapOrderFromDatabase(order, itemsByOrder[order.id] || []));
     setDeliveries(nextDeliveries);
-    console.log("PVD Entregas sincronizado:", {
+    console.log("PDV Entregas sincronizado:", {
       orders: sortedOrders.length,
       items: Array.isArray(itemsData) ? itemsData.length : 0,
       deliveries: nextDeliveries.length,
@@ -2329,7 +2270,7 @@ function App() {
     loadCashData();
     loadNotifications();
 
-    // Mantém o PVD Entregas sincronizado com pedidos feitos em outro celular/computador.
+    // Mantém o PDV Entregas sincronizado com pedidos feitos em outro celular/computador.
     // Antes o sistema carregava os pedidos só uma vez ao abrir a tela; por isso
     // pedidos de cliente podiam salvar no Supabase, mas não aparecer no painel aberto.
     const refreshDeliveries = () => {
@@ -2374,7 +2315,6 @@ function App() {
   const [counterDraft, setCounterDraft] = useState({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
   const [newCourier, setNewCourier] = useState({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
   const todayInput = getDateInputValue(new Date());
-  const [courierReportRange, setCourierReportRange] = useState({ startDate: todayInput, endDate: todayInput });
   const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], price: "", cost: "", stock: "", minStock: "", ncm: "", barcode: "", imageUrl: "" });
   const [productGroups, setProductGroups] = useState(initialProductGroups);
   const [newProductGroup, setNewProductGroup] = useState("");
@@ -2551,10 +2491,6 @@ function App() {
   const loggedCourierDeliveries = useMemo(() => (loggedCourier ? getCourierDeliveries(deliveries) : []), [deliveries, loggedCourier]);
   const waitingPickupDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_PICKUP), [loggedCourierDeliveries]);
   const courierPendingDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED), [loggedCourierDeliveries]);
-  const courierPeriodReport = useMemo(() => {
-    if (!loggedCourier) return { deliveryCount: 0, totalDeliveryFees: 0, courierAmount: 0, storeAmount: 0, deliveries: [] };
-    return buildCourierPeriodReport(deliveries, loggedCourier.username, courierReportRange.startDate, courierReportRange.endDate);
-  }, [deliveries, loggedCourier, courierReportRange]);
   const dayReport = useMemo(() => buildDayReport(products, deliveries), [products, deliveries]);
   const cashClosingReport = useMemo(() => buildCashClosingReport(deliveries, cashSession), [deliveries, cashSession]);
   const activeDeliveryOrdersForStore = useMemo(
@@ -3928,7 +3864,7 @@ function App() {
         })
       );
       if (currentDelivery.deliveredByName) {
-        addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} aprovado pela loja. Valor liberado no relatório.`, "courier", id);
+        addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} finalizado pela loja.`, "courier", id);
       }
       setLastAction(`Entrega #${id} aprovada e marcada como paga.`);
       await loadDeliveries();
@@ -4312,7 +4248,7 @@ function App() {
           : item
       )
     );
-    setLastAction(`Pedido #${id} finalizado pela loja. Sem entregador vinculado, não gera comissão.`);
+    setLastAction(`Pedido #${id} finalizado pela loja.`);
   }
 
   const tabs = [
@@ -4320,7 +4256,7 @@ function App() {
     { id: "products", label: "Produtos", icon: "package" },
     { id: "kits", label: "Kits", icon: "package" },
     { id: "promos", label: "Promoções", icon: "percent" },
-    { id: "deliveries", label: "PVD Entregas", icon: "truck" },
+    { id: "deliveries", label: "PDV Entregas", icon: "truck" },
     { id: "counter", label: "PDV Balcão", icon: "money" },
     { id: "cash", label: "Fechamento", icon: "money" },
     { id: "tabs", label: "Fiados/Comandas", icon: "users" },
@@ -4362,10 +4298,10 @@ function App() {
           </div>
 
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-            <Title title="Entregas disponíveis" subtitle="Dar saída ao retirar na loja. Ao chegar, pedir aprovação da loja para liberar o valor." />
+            <Title title="Entregas disponíveis" subtitle="Aceite o pedido, marque a retirada na loja e depois marque como entregue ao chegar no cliente." />
             <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
           </div>
-          {courierPendingDeliveries.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega pendente no momento. Entregas aprovadas saem desta lista e ficam no relatório.</p></CardBox>}
+          {courierPendingDeliveries.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega pendente no momento.</p></CardBox>}
 
           <div className="grid gap-4">
             {courierPendingDeliveries.map((delivery) => (
@@ -4389,7 +4325,7 @@ function App() {
                     <div className="text-left md:text-right">
                       <p className="text-sm text-zinc-500">Total com entrega</p>
                       <p className="text-2xl font-black">{money(delivery.value)}</p>
-                      <p className="text-xs text-zinc-500">Taxa: {money(normalizeDeliveryFee(delivery.deliveryFee))} • Motoboy: {money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType))}</p>
+                      <p className="text-xs text-zinc-500">Taxa de entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -5195,7 +5131,7 @@ function App() {
                       <Input label="Desconto no pedido" type="number" value={deliveryDraft.discount} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, discount: Math.max(0, Number(value || 0)) })} placeholder="0,00" />
                       <Input label="Taxa de entrega" type="number" value={deliveryDraft.deliveryFee} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, deliveryFee: value === "" ? "" : Math.max(0, Number(value || 0)) })} placeholder="5,00" />
                     </div>
-                    <div className="mb-4 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm text-zinc-600">Entregas lançadas pelo PVD são liberadas para todos os motoboys. Pedidos feitos pelo cliente precisam ser aprovados aqui antes de aparecer para eles.</div>
+                    <div className="mb-4 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm text-zinc-600">Entregas lançadas pelo PDV são liberadas para todos os motoboys. Pedidos feitos pelo cliente precisam ser aprovados aqui antes de aparecer para eles.</div>
                     <Input label="Observação do pedido" value={deliveryDraft.notes} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, notes: value })} placeholder="Ex: levar maquininha, troco para 100..." />
                     <div className="mt-4 space-y-2"><h4 className="font-bold">Itens do pedido</h4>{deliveryDraft.items.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto selecionado ainda.</p>}{deliveryDraft.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 p-3"><div className="min-w-0"><p className="font-semibold truncate">{item.name}</p><p className="text-xs text-zinc-500">{money(item.price)} unidade</p></div><div className="flex items-center gap-2"><input type="number" min="1" value={item.quantity} onChange={(event) => updateDeliveryItemQuantity(item.id, event.target.value)} className="w-16 rounded-xl border border-zinc-200 px-2 py-2 text-center" /><span className="font-bold w-20 text-right">{money(item.price * item.quantity)}</span><button onClick={() => removeDeliveryItem(item.id)} className="rounded-xl bg-red-50 px-2 py-2 text-red-600">remover</button></div></div>)}</div>
                     <div className="mt-5 flex flex-col md:flex-row md:items-center justify-between gap-3 border-t border-zinc-100 pt-4"><div><p className="text-sm text-zinc-500">Produtos</p><p className="text-2xl font-black">{money(deliveryDraftTotal)}</p><p className="text-sm text-zinc-500">Desconto: -{money(deliveryDraftDiscount)}</p><p className="text-sm text-zinc-500">Subtotal com desconto: {money(buildDiscountedProductsTotal(deliveryDraftTotal, deliveryDraftDiscount))}</p><p className="text-sm text-zinc-500 mt-1">Taxa de entrega: {money(deliveryDraftFee)}</p><p className="text-sm text-zinc-500">Divisão final: moto própria = 100% entregador; moto do estabelecimento = valor do entregador + parte da loja.</p><p className="text-3xl font-black mt-2">Total: {money(deliveryDraftFinalTotal)}</p></div><Button onClick={launchDeliveryOrder} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6 px-6">Lançar entrega e imprimir</Button></div>
@@ -5255,7 +5191,7 @@ function App() {
 
             {activeTab === "counter" && (
               <div className="space-y-6">
-                <Title title="PDV Balcão" subtitle="Venda presencial separada do PVD Entregas, mas ligada ao estoque, caixa, pagamento e relatórios." />
+                <Title title="PDV Balcão" subtitle="Venda presencial separada do PDV Entregas, mas ligada ao estoque, caixa, pagamento e relatórios." />
                 <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
                   <CardBox>
                     <h3 className="font-bold text-lg mb-4">1. Pesquisar produtos e kits</h3>
@@ -5636,7 +5572,6 @@ function App() {
                     {filteredCouriers.length === 0 && <p className="text-sm text-zinc-500">Nenhum entregador encontrado.</p>}
                     {filteredCouriers.map((courier) => {
                       const isEditing = editingCourierId === courier.id;
-                      const summary = buildCourierFinancialSummary(deliveries, courier.username);
                       return (
                         <div key={courier.id} className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 space-y-3">
                           {!isEditing ? (
@@ -5650,12 +5585,7 @@ function App() {
                                 <Button onClick={() => setEditingCourierId(courier.id)} variant="secondary" className="rounded-2xl">Editar entregador</Button>
                               </div>
 
-                              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                <Metric title="Entregas feitas" value={summary.deliveryCount} icon="check" />
-                                <Metric title="Taxas totais" value={money(summary.totalDeliveryFees)} icon="money" />
-                                <Metric title="Valor do entregador" value={money(summary.courierAmount)} icon="truck" />
-                                <Metric title="Parte da loja" value={money(summary.storeAmount)} icon="chart" />
-                              </div>
+                              <div className="rounded-2xl border border-zinc-100 bg-white p-3 text-sm text-zinc-600">Acesso operacional: o entregador vê apenas pedidos disponíveis, aceitos ou em andamento. Valores ficam no painel da loja.</div>
                             </div>
                           ) : (
                             <div className="space-y-3">
@@ -5672,12 +5602,7 @@ function App() {
                                 </label>
                               </div>
 
-                              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                <Metric title="Entregas feitas" value={summary.deliveryCount} icon="check" />
-                                <Metric title="Taxas totais" value={money(summary.totalDeliveryFees)} icon="money" />
-                                <Metric title="Valor do entregador" value={money(summary.courierAmount)} icon="truck" />
-                                <Metric title="Parte da loja" value={money(summary.storeAmount)} icon="chart" />
-                              </div>
+                              <div className="rounded-2xl border border-zinc-100 bg-white p-3 text-sm text-zinc-600">Acesso operacional: o entregador vê apenas pedidos disponíveis, aceitos ou em andamento. Valores ficam no painel da loja.</div>
 
                               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                 <p className="text-sm text-zinc-500">Edite somente o entregador necessário para economizar espaço na tela.</p>
@@ -5770,7 +5695,7 @@ function OwnerDeliveryCard({ delivery, onPrint, onApprove, onManualConfirm, onCa
           {isDeliveryOrder(delivery) ? (
             <p className="text-sm text-zinc-500">Taxa entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))} • Motoboy: {money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType))} • Loja: {money(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType))}</p>
           ) : (
-            <p className="text-sm text-zinc-500">Venda balcão sem taxa de entrega • sem comissão de motoboy</p>
+            <p className="text-sm text-zinc-500">Venda balcão sem taxa de entrega</p>
           )}
           {delivery.motorcycleType && <p className="text-sm text-zinc-500">Moto usada: {delivery.motorcycleType}</p>}
           {delivery.cancellationReason && <p className="text-sm text-red-700 font-semibold">Motivo do cancelamento: {delivery.cancellationReason}</p>}
@@ -5906,15 +5831,12 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
             <Metric title="Bloqueados" value={blockedCouriers} icon="alert" />
           </div>
           <div className="grid gap-2">
-            {couriers.map((courier) => {
-              const summary = buildCourierFinancialSummary(deliveries, courier.username);
-              return (
-                <div key={courier.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-1 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm">
-                  <span className="font-semibold">{courier.name} • {courier.username}</span>
-                  <span className="text-zinc-500">{summary.deliveryCount} entregas • {money(summary.courierAmount)} feito</span>
-                </div>
-              );
-            })}
+            {couriers.map((courier) => (
+              <div key={courier.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-1 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm">
+                <span className="font-semibold">{courier.name} • {courier.username}</span>
+                <span className="text-zinc-500">{courier.active ? "Ativo" : "Bloqueado"} • {courier.motorcycleType || "Moto própria"}</span>
+              </div>
+            ))}
           </div>
         </CardBox>
       </div>
@@ -5922,7 +5844,7 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
       <CardBox>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-bold text-lg">Testes internos do protótipo</h3>
+            <h3 className="font-bold text-lg">Testes internos do sistema</h3>
             <p className="text-sm text-zinc-500">Esses testes ajudam a garantir que as regras básicas continuam funcionando.</p>
           </div>
           <span className="text-sm font-bold bg-zinc-950 text-white rounded-2xl px-4 py-2 w-fit">{passedTests}/{selfTests.length} aprovados</span>
