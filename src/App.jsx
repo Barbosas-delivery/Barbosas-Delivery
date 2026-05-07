@@ -264,6 +264,40 @@ const initialDeliveries = [
   },
 ];
 
+
+const STORAGE_PREFIX = "barbosas_delivery_v3_";
+const STORAGE_24_MONTHS_MS = 1000 * 60 * 60 * 24 * 730;
+
+function readStoredValue(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed ?? fallback;
+  } catch (error) {
+    console.warn("Não foi possível ler armazenamento local:", key, error);
+    return fallback;
+  }
+}
+
+function writeStoredValue(key, value) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+  } catch (error) {
+    console.warn("Não foi possível salvar armazenamento local:", key, error);
+  }
+}
+
+function pruneRecordsByMonths(records, dateFields = ["closedAt", "createdAt", "launchedAt"]) {
+  const minTime = Date.now() - STORAGE_24_MONTHS_MS;
+  return (Array.isArray(records) ? records : []).filter((record) => {
+    const time = dateFields.map((field) => new Date(record?.[field] || 0).getTime()).find((value) => Number.isFinite(value) && value > 0);
+    return !time || time >= minTime;
+  });
+}
+
 function money(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 }
@@ -860,6 +894,70 @@ function formatBrazilMobilePhone(phone) {
   return "(" + numbers.slice(0, 2) + ") " + numbers.slice(2, 3) + numbers.slice(3, 7) + "-" + numbers.slice(7, 11);
 }
 
+
+function normalizePhoneInput(value) {
+  return onlyPhoneNumbers(value).slice(0, 11);
+}
+
+function normalizeIdentityName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function hasDuplicateClientRecord(clients, candidate, ignoredId = null) {
+  const candidatePhone = onlyPhoneNumbers(candidate?.phone || "");
+  const candidateName = normalizeIdentityName(candidate?.name || "");
+  return (Array.isArray(clients) ? clients : []).some((client) => {
+    if (ignoredId !== null && String(client.id) === String(ignoredId)) return false;
+    const samePhone = candidatePhone && onlyPhoneNumbers(client.phone || "") === candidatePhone;
+    const sameName = candidateName && normalizeIdentityName(client.name || "") === candidateName;
+    return samePhone || sameName;
+  });
+}
+
+function getOrderDateMs(order) {
+  return new Date(order?.launchedAt || order?.createdAt || order?.closedAt || order?.deliveredAt || 0).getTime() || 0;
+}
+
+function isOrderInPeriod(order, startDate, endDate) {
+  const time = getOrderDateMs(order);
+  if (!time) return false;
+  const start = startDate ? new Date(`${startDate}T00:00:00`).getTime() : 0;
+  const end = endDate ? new Date(`${endDate}T23:59:59`).getTime() : Number.MAX_SAFE_INTEGER;
+  return time >= start && time <= end;
+}
+
+function buildPeriodSalesReport(deliveries, startDate, endDate) {
+  const periodDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => isOrderInPeriod(delivery, startDate, endDate));
+  const activeOrders = periodDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
+  const cancelledOrders = periodDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED);
+  const byPayment = ["Pix", "Dinheiro", "Cartão débito", "Cartão crédito"].reduce((acc, payment) => {
+    acc[payment] = activeOrders.filter((delivery) => delivery.payment === payment && delivery.paymentStatus === PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0);
+    return acc;
+  }, {});
+  activeOrders.forEach((delivery) => {
+    if (delivery.payment === "Misto" && delivery.mixedPayment) {
+      byPayment.Pix += Number(delivery.mixedPayment.pix || 0);
+      byPayment.Dinheiro += Number(delivery.mixedPayment.cash || 0);
+      byPayment["Cartão débito"] += Number(delivery.mixedPayment.debit || 0);
+      byPayment["Cartão crédito"] += Number(delivery.mixedPayment.credit || 0);
+    }
+  });
+  return {
+    orders: periodDeliveries,
+    activeOrders,
+    cancelledOrders,
+    totalSold: activeOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+    totalPaid: activeOrders.filter((delivery) => delivery.paymentStatus === PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+    pendingAmount: activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+    byPayment,
+  };
+}
+
 function isCustomerFormComplete(customer) {
   return Boolean(
     customer.name &&
@@ -1286,11 +1384,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [storeSettings, setStoreSettings] = useState(initialStoreSettings);
   const [products, setProducts] = useState([]);
-  const [promotions, setPromotions] = useState(initialPromotions);
-  const [kits, setKits] = useState(initialKits);
+  const [promotions, setPromotions] = useState(() => readStoredValue("promotions", initialPromotions));
+  const [kits, setKits] = useState(() => readStoredValue("kits", initialKits));
   const [clients, setClients] = useState(initialClients);
   const [deliveries, setDeliveries] = useState(initialDeliveries);
-  const [couriers, setCouriers] = useState(initialCouriers);
+  const [couriers, setCouriers] = useState(() => readStoredValue("couriers", initialCouriers));
   const [search, setSearch] = useState("");
   const [ownerPinOpen, setOwnerPinOpen] = useState(false);
   const [lastAction, setLastAction] = useState("");
@@ -1372,6 +1470,48 @@ export default function App() {
     }
 
     setClients(Array.isArray(data) ? data.map(mapClientFromDatabase) : []);
+  }
+
+  function mapCourierFromDatabase(courier) {
+    return {
+      id: courier.id,
+      name: courier.name || "",
+      username: courier.username || "",
+      password: courier.password || "",
+      active: courier.active !== false,
+      createdAt: courier.created_at || courier.createdAt || "",
+      motorcycleType: courier.motorcycle_type || courier.motorcycleType || "Moto própria",
+    };
+  }
+
+  function mapCourierToDatabase(courier) {
+    return {
+      id: courier.id,
+      name: String(courier.name || "").trim(),
+      username: String(courier.username || "").trim().toLowerCase(),
+      password: String(courier.password || ""),
+      active: courier.active !== false,
+      motorcycle_type: courier.motorcycleType || "Moto própria",
+      created_at: courier.createdAt || new Date().toISOString(),
+    };
+  }
+
+  async function loadCouriers() {
+    const { data, error } = await supabase
+      .from("couriers")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Erro ao carregar entregadores:", error);
+      const storedCouriers = readStoredValue("couriers", null);
+      if (storedCouriers) setCouriers(storedCouriers);
+      setLastAction(`Entregadores não carregados do Supabase: ${error.message || "verifique SELECT em couriers."}`);
+      return;
+    }
+
+    const nextCouriers = Array.isArray(data) && data.length > 0 ? data.map(mapCourierFromDatabase) : readStoredValue("couriers", initialCouriers);
+    setCouriers(nextCouriers);
   }
 
 
@@ -1720,6 +1860,7 @@ export default function App() {
 
     loadProducts();
     loadClients();
+    loadCouriers();
     loadDeliveries();
 
     // Mantém o PVD Entregas sincronizado com pedidos feitos em outro celular/computador.
@@ -1742,6 +1883,7 @@ export default function App() {
       .channel("products-clients-sync")
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => { if (isMounted) loadProducts(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => { if (isMounted) loadClients(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "couriers" }, () => { if (isMounted) loadCouriers(); })
       .subscribe();
 
     return () => {
@@ -1760,7 +1902,7 @@ export default function App() {
   const todayInput = getDateInputValue(new Date());
   const [courierReportRange, setCourierReportRange] = useState({ startDate: todayInput, endDate: todayInput });
   const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], price: "", cost: "", stock: "", minStock: "", ncm: "", barcode: "", imageUrl: "" });
-  const [productGroups, setProductGroups] = useState(initialProductGroups);
+  const [productGroups, setProductGroups] = useState(() => readStoredValue("productGroups", initialProductGroups));
   const [newProductGroup, setNewProductGroup] = useState("");
   const [newPromotion, setNewPromotion] = useState({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
   const [promotionProductSearch, setPromotionProductSearch] = useState("");
@@ -1778,13 +1920,13 @@ export default function App() {
   const [courierSearch, setCourierSearch] = useState("");
   const [editingCourierId, setEditingCourierId] = useState(null);
   const [editingProductId, setEditingProductId] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [cashSession, setCashSession] = useState({ isOpen: false, openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
+  const [notifications, setNotifications] = useState(() => readStoredValue("notifications", []));
+  const [cashSession, setCashSession] = useState(() => readStoredValue("cashSession", { isOpen: false, openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] }));
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [sangriaDraft, setSangriaDraft] = useState({ value: "", reason: "" });
   const [closingCashCounted, setClosingCashCounted] = useState("");
-  const [tabsAccounts, setTabsAccounts] = useState([]);
-  const [tabCreditLimits, setTabCreditLimits] = useState({});
+  const [tabsAccounts, setTabsAccounts] = useState(() => readStoredValue("tabsAccounts", []));
+  const [tabCreditLimits, setTabCreditLimits] = useState(() => readStoredValue("tabCreditLimits", {}));
   const [tabDraft, setTabDraft] = useState({ customerName: "", phone: "", creditLimit: DEFAULT_TAB_CREDIT_LIMIT });
   const [tabProductSearch, setTabProductSearch] = useState("");
   const [tabProductSearchByTab, setTabProductSearchByTab] = useState({});
@@ -1795,6 +1937,8 @@ export default function App() {
   const [tabClosingChangeFor, setTabClosingChangeFor] = useState("");
   const [tabClosingMixedPayment, setTabClosingMixedPayment] = useState(createEmptyMixedPayment());
   const [pendingCancellation, setPendingCancellation] = useState({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
+  const [cashClosings, setCashClosings] = useState(() => pruneRecordsByMonths(readStoredValue("cashClosings", []), ["closedAt", "createdAt"]));
+  const [reportRange, setReportRange] = useState({ startDate: todayInput.slice(0, 7) + "-01", endDate: todayInput });
 
   const filteredProducts = useMemo(() => {
     const term = search.toLowerCase();
@@ -1957,6 +2101,22 @@ export default function App() {
   const customerNotifications = useMemo(() => getAudienceNotifications(notifications, "customer"), [notifications]);
   const ownerUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "loja"), [notifications]);
   const courierUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "couriers"), [notifications]);
+  const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
+  const cancelledDeliveryOrdersForStore = useMemo(() => deliveries.filter((delivery) => isDeliveryOrder(delivery) && delivery.status === DELIVERY_STATUS.CANCELLED), [deliveries]);
+  const cancelledDeliveryReportForStore = useMemo(() => ({
+    count: cancelledDeliveryOrdersForStore.length,
+    total: cancelledDeliveryOrdersForStore.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+  }), [cancelledDeliveryOrdersForStore]);
+
+  useEffect(() => { writeStoredValue("promotions", promotions); }, [promotions]);
+  useEffect(() => { writeStoredValue("kits", kits); }, [kits]);
+  useEffect(() => { writeStoredValue("productGroups", productGroups); }, [productGroups]);
+  useEffect(() => { writeStoredValue("couriers", couriers); }, [couriers]);
+  useEffect(() => { writeStoredValue("notifications", notifications.slice(0, 250)); }, [notifications]);
+  useEffect(() => { writeStoredValue("cashSession", cashSession); }, [cashSession]);
+  useEffect(() => { writeStoredValue("tabsAccounts", tabsAccounts); }, [tabsAccounts]);
+  useEffect(() => { writeStoredValue("tabCreditLimits", tabCreditLimits); }, [tabCreditLimits]);
+  useEffect(() => { writeStoredValue("cashClosings", pruneRecordsByMonths(cashClosings, ["closedAt", "createdAt"])); }, [cashClosings]);
 
   useEffect(() => {
     if (!showCustomerPromo) return;
@@ -2320,6 +2480,7 @@ export default function App() {
     if (!newClient.name || !newClient.phone || !newClient.cep || !newClient.street || !newClient.number || !newClient.district || !newClient.city || !newClient.state) return setLastAction("Cliente não salvo: nome, telefone, CEP, rua, número, bairro, cidade e estado são obrigatórios.");
     if (!isValidCep(newClient.cep)) return setLastAction("Cliente não salvo: CEP inválido. Digite 8 números.");
     if (!isValidBrazilMobilePhone(newClient.phone)) return setLastAction("Telefone inválido. Use DDD entre parênteses + número 9 obrigatório. Exemplo: (43) 98873-6791.");
+    if (hasDuplicateClientRecord(clients, newClient)) return setLastAction("Cliente não salvo: já existe cadastro com esse telefone ou esse nome.");
 
     const clientToInsert = mapClientToDatabase({ id: Date.now(), ...newClient });
     const { error, ignoredColumns } = await insertWithSchemaRetry("clients", clientToInsert, false);
@@ -2337,7 +2498,7 @@ export default function App() {
 
   function updateClientField(id, field, value) {
     let finalValue = value;
-    if (field === "phone") finalValue = formatBrazilMobilePhone(value);
+    if (field === "phone") finalValue = normalizePhoneInput(value);
     if (field === "state") finalValue = String(value || "").toUpperCase().slice(0, 2);
     setClients((previousClients) => previousClients.map((client) => (client.id === id ? { ...client, [field]: finalValue } : client)));
   }
@@ -2390,6 +2551,10 @@ export default function App() {
       setLastAction("Telefone inválido. Use DDD + 9 + 8 dígitos. Exemplo: (43) 98873-6791.");
       return;
     }
+    if (hasDuplicateClientRecord(clients, client, id)) {
+      setLastAction("Cliente não salvo: já existe outro cadastro com esse telefone ou esse nome.");
+      return;
+    }
 
     const formattedClient = mapClientToDatabase(client);
     const { id: _ignoredId, ...clientPatch } = formattedClient;
@@ -2405,13 +2570,29 @@ export default function App() {
     setEditingClientId(null);
   }
 
-  function addCourier() {
-    if (!newCourier.name.trim() || !newCourier.username.trim()) return setLastAction("Entregador não salvo: nome e usuário são obrigatórios.");
-    if (hasDuplicateCourierUsername(couriers, newCourier.username)) return setLastAction("Esse usuário de entregador já existe. Escolha outro usuário.");
-    if (!isStrongPassword(newCourier.password)) return setLastAction("A senha gerada não está forte o suficiente. Gere outra senha.");
-    setCouriers((previousCouriers) => [...previousCouriers, { id: Date.now(), name: newCourier.name.trim(), username: newCourier.username.trim(), password: newCourier.password, active: true, createdAt: new Date().toLocaleString("pt-BR"), motorcycleType: newCourier.motorcycleType }]);
+  async function addCourier() {
+    const courierToInsert = mapCourierToDatabase({
+      id: Date.now(),
+      name: newCourier.name,
+      username: newCourier.username,
+      password: newCourier.password,
+      active: true,
+      createdAt: new Date().toISOString(),
+      motorcycleType: newCourier.motorcycleType,
+    });
+    if (!courierToInsert.name || !courierToInsert.username) return setLastAction("Entregador não salvo: nome e usuário são obrigatórios.");
+    if (hasDuplicateCourierUsername(couriers, courierToInsert.username)) return setLastAction("Esse usuário de entregador já existe. Escolha outro usuário.");
+    if (!isStrongPassword(courierToInsert.password)) return setLastAction("A senha gerada não está forte o suficiente. Gere outra senha.");
+
+    const { error, ignoredColumns } = await insertWithSchemaRetry("couriers", courierToInsert, false);
+    if (error) {
+      console.error("Erro ao cadastrar entregador no Supabase:", error);
+      setLastAction(`Entregador salvo neste navegador, mas não no Supabase: ${error.message || "verifique RLS/policies de INSERT em couriers."}`);
+    }
+
+    setCouriers((previousCouriers) => [...previousCouriers, mapCourierFromDatabase(courierToInsert)]);
     setNewCourier({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
-    setLastAction("Entregador cadastrado com usuário definido pela loja e senha forte gerada automaticamente.");
+    if (!error) setLastAction(ignoredColumns.length > 0 ? `Entregador cadastrado. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Entregador cadastrado e salvo no Supabase.");
   }
 
   function regenerateCourierPassword() {
@@ -2419,9 +2600,17 @@ export default function App() {
     setLastAction("Nova senha forte gerada para o entregador.");
   }
 
-  function toggleCourierStatus(id) {
-    setCouriers((previousCouriers) => previousCouriers.map((courier) => (courier.id === id ? { ...courier, active: !courier.active } : courier)));
-    setLastAction("Status do entregador atualizado.");
+  async function toggleCourierStatus(id) {
+    const courier = couriers.find((item) => item.id === id);
+    if (!courier) return;
+    const nextActive = !courier.active;
+    const { error } = await updateWithSchemaRetry("couriers", id, { active: nextActive });
+    if (error) {
+      console.error("Erro ao atualizar entregador no Supabase:", error);
+      setLastAction(`Status alterado neste navegador, mas não no Supabase: ${error.message || "verifique UPDATE em couriers."}`);
+    }
+    setCouriers((previousCouriers) => previousCouriers.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
+    if (!error) setLastAction("Status do entregador atualizado e salvo.");
   }
 
   async function toggleProductStatus(id) {
@@ -2498,7 +2687,7 @@ export default function App() {
     setLastAction("Nova senha forte gerada para o entregador cadastrado.");
   }
 
-  function saveCourierEdits(id) {
+  async function saveCourierEdits(id) {
     const courier = couriers.find((item) => item.id === id);
     if (!courier) return;
     if (!courier.name.trim() || !courier.username.trim()) {
@@ -2513,8 +2702,16 @@ export default function App() {
       setLastAction("Senha fraca. Gere uma nova senha forte antes de salvar.");
       return;
     }
-    setLastAction("Dados do entregador atualizados com sucesso.");
+    const formattedCourier = mapCourierToDatabase(courier);
+    const { id: _ignoredId, ...courierPatch } = formattedCourier;
+    const { error, ignoredColumns } = await updateWithSchemaRetry("couriers", id, courierPatch);
+    if (error) {
+      console.error("Erro ao salvar entregador no Supabase:", error);
+      setLastAction(`Entregador atualizado neste navegador, mas não no Supabase: ${error.message || "verifique UPDATE em couriers."}`);
+    }
+    setCouriers((previousCouriers) => previousCouriers.map((item) => (item.id === id ? mapCourierFromDatabase(formattedCourier) : item)));
     setEditingCourierId(null);
+    if (!error) setLastAction(ignoredColumns.length > 0 ? `Entregador atualizado. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Dados do entregador atualizados e salvos.");
   }
 
   async function searchCep() {
@@ -2870,6 +3067,34 @@ export default function App() {
     return printThermalHtml("FECHAMENTO DE CAIXA", body, 1);
   }
 
+  async function persistCashClosing(record) {
+    setCashClosings((previous) => pruneRecordsByMonths([record, ...(previous || [])], ["closedAt", "createdAt"]));
+    const payload = {
+      id: record.id,
+      movement_type: "closing",
+      type: "closing",
+      value: Number(record.totalReceived || 0),
+      amount: Number(record.totalReceived || 0),
+      reason: "Fechamento de caixa",
+      notes: JSON.stringify(record),
+      created_at: record.closedAt || new Date().toISOString(),
+      opened_at: record.openedAt || null,
+      closed_at: record.closedAt || new Date().toISOString(),
+      pix: Number(record.byPayment?.Pix || 0),
+      debit: Number(record.byPayment?.["Cartão débito"] || 0),
+      credit: Number(record.byPayment?.["Cartão crédito"] || 0),
+      cash: Number(record.byPayment?.Dinheiro || 0),
+      total_sold: Number(record.totalSold || 0),
+      total_received: Number(record.totalReceived || 0),
+      counted_cash: Number(record.countedCash || 0),
+      difference: Number(record.difference || 0),
+    };
+    const { error } = await insertWithSchemaRetry("cash_movements", payload, false);
+    if (error) {
+      console.warn("Fechamento salvo localmente, mas não no Supabase cash_movements:", error);
+    }
+  }
+
   function printDeliveryReceipt(delivery, copies = 1) {
     const itemsHtml = buildReceiptItemsHtml(delivery.items || []);
     const isDelivery = isDeliveryOrder(delivery);
@@ -3217,15 +3442,28 @@ export default function App() {
     await loadDeliveries();
   }
 
-  function closeCashRegister() {
+  async function closeCashRegister() {
     if (!cashSession.isOpen) return setLastAction("Abra o caixa antes de fechar.");
     if (closingCashCounted === "") return setLastAction("Informe quanto dinheiro foi contado na gaveta para fechar o caixa.");
     const countedCash = Math.max(0, Number(closingCashCounted || 0));
     const report = buildCashClosingReport(deliveries, cashSession);
     const difference = countedCash - report.expectedDrawerCash;
+    const closedAt = new Date().toISOString();
+    const record = {
+      id: Date.now(),
+      createdAt: closedAt,
+      openedAt: cashSession.openedAt || "",
+      closedAt,
+      countedCash,
+      difference,
+      ...report,
+      sangrias: cashSession.sangrias || [],
+    };
     printCashClosingReceipt(report, countedCash, difference);
-    setCashSession((previous) => ({ ...previous, isOpen: false, closedAt: new Date().toISOString() }));
-    setLastAction(`Caixa fechado. Esperado ${money(report.expectedDrawerCash)}, contado ${money(countedCash)}, diferença ${money(difference)}.`);
+    await persistCashClosing(record);
+    setCashSession((previous) => ({ ...previous, isOpen: false, closedAt }));
+    setClosingCashCounted("");
+    setLastAction(`Caixa fechado e salvo. Esperado ${money(report.expectedDrawerCash)}, contado ${money(countedCash)}, diferença ${money(difference)}.`);
   }
 
   function getTabCustomerKey(tabOrDraft) {
@@ -3535,7 +3773,10 @@ export default function App() {
             </div>
           </CardBox>
 
-          <Title title="Entregas disponíveis" subtitle="Dar saída ao retirar na loja. Ao chegar, pedir aprovação da loja para liberar o valor." />
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+            <Title title="Entregas disponíveis" subtitle="Dar saída ao retirar na loja. Ao chegar, pedir aprovação da loja para liberar o valor." />
+            <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
+          </div>
           {courierPendingDeliveries.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega pendente no momento. Entregas aprovadas saem desta lista e ficam no relatório.</p></CardBox>}
 
           <div className="grid gap-4">
@@ -3599,7 +3840,7 @@ export default function App() {
                   <div className="rounded-2xl bg-zinc-800 border border-zinc-700 p-4 text-sm text-zinc-300">Clientes não precisam criar conta. Toda vez que abrir o link do aplicativo, preencha o formulário para identificarmos a entrega.</div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <DarkInput label="Nome completo" value={customerForm.name} onChange={(value) => setCustomerForm({ ...customerForm, name: value })} placeholder="Seu nome" />
-                    <DarkInput label="Telefone" value={customerForm.phone} onChange={(value) => setCustomerForm({ ...customerForm, phone: formatBrazilMobilePhone(value) })} placeholder="(43) 98873-6791" />
+                    <DarkInput label="Telefone" value={customerForm.phone} onChange={(value) => setCustomerForm({ ...customerForm, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
                     <div><DarkInput label="CEP" value={customerForm.cep} onChange={(value) => setCustomerForm({ ...customerForm, cep: value })} placeholder="00000-000" /><button type="button" onClick={searchCustomerCep} className="text-xs text-zinc-300 underline mt-1">buscar endereço pelo CEP</button></div>
                     <DarkInput label="Número da casa" value={customerForm.number} onChange={(value) => setCustomerForm({ ...customerForm, number: value })} placeholder="Ex: 1500" />
                     <DarkInput label="Endereço / Rua" value={customerForm.street} onChange={(value) => setCustomerForm({ ...customerForm, street: value })} placeholder="Rua ou avenida" />
@@ -4399,6 +4640,27 @@ export default function App() {
                     </div>
                   )}
                 </CardBox>
+
+                <Title title="Relatório de entregas canceladas" subtitle="Controle simples para conferir cancelamentos, motivos e evitar confusão no caixa." />
+                <CardBox>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <Metric title="Canceladas" value={cancelledDeliveryReportForStore.count} icon="alert" />
+                    <Metric title="Valor cancelado" value={money(cancelledDeliveryReportForStore.total)} icon="money" />
+                    <Metric title="Últimas 24 meses" value={cancelledDeliveryOrdersForStore.length} icon="calendar" />
+                  </div>
+                  {cancelledDeliveryOrdersForStore.length === 0 ? (
+                    <p className="text-sm text-zinc-500">Nenhuma entrega cancelada registrada.</p>
+                  ) : (
+                    <div className="grid gap-2 max-h-80 overflow-auto pr-1">
+                      {cancelledDeliveryOrdersForStore.slice().sort((a, b) => getOrderDateMs(b) - getOrderDateMs(a)).slice(0, 30).map((delivery) => (
+                        <div key={delivery.id} className="rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-900 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <span><b>Pedido #{delivery.id}</b> • {delivery.client} • {delivery.cancellationReason || "Sem motivo informado"}</span>
+                          <span className="font-bold">{money(delivery.value)} • {delivery.cancelledAt ? new Date(delivery.cancelledAt).toLocaleString("pt-BR") : "cancelado"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardBox>
               </div>
             )}
 
@@ -4436,7 +4698,7 @@ export default function App() {
                     <h3 className="font-bold text-lg mb-4">2. Finalizar venda balcão</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                       <Input label="Cliente" value={counterDraft.customerName} onChange={(value) => setCounterDraft({ ...counterDraft, customerName: value })} placeholder="Cliente balcão" />
-                      <Input label="Telefone opcional" value={counterDraft.phone} onChange={(value) => setCounterDraft({ ...counterDraft, phone: formatBrazilMobilePhone(value) })} placeholder="(43) 98873-6791" />
+                      <Input label="Telefone opcional" value={counterDraft.phone} onChange={(value) => setCounterDraft({ ...counterDraft, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
                     </div>
                     <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={counterDraft.payment} onChange={(event) => setCounterDraft({ ...counterDraft, payment: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
                     {counterDraft.payment === "Dinheiro" && <div className="mb-4"><Input label="Precisa de troco para quanto?" type="number" value={counterDraft.changeFor} onChange={(value) => setCounterDraft({ ...counterDraft, changeFor: value })} placeholder="Ex: 100,00" /></div>}
@@ -4512,6 +4774,46 @@ export default function App() {
                     <Metric title="Cancelados" value={cashClosingReport.cancelledOrders} icon="alert" />
                   </div>
                 </CardBox>
+
+                <CardBox>
+                  <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
+                    <div>
+                      <h3 className="font-bold text-lg">Relatório de vendas por período</h3>
+                      <p className="text-sm text-zinc-500">Busca por data com Pix, débito, crédito, dinheiro, pendências e cancelamentos.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 w-full md:w-auto">
+                      <Input label="Data inicial" type="date" value={reportRange.startDate} onChange={(value) => setReportRange({ ...reportRange, startDate: value })} />
+                      <Input label="Data final" type="date" value={reportRange.endDate} onChange={(value) => setReportRange({ ...reportRange, endDate: value })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Metric title="Total vendido" value={money(periodSalesReport.totalSold)} icon="money" />
+                    <Metric title="Total recebido" value={money(periodSalesReport.totalPaid)} icon="check" />
+                    <Metric title="Pix" value={money(periodSalesReport.byPayment?.Pix || 0)} icon="money" />
+                    <Metric title="Dinheiro" value={money(periodSalesReport.byPayment?.Dinheiro || 0)} icon="money" />
+                    <Metric title="Débito" value={money(periodSalesReport.byPayment?.["Cartão débito"] || 0)} icon="money" />
+                    <Metric title="Crédito" value={money(periodSalesReport.byPayment?.["Cartão crédito"] || 0)} icon="money" />
+                    <Metric title="Pendente/fiado" value={money(periodSalesReport.pendingAmount)} icon="alert" />
+                    <Metric title="Cancelados" value={periodSalesReport.cancelledOrders.length} icon="alert" />
+                  </div>
+                </CardBox>
+
+                <CardBox>
+                  <h3 className="font-bold text-lg mb-4">Caixas fechados salvos</h3>
+                  <p className="text-sm text-zinc-500 mb-4">O sistema mantém os fechamentos dos últimos 24 meses neste navegador e tenta registrar também na tabela cash_movements do Supabase.</p>
+                  {cashClosings.length === 0 ? (
+                    <p className="text-sm text-zinc-500">Nenhum fechamento salvo ainda.</p>
+                  ) : (
+                    <div className="grid gap-2 max-h-80 overflow-auto pr-1">
+                      {cashClosings.slice(0, 60).map((closing) => (
+                        <div key={closing.id} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <span><b>{closing.closedAt ? new Date(closing.closedAt).toLocaleString("pt-BR") : "Fechamento"}</b> • vendido {money(closing.totalSold)} • recebido {money(closing.totalReceived)}</span>
+                          <span className="font-bold">Pix {money(closing.byPayment?.Pix || 0)} • Déb {money(closing.byPayment?.["Cartão débito"] || 0)} • Créd {money(closing.byPayment?.["Cartão crédito"] || 0)} • Din {money(closing.byPayment?.Dinheiro || 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardBox>
               </div>
             )}
 
@@ -4523,7 +4825,7 @@ export default function App() {
                     <h3 className="font-bold text-lg mb-4">Nova comanda</h3>
                     <div className="grid gap-3">
                       <Input label="Nome do cliente" value={tabDraft.customerName} onChange={(value) => setTabDraft({ ...tabDraft, customerName: value })} placeholder="Ex: João" />
-                      <Input label="Telefone opcional" value={tabDraft.phone} onChange={(value) => setTabDraft({ ...tabDraft, phone: formatBrazilMobilePhone(value) })} placeholder="(43) 98873-6791" />
+                      <Input label="Telefone opcional" value={tabDraft.phone} onChange={(value) => setTabDraft({ ...tabDraft, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
                       <Input label="Limite inicial da comanda" type="number" value={tabDraft.creditLimit} onChange={(value) => setTabDraft({ ...tabDraft, creditLimit: value })} placeholder="50" />
                       <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">Limite padrão: {money(DEFAULT_TAB_CREDIT_LIMIT)}. Após pagamentos rápidos, o limite sobe automaticamente; se atrasar ou fechar como fiado, o limite pode diminuir. Você também pode alterar manualmente em cada comanda.</p>
                       <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">A forma de pagamento aparece somente quando a comanda for fechada.</p>
@@ -4635,7 +4937,7 @@ export default function App() {
                   <h3 className="font-bold text-lg mb-4">Novo cliente</h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <Input label="Nome" value={newClient.name} onChange={(value) => setNewClient({ ...newClient, name: value })} />
-                    <Input label="Telefone" value={newClient.phone} onChange={(value) => setNewClient({ ...newClient, phone: formatBrazilMobilePhone(value) })} placeholder="(43) 98873-6791" />
+                    <Input label="Telefone" value={newClient.phone} onChange={(value) => setNewClient({ ...newClient, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
                     <div><Input label="CEP" value={newClient.cep} onChange={(value) => setNewClient({ ...newClient, cep: value })} /><button onClick={searchCep} className="text-xs text-zinc-600 underline mt-1">buscar endereço pelo CEP</button></div>
                     <Input label="Rua" value={newClient.street} onChange={(value) => setNewClient({ ...newClient, street: value })} />
                     <Input label="Número" value={newClient.number} onChange={(value) => setNewClient({ ...newClient, number: value })} />
