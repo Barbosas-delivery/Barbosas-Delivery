@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "./supabaseClient";
+// Bloco 4: ajustes de layout e experiência por perfil. Cliente/entregador mobile-first; caixa/admin otimizados para tablet e desktop.
 const Card = memo(function Card({ className = "", children, ...props }) {
   return <div className={className} {...props}>{children}</div>;
 });
@@ -22,7 +23,7 @@ const Button = memo(function Button({ className = "", variant = "default", child
       {...props}
       type={props.type || "button"}
       disabled={disabled}
-      className={`${variantClass} ${className} ${disabledClass}`.trim()}
+      className={`inline-flex min-h-[44px] touch-manipulation items-center justify-center transition active:scale-[0.99] ${variantClass} ${className} ${disabledClass}`.trim()}
     >
       <span className="relative z-10 inline-flex items-center justify-center gap-1 text-inherit">{children}</span>
     </button>
@@ -1288,7 +1289,7 @@ function DarkLoginInput({ icon, label, value, onChange, placeholder, type = "tex
           }}
           placeholder={placeholder}
           type={type}
-          className="bg-transparent outline-none text-white w-full placeholder:text-zinc-500"
+          className="min-h-[44px] bg-transparent text-base outline-none text-white w-full placeholder:text-zinc-500"
         />
         {rightButton}
       </div>
@@ -1322,15 +1323,15 @@ function StoreLogo({ size = "h-14 w-14" }) {
 }
 
 function Title({ title, subtitle }) {
-  return <div><h2 className="text-2xl md:text-3xl font-bold tracking-tight">{title}</h2><p className="text-zinc-500 mt-1">{subtitle}</p></div>;
+  return <div className="min-w-0"><h2 className="text-xl md:text-3xl font-bold tracking-tight leading-tight">{title}</h2><p className="text-zinc-500 mt-1 text-sm md:text-base">{subtitle}</p></div>;
 }
 
 function Metric({ title, value, icon }) {
-  return <Card className="rounded-3xl border-zinc-200 shadow-sm"><CardContent className="p-5"><div className="h-10 w-10 rounded-2xl bg-zinc-100 flex items-center justify-center mb-4"><Icon name={icon} /></div><p className="text-sm text-zinc-500">{title}</p><p className="text-2xl font-bold mt-1">{value}</p></CardContent></Card>;
+  return <Card className="rounded-3xl border-zinc-200 shadow-sm"><CardContent className="p-4 md:p-5"><div className="h-9 w-9 md:h-10 md:w-10 rounded-2xl bg-zinc-100 flex items-center justify-center mb-3 md:mb-4"><Icon name={icon} /></div><p className="text-xs md:text-sm text-zinc-500">{title}</p><p className="text-xl md:text-2xl font-bold mt-1 break-words">{value}</p></CardContent></Card>;
 }
 
 function CardBox({ children }) {
-  return <Card className="rounded-3xl border-zinc-200 shadow-sm"><CardContent className="p-5">{children}</CardContent></Card>;
+  return <Card className="rounded-3xl border-zinc-200 shadow-sm overflow-hidden"><CardContent className="p-4 md:p-5 min-w-0">{children}</CardContent></Card>;
 }
 
 function Input({ label, value, onChange, type = "text", placeholder = "" }) {
@@ -1347,7 +1348,7 @@ function Input({ label, value, onChange, type = "text", placeholder = "" }) {
           onChange?.(event.target.value);
         }}
         placeholder={placeholder}
-        className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20"
+        className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"
       />
     </label>
   );
@@ -1367,7 +1368,7 @@ function DarkInput({ label, value, onChange, type = "text", placeholder = "" }) 
           onChange?.(event.target.value);
         }}
         placeholder={placeholder}
-        className="mt-1 w-full rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none placeholder:text-zinc-500 focus:ring-2 focus:ring-white/20"
+        className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-base text-white outline-none placeholder:text-zinc-500 focus:ring-2 focus:ring-white/20"
       />
     </label>
   );
@@ -1376,7 +1377,7 @@ function DarkInput({ label, value, onChange, type = "text", placeholder = "" }) 
 function SearchBox({ value, onChange, placeholder }) {
   const focusKey = getStableFocusKey("Busca", placeholder, "search");
   return (
-    <div className="bg-white rounded-3xl border border-zinc-200 px-4 py-3 flex items-center gap-3 shadow-sm">
+    <div className="bg-white rounded-3xl border border-zinc-200 px-4 py-2 flex items-center gap-3 shadow-sm">
       <Icon name="search" className="text-zinc-400" />
       <input
         data-focus-key={focusKey}
@@ -4485,21 +4486,21 @@ function App() {
 
   if (loggedCourier) {
     return (
-      <div className="min-h-screen bg-zinc-100 text-zinc-950">
-        <header className="bg-zinc-950 text-white px-4 md:px-8 py-5 sticky top-0 z-20 shadow-xl">
-          <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="min-h-screen bg-zinc-100 text-zinc-950 pb-24 md:pb-0">
+        <header className="bg-zinc-950 text-white px-4 md:px-8 py-4 md:py-5 sticky top-0 z-20 shadow-xl">
+          <div className="max-w-md md:max-w-5xl mx-auto flex flex-row md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="h-11 w-11 rounded-2xl bg-white text-zinc-950 flex items-center justify-center text-xl"><Icon name="truck" /></div>
               <div>
-                <h1 className="text-xl font-bold">Painel do Entregador</h1>
+                <h1 className="text-lg md:text-xl font-bold">Painel do Entregador</h1>
                 <p className="text-xs text-zinc-400">{loggedCourier.name} • usuário {loggedCourier.username} • 🔔 {courierUnreadNotifications} novas</p>
               </div>
             </div>
-            <Button onClick={() => { setLoggedCourier(null); setCourierPassword(""); }} variant="secondary" className="rounded-2xl"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
+            <Button onClick={() => { setLoggedCourier(null); setCourierPassword(""); }} variant="secondary" className="rounded-2xl px-3 md:px-4"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
           </div>
         </header>
 
-        <main className="max-w-5xl mx-auto p-4 md:p-8 space-y-6">
+        <main className="max-w-md md:max-w-5xl mx-auto p-3 md:p-8 space-y-5 md:space-y-6">
           {courierUnreadNotifications > 0 && (
             <NotificationPanel
               title={`Notificações dos entregadores (${courierUnreadNotifications} novas)`}
@@ -4508,7 +4509,7 @@ function App() {
             />
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
             <Metric title="Entregas disponíveis" value={waitingPickupDeliveries.length} icon="truck" />
             <Metric title="Pendentes" value={courierPendingDeliveries.length} icon="calendar" />
             <Metric title="Confirmadas" value={loggedCourierDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED).length} icon="check" />
@@ -4546,11 +4547,11 @@ function App() {
                       <p className="text-xs text-zinc-500">Taxa de entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))}</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                    <Button onClick={() => markCourierPickedUp(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl">Aceitar e retirar</Button>
-                    <Button onClick={() => refuseCourierDelivery(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl">Recusar</Button>
-                    <Button onClick={() => updateDeliveryStatus(delivery.id, DELIVERY_STATUS.DELIVERY_PROBLEM)} disabled={delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} variant="secondary" className="rounded-2xl">Problema</Button>
-                    <Button onClick={() => requestDeliveryApproval(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Marcar entregue</Button>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <Button onClick={() => markCourierPickedUp(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Aceitar e retirar</Button>
+                    <Button onClick={() => refuseCourierDelivery(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Recusar</Button>
+                    <Button onClick={() => updateDeliveryStatus(delivery.id, DELIVERY_STATUS.DELIVERY_PROBLEM)} disabled={delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} variant="secondary" className="rounded-2xl py-4 text-sm">Problema</Button>
+                    <Button onClick={() => requestDeliveryApproval(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-4 text-sm">Marcar entregue</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -4563,14 +4564,14 @@ function App() {
 
   if (!isLogged) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center p-4">
-        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-2xl">
+      <div className="min-h-screen bg-zinc-950 text-white flex items-start md:items-center justify-center p-3 md:p-4 overflow-x-hidden">
+        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className={customerSubmitted ? "w-full max-w-6xl" : "w-full max-w-2xl"}>
           <Card className="bg-zinc-900 border-zinc-800 shadow-2xl rounded-3xl">
-            <CardContent className="p-6 md:p-8">
+            <CardContent className="p-4 sm:p-6 md:p-8">
               <div className={customerSubmitted ? "flex flex-col md:flex-row md:items-center gap-4 mb-8 justify-center" : "flex flex-col md:flex-row md:items-center gap-4 mb-8 md:justify-between"}>
                 <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-2xl font-bold text-white">Barbosas Delivery</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Informe seus dados para continuar"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
                 {!customerSubmitted && (
-                  <div className="flex rounded-2xl bg-zinc-800 p-1 border border-zinc-700">
+                  <div className="grid grid-cols-3 w-full md:w-auto rounded-2xl bg-zinc-800 p-1 border border-zinc-700">
                     <button type="button" onClick={() => setEntryMode("customer")} className={`px-4 py-2 rounded-xl text-sm font-semibold ${entryMode === "customer" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>Cliente</button>
                     <button type="button" onClick={() => setEntryMode("loja")} className={`px-4 py-2 rounded-xl text-sm font-semibold ${entryMode === "loja" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>Loja</button>
                     <button type="button" onClick={() => setEntryMode("courier")} className={`px-4 py-2 rounded-xl text-sm font-semibold ${entryMode === "courier" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>Entregador</button>
@@ -4598,7 +4599,7 @@ function App() {
               )}
 
               {entryMode === "customer" && customerSubmitted && (
-                <div className="space-y-4 pb-24">
+                <div className="space-y-4 pb-28 md:pb-8">
                   {safeCustomerCart.length > 0 && (
                     <button
                       type="button"
@@ -4669,7 +4670,7 @@ function App() {
                       </div>
                     </motion.div>
                   )}
-                  <div className="rounded-3xl bg-white text-zinc-950 p-4">
+                  <div className="rounded-3xl bg-white text-zinc-950 p-4 md:p-5 shadow-sm">
                     <h2 className="text-xl font-black mb-1">Monte seu pedido</h2>
                     <p className="text-xs text-zinc-600"><b>Entrega para:</b> {customerForm.street}, {customerForm.number} - {customerForm.district}, {customerForm.city}/{customerForm.state}</p>
                     <p className={`text-xs font-bold mt-1 ${storeSettings.isOpen ? "text-emerald-600" : "text-red-600"}`}>{storeSettings.isOpen ? "Estamos abertos" : "Estamos fechados no momento"} • {storeSettings.openingHours}</p>
@@ -4677,15 +4678,15 @@ function App() {
                   </div>
                   {customerNotifications.length > 0 && <div className="rounded-3xl bg-amber-50 border border-amber-200 p-4 text-amber-900"><p className="font-black text-sm mb-1">Atualizações do pedido</p>{customerNotifications.slice(0, 3).map((notification) => <p key={notification.id} className="text-xs">• {notification.message}</p>)}</div>}
 
-                  <div className="rounded-3xl bg-white text-zinc-950 p-3 space-y-3">
+                  <div className="sticky top-3 z-20 rounded-3xl bg-white text-zinc-950 p-3 space-y-3 shadow-lg md:static md:shadow-none">
                     <SearchBox value={customerProductSearch} onChange={setCustomerProductSearch} placeholder="Buscar produto por nome, grupo, NCM ou código" />
-                    <div className="flex gap-2 overflow-x-auto pb-1">
+                    <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
                       {["Todos", ...(customerVisibleKits.length > 0 ? ["Kits"] : []), ...visibleCustomerGroups].map((group) => (
                         <button
                           key={group}
                           type="button"
                           onClick={() => setSelectedCustomerGroup(group)}
-                          className={`whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-bold border ${selectedCustomerGroup === group ? "bg-zinc-950 text-white border-zinc-950" : "bg-zinc-50 text-zinc-700 border-zinc-200"}`}
+                          className={`whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border touch-manipulation ${selectedCustomerGroup === group ? "bg-zinc-950 text-white border-zinc-950" : "bg-zinc-50 text-zinc-700 border-zinc-200"}`}
                         >
                           {group}
                         </button>
@@ -4696,7 +4697,7 @@ function App() {
                   {customerVisibleKits.length > 0 && (selectedCustomerGroup === "Todos" || selectedCustomerGroup === "Kits") && (
                     <div className="space-y-3">
                       <h3 className="text-white font-black text-sm px-1 uppercase tracking-wide">Kits</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {customerVisibleKits.map((kit) => (
                           <div key={kit.id} className="rounded-2xl bg-yellow-50 text-zinc-950 p-3 border border-yellow-200 shadow-sm">
                             <div className="flex items-center justify-between gap-3">
@@ -4719,7 +4720,7 @@ function App() {
                   )}
 
                   {shouldShowCustomerProducts && (
-                    <div className="grid gap-3 max-h-[58vh] overflow-auto pr-1 pb-2">
+                    <div className="grid gap-3 md:max-h-[70vh] md:overflow-auto md:pr-1 pb-2">
                     {customerProductResults.length === 0 && (
                       <div className="rounded-3xl bg-white text-zinc-950 p-5 text-sm text-zinc-500">Nenhum produto encontrado nessa sessão.</div>
                     )}
@@ -4888,13 +4889,17 @@ function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-4 md:p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6">
-          <aside className="bg-white rounded-3xl p-3 shadow-sm border border-zinc-200 h-fit lg:sticky lg:top-28">
-            {tabs.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left transition ${activeTab === tab.id ? "bg-zinc-950 text-white" : "hover:bg-zinc-100 text-zinc-700"}`}><Icon name={tab.icon} /><span className="font-medium">{tab.label}</span></button>)}
+      <main className="max-w-[1600px] mx-auto p-3 md:p-8 pb-28 md:pb-8">
+        <div className="mb-3 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 xl:hidden">
+          <p className="font-black">Painel da loja otimizado para tablet/desktop</p>
+          <p>Para operação de caixa e administração, use tela maior sempre que possível. Cliente e entregador continuam otimizados para celular.</p>
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)] gap-4 xl:gap-6">
+          <aside className="bg-white rounded-3xl p-2 shadow-sm border border-zinc-200 h-fit sticky top-[92px] z-10 overflow-x-auto whitespace-nowrap xl:whitespace-normal xl:sticky xl:top-28 -mx-1 xl:mx-0 flex xl:block gap-2">
+            {tabs.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`shrink-0 xl:w-full flex items-center gap-2 xl:gap-3 px-4 py-3 rounded-2xl text-left transition ${activeTab === tab.id ? "bg-zinc-950 text-white" : "hover:bg-zinc-100 text-zinc-700"}`}><Icon name={tab.icon} /><span className="font-medium">{tab.label}</span></button>)}
           </aside>
 
-          <section className="space-y-6">
+          <section className="space-y-6 min-w-0">
             {ownerUnreadNotifications > 0 && (
               <NotificationPanel
                 title={`Notificações da loja (${ownerUnreadNotifications} novas)`}
@@ -4929,7 +4934,7 @@ function App() {
                     <Input label="Nome" value={newProduct.name} onChange={(value) => setNewProduct({ ...newProduct, name: value })} />
                     <label className="block">
                       <span className="text-xs font-medium text-zinc-600">Grupo</span>
-                      <select value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20">
+                      <select value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
                         {productGroups.map((group) => <option key={group} value={group}>{group}</option>)}
                       </select>
                     </label>
@@ -4994,7 +4999,7 @@ function App() {
                                 <Input label="Nome" value={product.name} onChange={(value) => updateProductField(product.id, "name", value)} />
                                 <label className="block">
                                   <span className="text-xs font-medium text-zinc-600">Grupo</span>
-                                  <select value={product.category} onChange={(event) => updateProductField(product.id, "category", event.target.value)} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20">
+                                  <select value={product.category} onChange={(event) => updateProductField(product.id, "category", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
                                     {productGroups.map((group) => <option key={group} value={group}>{group}</option>)}
                                   </select>
                                 </label>
@@ -5341,9 +5346,9 @@ function App() {
                   </CardBox>
                   <CardBox>
                     <h3 className="font-bold text-lg mb-4">2. Montar entrega</h3>
-                    <label className="block mb-3"><span className="text-xs font-medium text-zinc-600">Cliente</span><select value={deliveryDraft.clientId} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, clientId: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20"><option value="">Selecione um cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name} - {formatBrazilMobilePhone(client.phone)}</option>)}</select></label>
+                    <label className="block mb-3"><span className="text-xs font-medium text-zinc-600">Cliente</span><select value={deliveryDraft.clientId} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, clientId: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option value="">Selecione um cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name} - {formatBrazilMobilePhone(client.phone)}</option>)}</select></label>
                     {selectedDeliveryClient && <div className="mb-4 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm"><p><b>Telefone:</b> {formatBrazilMobilePhone(selectedDeliveryClient.phone)}</p><p><b>Endereço:</b> {buildDeliveryAddress(selectedDeliveryClient)}</p><p><b>Referência:</b> {selectedDeliveryClient.reference || "-"}</p></div>}
-                    <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={deliveryDraft.payment} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, payment: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
+                    <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={deliveryDraft.payment} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, payment: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
                     {deliveryDraft.payment === "Dinheiro" && <div className="mb-4"><Input label="Precisa de troco para quanto?" type="number" value={deliveryDraft.changeFor} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, changeFor: value })} placeholder="Ex: 100,00" /></div>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                       <Input label="Desconto no pedido" type="number" value={deliveryDraft.discount} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, discount: Math.max(0, Number(value || 0)) })} placeholder="0,00" />
@@ -5443,7 +5448,7 @@ function App() {
                       <Input label="Cliente" value={counterDraft.customerName} onChange={(value) => setCounterDraft({ ...counterDraft, customerName: value })} placeholder="Cliente balcão" />
                       <Input label="Telefone opcional" value={counterDraft.phone} onChange={(value) => setCounterDraft({ ...counterDraft, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
                     </div>
-                    <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={counterDraft.payment} onChange={(event) => setCounterDraft({ ...counterDraft, payment: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
+                    <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={counterDraft.payment} onChange={(event) => setCounterDraft({ ...counterDraft, payment: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
                     {counterDraft.payment === "Dinheiro" && <div className="mb-4 space-y-2"><Input label="Valor recebido / troco para quanto?" type="number" value={counterDraft.changeFor} onChange={(value) => setCounterDraft({ ...counterDraft, changeFor: value })} placeholder="Ex: 100,00" />{counterDraft.changeFor && <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-emerald-800"><p className="text-xs font-bold">Troco para devolver ao cliente</p><p className="text-3xl font-black">{money(calculateChangeDue(counterDraft.changeFor, counterDraftFinalTotal))}</p></div>}</div>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                       <Input label="Desconto" type="number" value={counterDraft.discount} onChange={(value) => setCounterDraft({ ...counterDraft, discount: Math.max(0, Number(value || 0)) })} placeholder="0,00" />
@@ -5656,7 +5661,7 @@ function App() {
                     <Input label="Tempo estimado de entrega" value={storeSettings.estimatedDeliveryTime} onChange={(value) => updateStoreSetting("estimatedDeliveryTime", value)} />
                     <label className="block">
                       <span className="text-xs font-medium text-zinc-600">Funcionamento</span>
-                      <select value={storeSettings.isOpen ? "open" : "closed"} onChange={(event) => updateStoreSetting("isOpen", event.target.value === "open")} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20">
+                      <select value={storeSettings.isOpen ? "open" : "closed"} onChange={(event) => updateStoreSetting("isOpen", event.target.value === "open")} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
                         <option value="open">Aberto para pedidos</option>
                         <option value="closed">Fechado no momento</option>
                       </select>
@@ -5767,7 +5772,7 @@ function App() {
                     <Input label="Senha forte gerada pelo app" value={newCourier.password} onChange={(value) => setNewCourier({ ...newCourier, password: value })} />
                     <label className="block">
                       <span className="text-xs font-medium text-zinc-600">Tipo de moto</span>
-                      <select value={newCourier.motorcycleType} onChange={(event) => setNewCourier({ ...newCourier, motorcycleType: event.target.value })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-zinc-950/20">
+                      <select value={newCourier.motorcycleType} onChange={(event) => setNewCourier({ ...newCourier, motorcycleType: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
                         <option>Moto própria</option>
                         <option>Moto do estabelecimento</option>
                       </select>
