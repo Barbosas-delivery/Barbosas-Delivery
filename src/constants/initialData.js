@@ -1,0 +1,156 @@
+import { DELIVERY_FEE, PAYMENT_STATUS, DELIVERY_STATUS } from "./appConstants";
+
+export const initialStoreSettings = {
+  storeName: "Barbosas Delivery",
+  storePhone: "(43) 98873-6791",
+  defaultDeliveryFee: DELIVERY_FEE,
+  minimumOrderValue: 20,
+  estimatedDeliveryTime: "15 a 25 minutinhos",
+  whatsappMessage: "Olá, seu pedido da Barbosa's está em andamento.",
+  openingHours: "Segunda a quinta das 09:00 às 00:00 • Sexta e sábado das 09:00 às 03:00 • Domingo das 13:00 às 00:00",
+  isOpen: true,
+};
+
+export const initialProductGroups = ["Bebidas", "Refrigerantes", "Energéticos", "Salgadinhos", "Copões"];
+
+export const initialPromotions = [
+  {
+    id: 1,
+    title: "COPÃO GELADO",
+    description: "Copão de Vodka nos sabores Maracujá e Frutas Vermelhas.",
+    productId: 1,
+    badge: "Promoção da loja",
+    imageUrl: "",
+    discountPercent: 10,
+    promotionalPrice: 15.3,
+    startDate: "",
+    endDate: "",
+    active: true,
+  },
+];
+
+export const initialKits = [
+  {
+    id: 1,
+    name: "Kit Balada",
+    description: "2 vodka, 2 energéticos, 2 gelos e 2 copos.",
+    items: [
+      { productId: 1, quantity: 2 },
+      { productId: 2, quantity: 2 },
+    ],
+    price: 44,
+    endDate: "",
+    active: true,
+  },
+];
+
+export const initialProducts = [
+  {
+    id: 1,
+    name: "Copão de Vodka",
+    category: "Bebidas",
+    price: 17,
+    cost: 8,
+    stock: 42,
+    minStock: 10,
+    ncm: "22086000",
+    barcode: "7890000000011",
+    active: true,
+  },
+  {
+    id: 2,
+    name: "Coca-Cola Lata",
+    category: "Refrigerantes",
+    price: 5,
+    cost: 3.1,
+    stock: 8,
+    minStock: 12,
+    ncm: "22021000",
+    barcode: "7894900011517",
+    active: true,
+  },
+];
+
+export const initialClients = [
+  {
+    id: 1,
+    name: "João Silva",
+    phone: "(43) 99999-0000",
+    cep: "87000-000",
+    street: "Av. Brasil",
+    number: "1500",
+    district: "Centro",
+    city: "Maringá",
+    state: "PR",
+    reference: "Próximo ao mercado",
+  },
+];
+
+export const initialCouriers = [
+  {
+    id: 1,
+    name: "Motoboy Teste",
+    username: "moto01",
+    password: "B4rb@2026!",
+    active: true,
+    createdAt: "02/05/2026 14:30",
+    motorcycleType: "Moto própria",
+  },
+];
+
+export const initialDeliveries = [
+  {
+    id: 1023,
+    client: "João Silva",
+    phone: "(43) 99999-0000",
+    address: "Av. Brasil, 1500 - Centro",
+    payment: "Pix",
+    paymentStatus: PAYMENT_STATUS.PAID,
+    productsTotal: 37,
+    deliveryFee: DELIVERY_FEE,
+    courierFee: 0,
+    storeFee: 0,
+    motorcycleType: "",
+    value: 42,
+    status: DELIVERY_STATUS.WAITING_PICKUP,
+    reference: "Próximo ao mercado",
+    courierUsername: "ALL",
+    courierName: "Todos os motoboys",
+    pickedUpByUsername: "",
+    pickedUpByName: "",
+    pickedUpAt: "",
+    deliveredByUsername: "",
+    deliveredByName: "",
+    deliveredAt: "",
+    ownerApproved: false,
+    ownerApprovedAt: "",
+    launchedAt: "2026-05-02T14:30:00.000Z",
+  },
+  {
+    id: 1024,
+    client: "Maria Souza",
+    phone: "(43) 98888-1111",
+    address: "Rua Paraná, 80 - Zona 7",
+    payment: "Dinheiro",
+    paymentStatus: PAYMENT_STATUS.PENDING,
+    productsTotal: 24,
+    deliveryFee: DELIVERY_FEE,
+    courierFee: 0,
+    storeFee: 0,
+    motorcycleType: "",
+    value: 29,
+    status: DELIVERY_STATUS.WAITING_PICKUP,
+    reference: "Casa com portão preto",
+    courierUsername: "ALL",
+    courierName: "Todos os motoboys",
+    pickedUpByUsername: "",
+    pickedUpByName: "",
+    pickedUpAt: "",
+    deliveredByUsername: "",
+    deliveredByName: "",
+    deliveredAt: "",
+    ownerApproved: false,
+    ownerApprovedAt: "",
+    launchedAt: "2026-05-02T15:10:00.000Z",
+  },
+];

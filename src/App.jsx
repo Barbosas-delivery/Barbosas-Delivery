@@ -1,5 +1,176 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
+import { insertWithSchemaRetry, updateWithSchemaRetry } from "./services/supabaseSchema";
+import {
+  loadProductsFromSupabase,
+  mapProductFromDatabase,
+  buildProductInsertPayload,
+  buildProductPatch,
+  insertProductInSupabase,
+  updateProductInSupabase,
+  updateProductStatusInSupabase,
+} from "./services/supabaseProducts";
+import {
+  mapClientFromDatabase,
+  mapClientToDatabase,
+  loadClientsFromSupabase,
+  insertClientInSupabase,
+  updateClientInSupabase,
+} from "./services/supabaseClients";
+import {
+  mapCourierFromDatabase,
+  mapCourierToDatabase,
+  loadCouriersFromSupabase,
+  insertCourierInSupabase,
+  updateCourierInSupabase,
+  updateCourierStatusInSupabase,
+} from "./services/supabaseCouriers";
+import { loadNotificationsFromSupabase, saveNotificationToSupabaseService } from "./services/supabaseNotifications";
+import { writeAuditLog, writeAppError } from "./services/supabaseAudit";
+import {
+  fetchOrderPaymentsFromSupabase,
+  cancelExistingOrderPaymentsInSupabase,
+  saveOrderPaymentsInSupabase,
+  saveStockMovementsInSupabase,
+  loadDeliveriesFromSupabase,
+  insertOrderWithItemsInSupabase,
+  updateOrderInSupabase,
+} from "./services/supabaseOrders";
+import {
+  loadCashDataFromSupabase,
+  findOpenCashSessionFromSupabase,
+  openCashSessionInSupabase,
+  insertCashSangriaInSupabase,
+  closeCashSessionInSupabase,
+} from "./services/supabaseCash";
+import { loadTabsAccountsFromSupabase, persistTabAccountInSupabase } from "./services/supabaseTabs";
+import {
+  APP_VERSION,
+  DELIVERY_STATUS,
+  PAYMENT_STATUS,
+  CANCELLATION_REASONS,
+  ORDER_TYPE,
+  DEFAULT_TAB_CREDIT_LIMIT,
+  TAB_FAST_PAYMENT_BONUS,
+  TAB_DELAY_PENALTY,
+  TAB_DELAY_LIMIT_HOURS,
+  STORAGE_24_MONTHS_MS,
+} from "./constants/appConstants";
+import {
+  initialStoreSettings,
+  initialProductGroups,
+  initialPromotions,
+  initialKits,
+  initialProducts,
+  initialClients,
+  initialCouriers,
+  initialDeliveries,
+} from "./constants/initialData";
+import {
+  money,
+  onlyCepNumbers,
+  isValidCep,
+  formatCep,
+  onlyPhoneNumbers,
+  isValidBrazilMobilePhone,
+  formatBrazilMobilePhone,
+  normalizePhoneInput,
+  normalizeBarcode,
+  escapeHtml,
+  buildReceiptItemsHtml,
+} from "./utils/formatters";
+import {
+  toNonNegativeNumber,
+  toPositiveInteger,
+  toSafeMoneyNumber,
+  toSafeNumber,
+  calculateChangeDue,
+} from "./utils/numbers";
+import {
+  getPaymentLabel,
+  createEmptyMixedPayment,
+  getMixedPaymentTotal,
+  getMixedPaymentDetails,
+  isMixedPaymentBalanced,
+  isOrderAboveMinimum,
+  getPaymentStatusClass,
+} from "./utils/payments";
+import {
+  validateOrderItems,
+  syncOrderItemsWithProducts,
+  reduceProductStock,
+  restoreProductStock,
+} from "./utils/stock";
+import {
+  calculatePromotionFromPercent,
+  getPromotionPrice,
+  getProductActivePromotion,
+  getProductSalePrice,
+  isPromotionInPeriod,
+  getActivePromotions,
+  getPromotionProduct,
+  buildKitProductsTotal,
+  isKitInPeriod,
+  getActiveKits,
+  getCustomerVisibleKits,
+  getKitItemsForOrder,
+  describeKitItems,
+  getActiveProducts,
+  normalizeGroupName,
+  hasDuplicateGroup,
+  getVisibleProductGroups,
+  groupProductsByCategory,
+} from "./utils/catalog";
+import {
+  buildDayReport,
+  buildCashClosingReport,
+  getOrderDateMs,
+  buildPeriodSalesReport,
+  buildProductSalesReport,
+  buildCategorySalesReport,
+  buildPrintableRowsHtml,
+  buildStoreDeliveryFinancialSummary,
+} from "./utils/reports";
+import {
+  isDeliveryOrder,
+  isCounterOrder,
+  needsStoreApprovalBeforeCourier,
+  canCourierControlDelivery,
+  normalizeDeliveryFee,
+  buildDeliveryTotal,
+  buildDiscountedProductsTotal,
+  normalizeDiscount,
+  calculateCourierFee,
+  calculateStoreFee,
+  buildDeliveryAddress,
+  getCourierDeliveries,
+  getStatusClass,
+  getOrderLabel,
+  buildOrderConfirmation,
+} from "./utils/delivery";
+import {
+  normalizeNotificationAudience,
+  createNotification,
+  getUnreadNotificationCount,
+  getAudienceNotifications,
+} from "./utils/notifications";
+import {
+  normalizeStoreCredential,
+  normalizeStoreLogin,
+  isValidLogin,
+  isStoreLoginLocked,
+  getStoreLockMessage,
+  isTruthyActive,
+  generateStrongPassword,
+  isStrongPassword,
+  hasDuplicateCourierUsername,
+  isValidCourierLogin,
+  findCourierByLogin,
+  isCourierUsernameAvailable,
+} from "./utils/auth";
+
+import { printThermalHtml as printThermalHtmlBase } from "./utils/printing";
+
 // Bloco 4: ajustes de layout e experiência por perfil. Cliente/entregador mobile-first; caixa/admin otimizados para tablet e desktop.
 const Card = memo(function Card({ className = "", children, ...props }) {
   return <div className={className} {...props}>{children}</div>;
@@ -76,199 +247,6 @@ const ICONS = {
   bell: "🔔",
 };
 
-const APP_VERSION = "5.1.0-revisado";
-const DELIVERY_FEE = 5;
-const COURIER_DELIVERY_SHARE = 0.7;
-const STORE_DELIVERY_SHARE = 0.3;
-
-const DELIVERY_STATUS = {
-  WAITING_STORE_APPROVAL: "Aguardando aprovação do pedido",
-  WAITING_PICKUP: "Aguardando retirada",
-  OUT_FOR_DELIVERY: "Saiu para entrega",
-  WAITING_OWNER_APPROVAL: "Aguardando aprovação da loja",
-  CONFIRMED_DELIVERED: "Entregue confirmado",
-  DELIVERY_PROBLEM: "Problema na entrega",
-  CANCELLED: "Pedido cancelado",
-};
-
-const PAYMENT_STATUS = {
-  PENDING: "Pagamento pendente",
-  PAID: "Pago",
-  RECEIVABLE: "Falta receber",
-  STORE_CREDIT: "Fiado/anotado",
-};
-
-const CANCELLATION_REASONS = ["Cliente desistiu", "Produto indisponível", "Endereço incorreto", "Pedido duplicado", "Outro motivo"];
-
-const ORDER_TYPE = {
-  DELIVERY: "delivery",
-  COUNTER: "counter",
-};
-
-const DEFAULT_TAB_CREDIT_LIMIT = 50;
-const TAB_FAST_PAYMENT_BONUS = 10;
-const TAB_DELAY_PENALTY = 10;
-const TAB_DELAY_LIMIT_HOURS = 24;
-
-const initialStoreSettings = {
-  storeName: "Barbosas Delivery",
-  storePhone: "(43) 98873-6791",
-  defaultDeliveryFee: DELIVERY_FEE,
-  minimumOrderValue: 20,
-  estimatedDeliveryTime: "15 a 25 minutinhos",
-  whatsappMessage: "Olá, seu pedido da Barbosa's está em andamento.",
-  openingHours: "Segunda a quinta das 09:00 às 00:00 • Sexta e sábado das 09:00 às 03:00 • Domingo das 13:00 às 00:00",
-  isOpen: true,
-};
-
-const initialProductGroups = ["Bebidas", "Refrigerantes", "Energéticos", "Salgadinhos", "Copões"];
-
-const initialPromotions = [
-  {
-    id: 1,
-    title: "COPÃO GELADO",
-    description: "Copão de Vodka nos sabores Maracujá e Frutas Vermelhas.",
-    productId: 1,
-    badge: "Promoção da loja",
-    imageUrl: "",
-    discountPercent: 10,
-    promotionalPrice: 15.3,
-    startDate: "",
-    endDate: "",
-    active: true,
-  },
-];
-
-const initialKits = [
-  {
-    id: 1,
-    name: "Kit Balada",
-    description: "2 vodka, 2 energéticos, 2 gelos e 2 copos.",
-    items: [
-      { productId: 1, quantity: 2 },
-      { productId: 2, quantity: 2 },
-    ],
-    price: 44,
-    endDate: "",
-    active: true,
-  },
-];
-
-const initialProducts = [
-  {
-    id: 1,
-    name: "Copão de Vodka",
-    category: "Bebidas",
-    price: 17,
-    cost: 8,
-    stock: 42,
-    minStock: 10,
-    ncm: "22086000",
-    barcode: "7890000000011",
-    active: true,
-  },
-  {
-    id: 2,
-    name: "Coca-Cola Lata",
-    category: "Refrigerantes",
-    price: 5,
-    cost: 3.1,
-    stock: 8,
-    minStock: 12,
-    ncm: "22021000",
-    barcode: "7894900011517",
-    active: true,
-  },
-];
-
-const initialClients = [
-  {
-    id: 1,
-    name: "João Silva",
-    phone: "(43) 99999-0000",
-    cep: "87000-000",
-    street: "Av. Brasil",
-    number: "1500",
-    district: "Centro",
-    city: "Maringá",
-    state: "PR",
-    reference: "Próximo ao mercado",
-  },
-];
-
-const initialCouriers = [
-  {
-    id: 1,
-    name: "Motoboy Teste",
-    username: "moto01",
-    password: "B4rb@2026!",
-    active: true,
-    createdAt: "02/05/2026 14:30",
-    motorcycleType: "Moto própria",
-  },
-];
-
-const initialDeliveries = [
-  {
-    id: 1023,
-    client: "João Silva",
-    phone: "(43) 99999-0000",
-    address: "Av. Brasil, 1500 - Centro",
-    payment: "Pix",
-    paymentStatus: PAYMENT_STATUS.PAID,
-    productsTotal: 37,
-    deliveryFee: DELIVERY_FEE,
-    courierFee: 0,
-    storeFee: 0,
-    motorcycleType: "",
-    value: 42,
-    status: DELIVERY_STATUS.WAITING_PICKUP,
-    reference: "Próximo ao mercado",
-    courierUsername: "ALL",
-    courierName: "Todos os motoboys",
-    pickedUpByUsername: "",
-    pickedUpByName: "",
-    pickedUpAt: "",
-    deliveredByUsername: "",
-    deliveredByName: "",
-    deliveredAt: "",
-    ownerApproved: false,
-    ownerApprovedAt: "",
-    launchedAt: "2026-05-02T14:30:00.000Z",
-  },
-  {
-    id: 1024,
-    client: "Maria Souza",
-    phone: "(43) 98888-1111",
-    address: "Rua Paraná, 80 - Zona 7",
-    payment: "Dinheiro",
-    paymentStatus: PAYMENT_STATUS.PENDING,
-    productsTotal: 24,
-    deliveryFee: DELIVERY_FEE,
-    courierFee: 0,
-    storeFee: 0,
-    motorcycleType: "",
-    value: 29,
-    status: DELIVERY_STATUS.WAITING_PICKUP,
-    reference: "Casa com portão preto",
-    courierUsername: "ALL",
-    courierName: "Todos os motoboys",
-    pickedUpByUsername: "",
-    pickedUpByName: "",
-    pickedUpAt: "",
-    deliveredByUsername: "",
-    deliveredByName: "",
-    deliveredAt: "",
-    ownerApproved: false,
-    ownerApprovedAt: "",
-    launchedAt: "2026-05-02T15:10:00.000Z",
-  },
-];
-
-
-const STORAGE_PREFIX = "barbosas_delivery_v3_";
-const STORAGE_24_MONTHS_MS = 1000 * 60 * 60 * 24 * 730;
-
 function readStoredValue(key, fallback) {
   // Registro permanente deve vir do Supabase. O navegador não é mais usado como apoio.
   return fallback;
@@ -284,40 +262,6 @@ function pruneRecordsByMonths(records, dateFields = ["closedAt", "createdAt", "l
     const time = dateFields.map((field) => new Date(record?.[field] || 0).getTime()).find((value) => Number.isFinite(value) && value > 0);
     return !time || time >= minTime;
   });
-}
-
-function money(value) {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
-}
-
-function toNonNegativeNumber(value, fallback = 0) {
-  const number = Number(String(value ?? "").replace(",", "."));
-  if (!Number.isFinite(number) || number < 0) return fallback;
-  return number;
-}
-
-
-function toNullableNumber(value) {
-  if (value === null || value === undefined) return null;
-  const text = String(value).trim().replace(",", ".");
-  if (text === "") return null;
-  const number = Number(text);
-  return Number.isFinite(number) ? number : null;
-}
-
-function toPositiveInteger(value, fallback = 1) {
-  const number = Number(String(value ?? "").replace(",", "."));
-  if (!Number.isFinite(number)) return fallback;
-  return Math.max(1, Math.floor(number));
-}
-
-function toSafeMoneyNumber(value, fallback = 0) {
-  const number = Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function toSafeNumber(value, fallback = 0) {
-  return toSafeMoneyNumber(value, fallback);
 }
 
 function normalizeCustomerCartItem(item, index = 0) {
@@ -345,39 +289,9 @@ function sanitizeCustomerCart(cart) {
     .filter((item) => item && item.quantity > 0 && item.price >= 0);
 }
 
-function normalizeBarcode(value) {
-  return String(value || "").replace(/\D/g, "").trim();
-}
-
 function hasCurrencyValue(text, value) {
   const normalized = String(text || "").replace(/ /g, " ").replace(/&nbsp;/g, " ");
   return normalized.includes(money(value).replace(/ /g, " "));
-}
-
-function normalizeStoreCredential(value) {
-  return String(value || "").trim();
-}
-
-function normalizeStoreLogin(value) {
-  return normalizeStoreCredential(value).toLowerCase();
-}
-
-function isValidLogin(login, password) {
-  // Fallback legado para não travar a operação caso a tabela store_users ainda não exista.
-  // A regra principal do Bloco 3 passa a ser validar a loja em store_users no Supabase.
-  const normalizedLogin = normalizeStoreLogin(login);
-  const normalizedPassword = normalizeStoreCredential(password);
-  return (normalizedLogin === "loja" || normalizedLogin === "gabrieladmin") && normalizedPassword.length >= 4;
-}
-
-function isStoreLoginLocked(lockedUntil) {
-  return lockedUntil && Date.now() < new Date(lockedUntil).getTime();
-}
-
-function getStoreLockMessage(lockedUntil) {
-  const remainingMs = Math.max(0, new Date(lockedUntil || 0).getTime() - Date.now());
-  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
-  return `Muitas tentativas inválidas. Aguarde ${remainingMinutes} minuto(s) para tentar novamente.`;
 }
 
 function hasDuplicateBarcode(products, barcode) {
@@ -390,165 +304,19 @@ function isProductBarcodeAvailable(products, barcode, currentProductId) {
   return !products.some((product) => product.id !== currentProductId && String(product.barcode) === normalizedBarcode);
 }
 
-function isDeliveryOrder(order) {
-  if (!order) return false;
-  return !order.orderType || order.orderType === ORDER_TYPE.DELIVERY;
-}
-
-function isCounterOrder(order) {
-  if (!order) return false;
-  return order.orderType === ORDER_TYPE.COUNTER;
-}
-
-function needsStoreApprovalBeforeCourier(order) {
-  if (!isDeliveryOrder(order)) return false;
-
-  // A única situação que deve bloquear o painel do entregador é o pedido ainda
-  // estar explicitamente aguardando aprovação da loja. Depois que a loja muda
-  // o status para "Aguardando retirada", o pedido precisa aparecer para os
-  // entregadores mesmo se colunas antigas como store_order_approved não existirem
-  // ou não tiverem sido gravadas no Supabase.
-  if (order.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return true;
-
-  const releasedStatuses = [
-    DELIVERY_STATUS.WAITING_PICKUP,
-    DELIVERY_STATUS.OUT_FOR_DELIVERY,
-    DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
-    DELIVERY_STATUS.DELIVERY_PROBLEM,
-    DELIVERY_STATUS.CONFIRMED_DELIVERED,
-  ];
-
-  if (releasedStatuses.includes(order.status)) return false;
-
-  if (order.needsStoreApproval === true && order.storeOrderApproved !== true) return true;
-  if (order.origin === "customer" && order.storeOrderApproved !== true && !order.approvedAt) return true;
-  if (String(order.notes || "").toLowerCase().includes("pedido enviado pelo cliente") && order.storeOrderApproved !== true && !order.approvedAt) return true;
-  return false;
-}
-
-function buildDayReport(products, deliveries) {
-  const activeDeliveries = deliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
-  const deliveryOrders = deliveries.filter((delivery) => isDeliveryOrder(delivery));
-  const activeDeliveryOrders = deliveryOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
-  const counterOrders = deliveries.filter((delivery) => isCounterOrder(delivery));
-  const activeCounterOrders = counterOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
-  const cancelled = deliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED).length;
-  const totalDelivery = activeDeliveries.reduce((sum, item) => sum + Number(item.value || 0), 0);
-  const deliverySalesTotal = activeDeliveryOrders.reduce((sum, item) => sum + Number(item.value || 0), 0);
-  const counterSalesTotal = activeCounterOrders.reduce((sum, item) => sum + Number(item.value || 0), 0);
-  const delivered = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED).length;
-  const pending = activeDeliveryOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED).length;
-  const lowStock = products.filter((product) => Number(product.stock) <= Number(product.minStock)).length;
-  const outOfStock = products.filter((product) => Number(product.stock) <= 0).length;
-  const activeProducts = products.filter((product) => product.active).length;
-  const inactiveProducts = products.filter((product) => !product.active).length;
-  const waitingPickup = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_PICKUP).length;
-  const outForDelivery = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.OUT_FOR_DELIVERY).length;
-  const waitingApproval = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL).length;
-  const deliveryProblem = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.DELIVERY_PROBLEM).length;
-  const productsTotal = activeDeliveries.reduce((sum, delivery) => sum + Number(delivery.productsTotal || 0), 0);
-  const discountsTotal = activeDeliveries.reduce((sum, delivery) => sum + Number(delivery.discount || 0), 0);
-  const deliveryFeesTotal = activeDeliveryOrders.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0);
-  const byPayment = ["Pix", "Dinheiro", "Cartão débito", "Cartão crédito"].reduce((acc, payment) => {
-    acc[payment] = activeDeliveries.filter((delivery) => delivery.payment === payment).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0);
-    return acc;
-  }, {});
-  const paidTotal = activeDeliveries.filter((delivery) => delivery.paymentStatus === PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0);
-  const pendingPaymentTotal = activeDeliveries.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0);
-  return {
-    totalDelivery,
-    delivered,
-    pending,
-    cancelled,
-    lowStock,
-    outOfStock,
-    activeProducts,
-    inactiveProducts,
-    waitingPickup,
-    outForDelivery,
-    waitingApproval,
-    deliveryProblem,
-    deliveryOrders: activeDeliveryOrders.length,
-    counterOrders: activeCounterOrders.length,
-    deliverySalesTotal,
-    counterSalesTotal,
-    productsTotal,
-    discountsTotal,
-    deliveryFeesTotal,
-    byPayment,
-    paidTotal,
-    pendingPaymentTotal,
-  };
-}
-
 function buildOrderTotal(items) {
   return sanitizeCustomerCart(items).reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1), 0);
 }
 
-function getPaymentLabel(payment, changeFor, mixedPaymentDetails = "") {
-  if (payment === "Misto") return mixedPaymentDetails ? `Misto - ${mixedPaymentDetails}` : "Misto - formas informadas no fechamento";
-  if (payment !== "Dinheiro") return payment || "Pagamento não informado";
-  return changeFor ? `Dinheiro - troco para ${money(changeFor)}` : "Dinheiro - sem troco informado";
-}
 
-function createEmptyMixedPayment() {
-  return { pix: "", cash: "", debit: "", credit: "" };
-}
 
-function getMixedPaymentTotal(parts = {}) {
-  return Number(parts.pix || 0) + Number(parts.cash || 0) + Number(parts.debit || 0) + Number(parts.credit || 0);
-}
 
-function getMixedPaymentDetails(parts = {}) {
-  return [
-    ["Pix", parts.pix],
-    ["Dinheiro", parts.cash],
-    ["Débito", parts.debit],
-    ["Crédito", parts.credit],
-  ]
-    .filter(([, value]) => Number(value || 0) > 0)
-    .map(([label, value]) => `${label}: ${money(value)}`)
-    .join(" • ");
-}
 
-function isMixedPaymentBalanced(parts = {}, total = 0) {
-  return Math.abs(getMixedPaymentTotal(parts) - Number(total || 0)) < 0.01;
-}
 
-function calculatePromotionFromPercent(productPrice, percent) {
-  const safePrice = toNonNegativeNumber(productPrice, 0);
-  const safePercent = Math.min(99, Math.max(0, toNonNegativeNumber(percent, 0)));
-  return Math.max(0, safePrice - safePrice * (safePercent / 100));
-}
 
-function getPromotionPercent(promotion) {
-  return Math.min(99, Math.max(0, toNonNegativeNumber(promotion?.discountPercent, 0)));
-}
 
-function getPromotionPrice(product, promotion) {
-  if (!product || !promotion) return Number(product?.price || 0);
-  const promotionalPrice = toNonNegativeNumber(promotion.promotionalPrice, 0);
-  if (promotionalPrice > 0 && promotionalPrice < toNonNegativeNumber(product.price, 0)) return promotionalPrice;
-  const percent = getPromotionPercent(promotion);
-  if (percent > 0) return calculatePromotionFromPercent(product.price, percent);
-  return toNonNegativeNumber(product.price, 0);
-}
 
-function getProductActivePromotion(product, promotions = []) {
-  if (!product) return null;
-  return (Array.isArray(promotions) ? promotions : [])
-    .filter((promotion) => Number(promotion.productId) === Number(product.id) && promotion.active && isPromotionInPeriod(promotion) && getPromotionPrice(product, promotion) < Number(product.price || 0))
-    .sort((a, b) => {
-      const aTime = new Date(a.createdAt || a.created_at || 0).getTime() || Number(a.id || 0);
-      const bTime = new Date(b.createdAt || b.created_at || 0).getTime() || Number(b.id || 0);
-      return bTime - aTime;
-    })[0] || null;
-}
 
-function getProductSalePrice(product, promotions = []) {
-  const promotion = getProductActivePromotion(product, promotions);
-  return promotion ? getPromotionPrice(product, promotion) : Number(product?.price || 0);
-}
 
 function formatProductImageHelp() {
   return "Formatos aceitos: JPG, PNG ou WEBP. Melhor proporção: quadrada 1:1 ou vertical 4:5.";
@@ -571,336 +339,13 @@ function buildCustomerHistory(deliveries, phone) {
   };
 }
 
-function isOrderAboveMinimum(productsTotal, minimumOrderValue) {
-  return Number(productsTotal || 0) >= Number(minimumOrderValue || 0);
-}
 
-function getPaymentStatusClass(paymentStatus) {
-  if (paymentStatus === PAYMENT_STATUS.PAID) return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (paymentStatus === PAYMENT_STATUS.STORE_CREDIT) return "bg-purple-100 text-purple-700 border-purple-200";
-  if (paymentStatus === PAYMENT_STATUS.RECEIVABLE) return "bg-amber-100 text-amber-700 border-amber-200";
-  return "bg-red-100 text-red-700 border-red-200";
-}
 
-function getOrderLabel(order, capitalize = false) {
-  const label = isCounterOrder(order) ? "venda" : "pedido";
-  return capitalize ? label.charAt(0).toUpperCase() + label.slice(1) : label;
-}
 
-function buildOrderConfirmation(delivery) {
-  return {
-    id: delivery.id,
-    total: delivery.value,
-    payment: getPaymentLabel(delivery.payment, delivery.changeFor),
-  };
-}
-
-function calculateChangeDue(changeFor, total) {
-  const received = toSafeMoneyNumber(changeFor, 0);
-  const saleTotal = toSafeMoneyNumber(total, 0);
-  if (received <= 0 || received < saleTotal) return 0;
-  return received - saleTotal;
-}
 
 function getCartMatchKey(item) {
   if (!item) return "";
   return String(item.cartKey || item.id || item.productId || "");
-}
-
-function normalizeCourierCredential(value) {
-  return String(value || "").trim();
-}
-
-function isTruthyActive(value) {
-  return value === true || value === "true" || value === 1 || value === "1" || value === undefined || value === null;
-}
-
-function buildKitProductsTotal(kitItems, products) {
-  return (kitItems || []).reduce((sum, item) => {
-    const product = products.find((currentProduct) => currentProduct.id === Number(item.productId));
-    return sum + Number(product?.price || 0) * Number(item.quantity || 0);
-  }, 0);
-}
-
-function isKitInPeriod(kit, now = new Date()) {
-  const today = now.toISOString().slice(0, 10);
-  if (kit.endDate && today > kit.endDate) return false;
-  return true;
-}
-
-function getActiveKits(kits, products) {
-  return kits.filter((kit) => {
-    if (!kit.active || !isKitInPeriod(kit)) return false;
-    if (!kit.items || kit.items.length === 0) return false;
-
-    const quantitiesByProduct = kit.items.reduce((acc, item) => {
-      const productId = Number(item.productId);
-      acc[productId] = Number(acc[productId] || 0) + Number(item.quantity || 0);
-      return acc;
-    }, {});
-
-    return Object.entries(quantitiesByProduct).every(([productId, quantity]) => {
-      const product = products.find((currentProduct) => currentProduct.id === Number(productId));
-      return product && product.active && Number(product.stock || 0) >= Number(quantity || 0);
-    });
-  });
-}
-
-function getCustomerVisibleKits(kits, products = []) {
-  return (Array.isArray(kits) ? kits : []).filter((kit) => {
-    if (!kit || !kit.active || !isKitInPeriod(kit) || !Array.isArray(kit.items) || kit.items.length === 0) return false;
-    return kit.items.every((item) => {
-      const product = products.find((currentProduct) => Number(currentProduct.id) === Number(item.productId));
-      return product && product.active === true && Number(product.stock || 0) >= Number(item.quantity || 0);
-    });
-  });
-}
-
-function getKitItemsForOrder(kit, products) {
-  return (kit.items || []).map((item) => {
-    const product = products.find((currentProduct) => currentProduct.id === Number(item.productId));
-    return {
-      id: product?.id,
-      name: product?.name || "Produto do kit",
-      price: Number(product?.price || 0),
-      quantity: Number(item.quantity || 0),
-      barcode: product?.barcode || "",
-      kitName: kit.name,
-    };
-  });
-}
-
-function describeKitItems(kit, products) {
-  return (kit.items || [])
-    .map((item) => {
-      const product = products.find((currentProduct) => currentProduct.id === Number(item.productId));
-      return `${item.quantity}x ${product?.name || "Produto removido"}`;
-    })
-    .join(", ");
-}
-
-function expandItemsForStock(items) {
-  return (items || []).flatMap((item) => {
-    if (item.isKit && Array.isArray(item.kitItems)) {
-      return item.kitItems.map((kitItem) => ({ ...kitItem, quantity: toPositiveInteger(kitItem.quantity, 0) * toPositiveInteger(item.quantity, 1) }));
-    }
-    return item;
-  });
-}
-
-function validateOrderItems(items, products) {
-  if (!items || items.length === 0) return { valid: false, message: "Adicione pelo menos um produto ao pedido." };
-
-  const stockItems = expandItemsForStock(items);
-  if (stockItems.some((item) => item.id === undefined || item.id === null || toPositiveInteger(item.quantity, 0) <= 0)) {
-    return { valid: false, message: "Existe item inválido no pedido. Remova e adicione novamente." };
-  }
-  const quantitiesByProduct = stockItems.reduce((acc, item) => {
-    acc[item.id] = Number(acc[item.id] || 0) + toPositiveInteger(item.quantity, 0);
-    return acc;
-  }, {});
-
-  for (const [productId, quantity] of Object.entries(quantitiesByProduct)) {
-    const product = products.find((currentProduct) => currentProduct.id === Number(productId));
-    if (!product || product.active !== true) {
-      return { valid: false, message: "Produto indisponível no pedido. Remova para continuar." };
-    }
-    if (Number(product.stock || 0) < Number(quantity || 0)) {
-      return { valid: false, message: `Estoque insuficiente para ${product.name}. Disponível: ${product.stock}.` };
-    }
-  }
-
-  return { valid: true, message: "" };
-}
-
-function syncOrderItemsWithProducts(items, products) {
-  return (items || []).map((item) => {
-    if (item.isKit) {
-      return {
-        ...item,
-        price: Number(item.price || 0),
-        kitItems: (item.kitItems || []).map((kitItem) => {
-          const product = products.find((currentProduct) => currentProduct.id === Number(kitItem.id));
-          return {
-            ...kitItem,
-            id: product?.id ?? kitItem.id,
-            name: product?.name || kitItem.name,
-            price: Number(product?.price ?? kitItem.price ?? 0),
-            barcode: product?.barcode || kitItem.barcode || "",
-          };
-        }),
-      };
-    }
-
-    const product = products.find((currentProduct) => currentProduct.id === item.id);
-    return {
-      ...item,
-      name: product?.name || item.name,
-      price: Number(product?.price ?? item.price ?? 0),
-      barcode: product?.barcode || item.barcode,
-    };
-  });
-}
-
-function reduceProductStock(products, items) {
-  const stockItems = expandItemsForStock(items);
-  return products.map((product) => {
-    const totalQuantity = stockItems
-      .filter((item) => Number(item.id) === Number(product.id))
-      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    if (!totalQuantity) return product;
-    return { ...product, stock: Math.max(0, Number(product.stock || 0) - totalQuantity) };
-  });
-}
-
-function restoreProductStock(products, items) {
-  const stockItems = expandItemsForStock(items || []);
-  return products.map((product) => {
-    const totalQuantity = stockItems
-      .filter((item) => Number(item.id) === Number(product.id))
-      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    if (!totalQuantity) return product;
-    return { ...product, stock: Number(product.stock || 0) + totalQuantity };
-  });
-}
-
-function getPaidActiveOrders(deliveries = []) {
-  return (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED && delivery.paymentStatus === PAYMENT_STATUS.PAID);
-}
-
-function buildPaidPaymentBreakdown(deliveries = []) {
-  const totals = { Pix: 0, Dinheiro: 0, "Cartão débito": 0, "Cartão crédito": 0 };
-  getPaidActiveOrders(deliveries).forEach((delivery) => {
-    if (delivery.payment === "Misto") {
-      totals.Pix += Number(delivery.mixedPayment?.pix || 0);
-      totals.Dinheiro += Number(delivery.mixedPayment?.cash || 0);
-      totals["Cartão débito"] += Number(delivery.mixedPayment?.debit || 0);
-      totals["Cartão crédito"] += Number(delivery.mixedPayment?.credit || 0);
-      return;
-    }
-    if (totals[delivery.payment] !== undefined) totals[delivery.payment] += Number(delivery.value || 0);
-  });
-  return totals;
-}
-
-function buildCashClosingReport(deliveries, cashSession = { openingAmount: 0, sangrias: [] }, orderPayments = []) {
-  const openedAtTime = cashSession?.openedAt ? new Date(cashSession.openedAt).getTime() : 0;
-  const orderTime = (delivery) => new Date(delivery.launchedAt || delivery.createdAt || delivery.deliveredAt || delivery.closedAt || 0).getTime() || 0;
-  const hasCashSessionId = Boolean(cashSession?.id);
-  const sessionOrders = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
-    if (hasCashSessionId) return String(delivery.cashSessionId || "") === String(cashSession.id);
-    return !openedAtTime || orderTime(delivery) >= openedAtTime;
-  });
-  const sessionPayments = (Array.isArray(orderPayments) ? orderPayments : []).filter((payment) => {
-    if (!hasCashSessionId) return false;
-    return String(payment.cashSessionId || "") === String(cashSession.id);
-  });
-  const cancelledOrders = sessionOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED);
-  const activeOrders = sessionOrders.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
-  const paidOrders = activeOrders.filter((delivery) => delivery.paymentStatus === PAYMENT_STATUS.PAID);
-  const pendingOrders = activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID);
-  const deliveryOrders = activeOrders.filter((delivery) => isDeliveryOrder(delivery));
-  const counterOrders = activeOrders.filter((delivery) => isCounterOrder(delivery));
-  const byPayment = { Pix: 0, Dinheiro: 0, "Cartão débito": 0, "Cartão crédito": 0 };
-  const hasPaymentRows = sessionPayments.length > 0;
-  if (hasPaymentRows) {
-    sessionPayments
-      .filter((payment) => String(payment.status || "paid") === "paid")
-      .forEach((payment) => {
-        const method = payment.method || "Outro";
-        if (Object.prototype.hasOwnProperty.call(byPayment, method)) {
-          byPayment[method] += toSafeMoneyNumber(payment.amount, 0);
-        }
-      });
-  } else {
-    paidOrders.forEach((delivery) => {
-      if (delivery.payment === "Misto" && delivery.mixedPayment) {
-        byPayment.Pix += toSafeMoneyNumber(delivery.mixedPayment.pix, 0);
-        byPayment.Dinheiro += toSafeMoneyNumber(delivery.mixedPayment.cash, 0);
-        byPayment["Cartão débito"] += toSafeMoneyNumber(delivery.mixedPayment.debit, 0);
-        byPayment["Cartão crédito"] += toSafeMoneyNumber(delivery.mixedPayment.credit, 0);
-        return;
-      }
-      if (Object.prototype.hasOwnProperty.call(byPayment, delivery.payment)) {
-        byPayment[delivery.payment] += toSafeMoneyNumber(delivery.value, 0);
-      }
-    });
-  }
-  const paymentsReceivedTotal = hasPaymentRows
-    ? sessionPayments.filter((payment) => String(payment.status || "paid") === "paid").reduce((sum, payment) => sum + toSafeMoneyNumber(payment.amount, 0), 0)
-    : paidOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0);
-  const paymentsPendingTotal = hasPaymentRows
-    ? sessionPayments.filter((payment) => String(payment.status || "") !== "paid").reduce((sum, payment) => sum + toSafeMoneyNumber(payment.amount, 0), 0)
-    : pendingOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0);
-  const sangriaTotal = (cashSession.sangrias || []).reduce((sum, item) => sum + toSafeMoneyNumber(item.value, 0), 0);
-  const openingAmount = toSafeMoneyNumber(cashSession.openingAmount, 0);
-  const expectedDrawerCash = openingAmount + byPayment.Dinheiro - sangriaTotal;
-  return {
-    orders: sessionOrders,
-    activeOrders,
-    totalSold: activeOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
-    totalReceived: paymentsReceivedTotal,
-    pendingAmount: paymentsPendingTotal,
-    expectedCash: byPayment.Dinheiro,
-    openingAmount,
-    sangriaTotal,
-    expectedDrawerCash,
-    byPayment,
-    deliverySold: deliveryOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
-    counterSold: counterOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
-    deliveryOrders: deliveryOrders.length,
-    counterOrders: counterOrders.length,
-    cancelledOrders: cancelledOrders.length,
-    cancelledAmount: cancelledOrders.reduce((sum, delivery) => sum + toSafeMoneyNumber(delivery.value, 0), 0),
-    pendingOrders: pendingOrders.length,
-    paidOrders: paidOrders.length,
-    openedAt: cashSession.openedAt || "",
-    closedAt: cashSession.closedAt || "",
-  };
-}
-
-function canCourierControlDelivery(delivery, courierUsername) {
-  if (!isDeliveryOrder(delivery) || delivery.status === DELIVERY_STATUS.CANCELLED) return false;
-  if (!delivery.pickedUpByUsername) return true;
-  return String(delivery.pickedUpByUsername).toLowerCase() === String(courierUsername || "").toLowerCase();
-}
-
-function normalizeDeliveryFee(value) {
-  if (value === "" || value === null || value === undefined) return DELIVERY_FEE;
-  return Math.max(0, Number(value || 0));
-}
-
-function buildDeliveryTotal(productsTotal, deliveryFee = DELIVERY_FEE, discount = 0) {
-  const finalDeliveryFee = normalizeDeliveryFee(deliveryFee);
-  return Math.max(0, Number(productsTotal || 0) + finalDeliveryFee - Number(discount || 0));
-}
-
-function buildDiscountedProductsTotal(productsTotal, discount = 0) {
-  return Math.max(0, Number(productsTotal || 0) - Number(discount || 0));
-}
-
-function normalizeDiscount(discount = 0, baseTotal = 0) {
-  return Math.min(Math.max(0, Number(discount || 0)), Math.max(0, Number(baseTotal || 0)));
-}
-
-function isStoreMotorcycle(motorcycleType) {
-  return String(motorcycleType || "").toLowerCase() === "moto do estabelecimento";
-}
-
-function calculateCourierFee(deliveryFee = DELIVERY_FEE, motorcycleType = "Moto do estabelecimento") {
-  const finalFee = normalizeDeliveryFee(deliveryFee);
-  return isStoreMotorcycle(motorcycleType) ? finalFee * COURIER_DELIVERY_SHARE : finalFee;
-}
-
-function calculateStoreFee(deliveryFee = DELIVERY_FEE, motorcycleType = "Moto do estabelecimento") {
-  const finalFee = normalizeDeliveryFee(deliveryFee);
-  return isStoreMotorcycle(motorcycleType) ? finalFee * STORE_DELIVERY_SHARE : 0;
-}
-
-function getCourierMotorcycleType(couriers, courierUsername) {
-  const normalizedUsername = String(courierUsername || "").trim().toLowerCase();
-  const courier = couriers.find((item) => item.username.toLowerCase() === normalizedUsername);
-  return courier?.motorcycleType || "Moto própria";
 }
 
 function getDateInputValue(date) {
@@ -915,197 +360,6 @@ function isDateInRange(isoDate, startDate, endDate) {
   return true;
 }
 
-function buildDeliveryAddress(client) {
-  if (!client) return "";
-  return `${client.street}, ${client.number} - ${client.district}, ${client.city}/${client.state}`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function buildReceiptItemsHtml(items) {
-  if (!items || items.length === 0) {
-    return `<tr><td colspan="4">Pedido sem itens detalhados.</td></tr>`;
-  }
-
-  return items
-    .map(
-      (item) =>
-        `<tr><td>${escapeHtml(item.quantity)}x</td><td>${escapeHtml(item.name)}</td><td>${money(item.price)}</td><td>${money(Number(item.price || 0) * Number(item.quantity || 0))}</td></tr>`
-    )
-    .join("");
-}
-
-function onlyCepNumbers(cep) {
-  return String(cep || "").replace(/[^0-9]/g, "");
-}
-
-function isValidCep(cep) {
-  return onlyCepNumbers(cep).length === 8;
-}
-
-function formatCep(cep) {
-  const numbers = onlyCepNumbers(cep);
-  if (numbers.length !== 8) return String(cep || "");
-  return numbers.slice(0, 5) + "-" + numbers.slice(5);
-}
-
-function onlyPhoneNumbers(phone) {
-  return String(phone || "").replace(/[^0-9]/g, "");
-}
-
-function isValidBrazilMobilePhone(phone) {
-  const numbers = onlyPhoneNumbers(phone);
-  return numbers.length === 11 && numbers[2] === "9";
-}
-
-function formatBrazilMobilePhone(phone) {
-  const numbers = onlyPhoneNumbers(phone).slice(0, 11);
-  if (numbers.length <= 2) return numbers;
-  if (numbers.length <= 3) return "(" + numbers.slice(0, 2) + ") " + numbers.slice(2);
-  if (numbers.length <= 7) return "(" + numbers.slice(0, 2) + ") " + numbers.slice(2, 3) + numbers.slice(3);
-  return "(" + numbers.slice(0, 2) + ") " + numbers.slice(2, 3) + numbers.slice(3, 7) + "-" + numbers.slice(7, 11);
-}
-
-
-function normalizePhoneInput(value) {
-  return onlyPhoneNumbers(value).slice(0, 11);
-}
-
-function normalizeIdentityName(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-}
-
-function hasDuplicateClientRecord(clients, candidate, ignoredId = null) {
-  // Regra definida: cliente duplicado deve ser bloqueado somente pelo telefone.
-  // Nomes iguais são permitidos, porque podem existir dois clientes com o mesmo nome.
-  const candidatePhone = onlyPhoneNumbers(candidate?.phone || "");
-  if (!candidatePhone) return false;
-  return (Array.isArray(clients) ? clients : []).some((client) => {
-    if (ignoredId !== null && String(client.id) === String(ignoredId)) return false;
-    return onlyPhoneNumbers(client.phone || "") === candidatePhone;
-  });
-}
-
-function getOrderDateMs(order) {
-  return new Date(order?.launchedAt || order?.createdAt || order?.closedAt || order?.deliveredAt || 0).getTime() || 0;
-}
-
-function isOrderInPeriod(order, startDate, endDate) {
-  const time = getOrderDateMs(order);
-  if (!time) return false;
-  const start = startDate ? new Date(`${startDate}T00:00:00`).getTime() : 0;
-  const end = endDate ? new Date(`${endDate}T23:59:59`).getTime() : Number.MAX_SAFE_INTEGER;
-  return time >= start && time <= end;
-}
-
-function buildPeriodSalesReport(deliveries, startDate, endDate, orderPayments = []) {
-  const periodDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => isOrderInPeriod(delivery, startDate, endDate));
-  const activeOrders = periodDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED);
-  const cancelledOrders = periodDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED);
-  const activeOrderIds = new Set(activeOrders.map((delivery) => String(delivery.id)));
-  const byPayment = { Pix: 0, Dinheiro: 0, "Cartão débito": 0, "Cartão crédito": 0 };
-  const matchingPayments = (Array.isArray(orderPayments) ? orderPayments : []).filter((payment) => activeOrderIds.has(String(payment.orderId)) && String(payment.status || "paid") === "paid");
-
-  if (matchingPayments.length > 0) {
-    matchingPayments.forEach((payment) => {
-      if (Object.prototype.hasOwnProperty.call(byPayment, payment.method)) {
-        byPayment[payment.method] += toSafeMoneyNumber(payment.amount, 0);
-      }
-    });
-  } else {
-    activeOrders.forEach((delivery) => {
-      if (delivery.payment === "Misto" && delivery.mixedPayment) {
-        byPayment.Pix += Number(delivery.mixedPayment.pix || 0);
-        byPayment.Dinheiro += Number(delivery.mixedPayment.cash || 0);
-        byPayment["Cartão débito"] += Number(delivery.mixedPayment.debit || 0);
-        byPayment["Cartão crédito"] += Number(delivery.mixedPayment.credit || 0);
-        return;
-      }
-      if (delivery.paymentStatus === PAYMENT_STATUS.PAID && Object.prototype.hasOwnProperty.call(byPayment, delivery.payment)) {
-        byPayment[delivery.payment] += Number(delivery.value || 0);
-      }
-    });
-  }
-
-  const totalPaid = Object.values(byPayment).reduce((sum, value) => sum + toSafeMoneyNumber(value, 0), 0);
-  return {
-    orders: periodDeliveries,
-    activeOrders,
-    cancelledOrders,
-    totalSold: activeOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    totalPaid,
-    pendingAmount: activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    byPayment,
-    deliveryOrders: activeOrders.filter((delivery) => isDeliveryOrder(delivery)).length,
-    counterOrders: activeOrders.filter((delivery) => isCounterOrder(delivery)).length,
-  };
-}
-
-function buildProductSalesReport(deliveries, startDate = "", endDate = "") {
-  const periodDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
-    if (startDate || endDate) return isOrderInPeriod(delivery, startDate, endDate);
-    return true;
-  });
-  const rowsByProduct = new Map();
-  periodDeliveries
-    .filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED)
-    .forEach((delivery) => {
-      (delivery.items || []).forEach((item) => {
-        if (item.isKit && Array.isArray(item.kitItems)) {
-          const key = `kit:${item.kitId || item.id}`;
-          const current = rowsByProduct.get(key) || { key, name: item.name || "Kit", quantity: 0, total: 0, orders: new Set(), kind: "Kit" };
-          current.quantity += toPositiveInteger(item.quantity, 1);
-          current.total += toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1);
-          current.orders.add(delivery.id);
-          rowsByProduct.set(key, current);
-          return;
-        }
-        const key = String(item.id || item.productId || item.barcode || item.name || "produto");
-        const current = rowsByProduct.get(key) || { key, name: item.name || "Produto", quantity: 0, total: 0, orders: new Set(), kind: "Produto" };
-        current.quantity += toPositiveInteger(item.quantity, 1);
-        current.total += toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1);
-        current.orders.add(delivery.id);
-        rowsByProduct.set(key, current);
-      });
-    });
-
-  return Array.from(rowsByProduct.values())
-    .map((row) => ({ ...row, orders: row.orders.size, averageTicket: row.orders.size ? row.total / row.orders.size : 0 }))
-    .sort((a, b) => b.total - a.total);
-}
-
-function buildCategorySalesReport(deliveries, products = [], startDate = "", endDate = "") {
-  const categoryByProduct = new Map(products.map((product) => [String(product.id), product.category || "Sem categoria"]));
-  const productRows = buildProductSalesReport(deliveries, startDate, endDate);
-  const rowsByCategory = new Map();
-  productRows.forEach((row) => {
-    const category = row.kind === "Kit" ? "Kits" : (categoryByProduct.get(String(row.key)) || "Sem categoria");
-    const current = rowsByCategory.get(category) || { category, quantity: 0, total: 0, products: 0 };
-    current.quantity += row.quantity;
-    current.total += row.total;
-    current.products += 1;
-    rowsByCategory.set(category, current);
-  });
-  return Array.from(rowsByCategory.values()).sort((a, b) => b.total - a.total);
-}
-
-function buildPrintableRowsHtml(rows, columns) {
-  if (!Array.isArray(rows) || rows.length === 0) return `<tr><td colspan="${columns.length}">Sem registros no período.</td></tr>`;
-  return rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(column.render ? column.render(row) : row[column.key])}</td>`).join("")}</tr>`).join("");
-}
-
 function isCustomerFormComplete(customer) {
   return Boolean(
     customer.name &&
@@ -1117,153 +371,6 @@ function isCustomerFormComplete(customer) {
       customer.city &&
       customer.state
   );
-}
-
-function generateStrongPassword() {
-  // Senha forte, mas simples para copiar e enviar ao entregador.
-  // Evita caracteres que costumam confundir no WhatsApp ou teclado do celular.
-  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const lower = "abcdefghijkmnopqrstuvwxyz";
-  const numbers = "23456789";
-  const symbols = "@#%*";
-  const all = upper + lower + numbers + symbols;
-  const required = [upper, lower, numbers, symbols].map((group) => group[Math.floor(Math.random() * group.length)]);
-  const remaining = Array.from({ length: 8 }, () => all[Math.floor(Math.random() * all.length)]);
-  return [...required, ...remaining].sort(() => Math.random() - 0.5).join("");
-}
-
-function isStrongPassword(password) {
-  const value = String(password || "");
-  return value.length >= 10 && /[A-Z]/.test(value) && /[a-z]/.test(value) && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
-}
-
-function hasDuplicateCourierUsername(couriers, username) {
-  const normalizedUsername = String(username || "").trim().toLowerCase();
-  return couriers.some((courier) => courier.username.toLowerCase() === normalizedUsername);
-}
-
-function isValidCourierLogin(couriers, username, password) {
-  return Boolean(findCourierByLogin(couriers, username, password));
-}
-
-function findCourierByLogin(couriers, username, password) {
-  const normalizedUsername = normalizeCourierCredential(username).toLowerCase();
-  const normalizedPassword = normalizeCourierCredential(password);
-  return (Array.isArray(couriers) ? couriers : []).find((courier) => {
-    const courierUsername = normalizeCourierCredential(courier.username).toLowerCase();
-    const courierPassword = normalizeCourierCredential(courier.password);
-    return isTruthyActive(courier.active) && courierUsername === normalizedUsername && courierPassword === normalizedPassword;
-  });
-}
-
-function getCourierDeliveries(deliveries) {
-  const deliveryList = Array.isArray(deliveries) ? deliveries : [];
-  return deliveryList.filter((delivery) =>
-    isDeliveryOrder(delivery) &&
-    delivery.status !== DELIVERY_STATUS.CANCELLED &&
-    delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED &&
-    !needsStoreApprovalBeforeCourier(delivery)
-  );
-}
-
-function getActiveProducts(products) {
-  return products.filter((product) => product.active === true);
-}
-
-function normalizeGroupName(groupName) {
-  return String(groupName || "").trim();
-}
-
-function hasDuplicateGroup(groups, groupName) {
-  const normalizedGroup = normalizeGroupName(groupName).toLowerCase();
-  return groups.some((group) => group.toLowerCase() === normalizedGroup);
-}
-
-function getVisibleProductGroups(products, groups) {
-  const activeProductGroups = products.filter((product) => product.active).map((product) => normalizeGroupName(product.category)).filter(Boolean);
-  return groups.filter((group) => activeProductGroups.includes(group));
-}
-
-function groupProductsByCategory(products, groups) {
-  return groups.map((group) => ({
-    group,
-    products: products.filter((product) => normalizeGroupName(product.category) === group),
-  })).filter((section) => section.products.length > 0);
-}
-
-function isCourierUsernameAvailable(couriers, username, currentCourierId) {
-  const normalizedUsername = String(username || "").trim().toLowerCase();
-  if (!normalizedUsername) return false;
-  return !couriers.some((courier) => courier.id !== currentCourierId && courier.username.toLowerCase() === normalizedUsername);
-}
-
-function buildStoreDeliveryFinancialSummary(deliveries) {
-  const confirmed = deliveries.filter((delivery) => isDeliveryOrder(delivery) && delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.ownerApproved === true);
-  return {
-    deliveryCount: confirmed.length,
-    totalDeliveryFees: confirmed.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0),
-    courierAmount: confirmed.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
-    storeAmount: confirmed.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
-  };
-}
-
-function normalizeNotificationAudience(audience) {
-  const value = String(audience || "loja").trim().toLowerCase();
-  if (value === "couriers" || value === "entregadores") return "courier";
-  if (value === "owner" || value === "store" || value === "loja") return "loja";
-  return value || "loja";
-}
-
-function createNotification(type, title, message, audience = "loja", deliveryId = null) {
-  return {
-    id: Date.now() + Math.random(),
-    type,
-    title,
-    message,
-    audience: normalizeNotificationAudience(audience),
-    deliveryId,
-    orderId: deliveryId,
-    read: false,
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function getUnreadNotificationCount(notifications, audience) {
-  const normalizedAudience = normalizeNotificationAudience(audience);
-  return notifications.filter((notification) => normalizeNotificationAudience(notification.audience) === normalizedAudience && !notification.read).length;
-}
-
-function getAudienceNotifications(notifications, audience) {
-  const normalizedAudience = normalizeNotificationAudience(audience);
-  return notifications
-    .filter((notification) => normalizeNotificationAudience(notification.audience) === normalizedAudience)
-    .sort((a, b) => new Date(b.createdAt || b.created_at || 0) - new Date(a.createdAt || a.created_at || 0));
-}
-
-function isPromotionInPeriod(promotion, now = new Date()) {
-  const today = now.toISOString().slice(0, 10);
-  if (promotion.startDate && today < promotion.startDate) return false;
-  if (promotion.endDate && today > promotion.endDate) return false;
-  return true;
-}
-
-function getActivePromotions(promotions, products) {
-  return promotions.filter((promotion) => {
-    const product = products.find((item) => item.id === Number(promotion.productId));
-    return promotion.active && product && product.active && isPromotionInPeriod(promotion) && getPromotionPrice(product, promotion) < Number(product.price || 0);
-  });
-}
-
-function getPromotionProduct(products, promotion) {
-  return products.find((product) => product.id === Number(promotion.productId));
-}
-
-function getStatusClass(status) {
-  if (status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return "bg-emerald-100 text-emerald-700";
-  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return "bg-purple-100 text-purple-700";
-  if (status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL) return "bg-blue-100 text-blue-700";
-  if (status === DELIVERY_STATUS.DELIVERY_PROBLEM || status === DELIVERY_STATUS.CANCELLED) return "bg-red-100 text-red-700";
-  return "bg-amber-100 text-amber-700";
 }
 
 function runSelfTests() {
@@ -1357,7 +464,6 @@ function runSelfTests() {
 
   return tests;
 }
-
 
 function DarkLoginInput({ icon, label, value, onChange, placeholder, type = "text", rightButton = null }) {
   const focusKey = getStableFocusKey(label, placeholder, type);
@@ -1547,10 +653,7 @@ function App() {
   const [lastAction, setLastAction] = useState("");
 
   async function loadProducts() {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("name", { ascending: true });
+    const { products: formattedProducts, error } = await loadProductsFromSupabase();
 
     if (error) {
       console.error("Erro ao carregar produtos:", error);
@@ -1559,63 +662,12 @@ function App() {
       return;
     }
 
-    const formattedProducts = Array.isArray(data)
-      ? data.map((product) => ({
-          id: product.id,
-          name: product.name,
-          category: product.category || "",
-          price: Number(product.price || 0),
-          cost: Number(product.cost || 0),
-          stock: Number(product.stock || 0),
-          minStock: Number(product.min_stock || 0),
-          ncm: product.ncm || "",
-          barcode: product.barcode || "",
-          expirationDate: product.expiration_date || "",
-          imageUrl: product.image_url || "",
-          active: product.active === true,
-        }))
-      : [];
-
     setProducts(formattedProducts);
     setLastAction("Produtos carregados do Supabase.");
   }
 
-  function mapClientFromDatabase(client) {
-    return {
-      id: client.id,
-      name: client.name || "",
-      phone: client.phone || "",
-      cep: client.cep || "",
-      street: client.street || "",
-      number: client.number || "",
-      district: client.district || "",
-      city: client.city || "",
-      state: client.state || "",
-      reference: client.reference || "",
-    };
-  }
-
-  function mapClientToDatabase(client) {
-    return {
-      id: client.id,
-      name: String(client.name || "").trim(),
-      phone: formatBrazilMobilePhone(client.phone),
-      phone_digits: onlyPhoneNumbers(client.phone),
-      cep: formatCep(client.cep),
-      street: String(client.street || "").trim(),
-      number: String(client.number || "").trim(),
-      district: String(client.district || "").trim(),
-      city: String(client.city || "").trim(),
-      state: String(client.state || "").toUpperCase().slice(0, 2),
-      reference: String(client.reference || "").trim(),
-    };
-  }
-
   async function loadClients() {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("*")
-      .order("name", { ascending: true });
+    const { clients: formattedClients, error } = await loadClientsFromSupabase();
 
     if (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -1623,47 +675,19 @@ function App() {
       return;
     }
 
-    setClients(Array.isArray(data) ? data.map(mapClientFromDatabase) : []);
-  }
-
-  function mapCourierFromDatabase(courier) {
-    return {
-      id: courier.id,
-      name: courier.name || "",
-      username: normalizeCourierCredential(courier.username).toLowerCase(),
-      password: normalizeCourierCredential(courier.password),
-      active: isTruthyActive(courier.active),
-      createdAt: courier.created_at || courier.createdAt || "",
-      motorcycleType: courier.motorcycle_type || courier.motorcycleType || "Moto própria",
-    };
-  }
-
-  function mapCourierToDatabase(courier) {
-    return {
-      id: courier.id,
-      name: String(courier.name || "").trim(),
-      username: normalizeCourierCredential(courier.username).toLowerCase(),
-      password: normalizeCourierCredential(courier.password),
-      active: isTruthyActive(courier.active),
-      motorcycle_type: courier.motorcycleType || "Moto própria",
-      created_at: courier.createdAt || new Date().toISOString(),
-    };
+    setClients(formattedClients);
   }
 
   async function loadCouriers() {
-    const { data, error } = await supabase
-      .from("couriers")
-      .select("*")
-      .order("name", { ascending: true });
+    const { couriers: nextCouriers, error } = await loadCouriersFromSupabase();
 
     if (error) {
       console.error("Erro ao carregar entregadores:", error);
       setCouriers([]);
       setLastAction(`Entregadores não carregados do Supabase: ${error.message || "verifique SELECT em couriers."}`);
-      return;
+      return [];
     }
 
-    const nextCouriers = Array.isArray(data) ? data.map(mapCourierFromDatabase) : [];
     setCouriers(nextCouriers);
     return nextCouriers;
   }
@@ -1722,12 +746,11 @@ function App() {
     })));
   }
 
-  function parseJsonNotes(value, fallback) {
-    try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; }
-  }
-
   async function loadTabsAccounts() {
-    const { data, error } = await supabase.from("tab_accounts").select("*");
+    const { tabs, error } = await loadTabsAccountsFromSupabase({
+      defaultCreditLimit: DEFAULT_TAB_CREDIT_LIMIT,
+    });
+
     if (error) {
       console.error("Erro ao carregar comandas:", error);
       setTabsAccounts([]);
@@ -1735,160 +758,44 @@ function App() {
       return;
     }
 
-    const { data: itemRows, error: itemError } = await supabase.from("tab_account_items").select("*");
-    if (itemError) console.warn("Itens de comandas não carregados; usando fallback JSON:", itemError);
-    const itemsByTab = (Array.isArray(itemRows) ? itemRows : []).reduce((acc, item) => {
-      const key = item.tab_account_id;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push({ id: item.product_id ?? item.id, name: item.name || "Produto", quantity: Number(item.quantity || 1), price: Number(item.price || 0), barcode: item.barcode || "" });
-      return acc;
-    }, {});
-
-    const openTabs = (Array.isArray(data) ? data : [])
-      .filter((row) => String(row.status || "open") === "open")
-      .map((row) => ({
-        id: row.id,
-        customerName: row.customer_name || row.customerName || "Cliente",
-        phone: row.phone || "",
-        creditLimit: Number(row.credit_limit ?? row.creditLimit ?? DEFAULT_TAB_CREDIT_LIMIT),
-        payment: row.payment || "Dinheiro",
-        items: itemsByTab[row.id] || parseJsonNotes(row.items_json || row.items || "", parseJsonNotes(row.notes, {}).items || []),
-        openedAt: row.opened_at || row.openedAt || row.created_at || new Date().toISOString(),
-        cashSessionId: row.cash_session_id || "",
-        notes: row.notes || "Comanda aberta",
-      }));
-    setTabsAccounts(openTabs);
+    setTabsAccounts(tabs || []);
   }
 
 
   async function persistTabAccount(tab, status = "open") {
-    const payload = {
-      id: tab.id,
-      customer_name: tab.customerName || "Cliente",
-      phone: tab.phone || "",
-      credit_limit: Number(tab.creditLimit || DEFAULT_TAB_CREDIT_LIMIT),
-      payment: tab.payment || "Dinheiro",
-      status,
+    const { error } = await persistTabAccountInSupabase(tab, status, {
+      defaultCreditLimit: DEFAULT_TAB_CREDIT_LIMIT,
       total: buildOrderTotal(tab.items || []),
-      opened_at: tab.openedAt || new Date().toISOString(),
-      closed_at: status === "closed" ? (tab.closedAt || new Date().toISOString()) : null,
-      closed_by: status === "closed" ? getCurrentStoreUserName() : null,
-      cash_session_id: tab.cashSessionId || cashSession.id || null,
-      items_json: JSON.stringify(tab.items || []),
-      notes: JSON.stringify({ ...tab, items: undefined }),
-      updated_at: new Date().toISOString(),
-    };
-    const { error: insertError } = await insertWithSchemaRetry("tab_accounts", payload, false);
-    if (insertError) {
-      const message = String(insertError.message || insertError || "").toLowerCase();
-      if (!message.includes("duplicate") && !message.includes("duplic") && !message.includes("23505")) {
-        throw new Error(insertError.message || "Não foi possível salvar comanda no Supabase.");
-      }
-      const { error: updateError } = await updateWithSchemaRetry("tab_accounts", tab.id, payload);
-      if (updateError) throw new Error(updateError.message || "Não foi possível atualizar comanda no Supabase.");
-    }
+      cashSessionId: tab.cashSessionId || cashSession.id || null,
+      closedBy: getCurrentStoreUserName(),
+    });
 
-    // Fonte principal dos itens da comanda passa a ser tab_account_items.
-    const { error: deleteItemsError } = await supabase.from("tab_account_items").delete().eq("tab_account_id", tab.id);
-    if (deleteItemsError && !String(deleteItemsError.message || "").toLowerCase().includes("permission")) {
-      console.warn("Itens antigos da comanda não removidos:", deleteItemsError);
-    }
-    const itemsPayload = (tab.items || []).map((item) => ({
-      tab_account_id: tab.id,
-      product_id: Number.isFinite(Number(item.id)) ? Number(item.id) : null,
-      name: item.name || "Produto",
-      quantity: Number(item.quantity || 1),
-      price: Number(item.price || 0),
-      barcode: item.barcode || "",
-    }));
-    if (itemsPayload.length) {
-      const { error: insertItemsError } = await insertWithSchemaRetry("tab_account_items", itemsPayload, false);
-      if (insertItemsError) throw new Error(insertItemsError.message || "Comanda salva, mas itens não foram salvos em tab_account_items.");
-    }
+    if (error) throw new Error(error.message || "Não foi possível salvar comanda no Supabase.");
     return true;
   }
 
 
   async function loadCashData() {
-    const { data: sessionsData, error: sessionsError } = await supabase
-      .from("cash_sessions")
-      .select("*")
-      .order("opened_at", { ascending: false });
+    const { cashSession: nextCashSession, cashClosings: nextCashClosings, error } = await loadCashDataFromSupabase();
 
-    if (sessionsError) {
-      console.error("Erro ao carregar sessões de caixa:", sessionsError);
-      setLastAction(`Caixa não carregado do Supabase: ${sessionsError.message || "verifique cash_sessions."}`);
+    if (error) {
+      console.error("Erro ao carregar sessões de caixa:", error);
+      setLastAction(`Caixa não carregado do Supabase: ${error.message || "verifique cash_sessions."}`);
       return;
     }
 
-    const sessions = Array.isArray(sessionsData) ? sessionsData : [];
-    const closings = sessions
-      .filter((row) => String(row.status || "") === "closed")
-      .map((row) => ({
-        id: row.id,
-        openedAt: row.opened_at || "",
-        closedAt: row.closed_at || "",
-        totalSold: Number(row.total_sold || 0),
-        totalReceived: Number(row.total_received || 0),
-        countedCash: Number(row.counted_cash || 0),
-        difference: Number(row.difference || 0),
-        byPayment: { Pix: Number(row.pix_total || 0), Dinheiro: Number(row.cash_total || 0), "Cartão débito": Number(row.debit_total || 0), "Cartão crédito": Number(row.credit_total || 0) },
-        pendingAmount: Number(row.pending_total || 0),
-        cancelledAmount: Number(row.cancelled_total || 0),
-        closingSnapshot: row.closing_snapshot || null,
-      }));
-    setCashClosings(closings);
-
-    const openSession = sessions.find((row) => String(row.status || "") === "open");
-    if (!openSession) {
-      setCashSession({ isOpen: false, id: "", openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
-      return;
-    }
-
-    let sangrias = [];
-    try {
-      const { data: movementRows } = await supabase
-        .from("cash_movements")
-        .select("*")
-        .gte("created_at", openSession.opened_at || new Date(0).toISOString());
-      sangrias = (Array.isArray(movementRows) ? movementRows : [])
-        .filter((row) => String(row.movement_type || row.type || "") === "sangria")
-        .map((row) => ({ id: row.id, value: Number(row.value || row.amount || 0), reason: row.reason || "Sangria", createdAt: row.created_at || new Date().toISOString() }));
-    } catch (error) {
-      console.warn("Sangrias não carregadas:", error);
-    }
-
-    setCashSession({
-      isOpen: true,
-      id: openSession.id,
-      openedAt: openSession.opened_at || new Date().toISOString(),
-      closedAt: "",
-      openingAmount: Number(openSession.opening_amount || 0),
-      sangrias,
-    });
+    setCashClosings(nextCashClosings || []);
+    if (nextCashSession) setCashSession(nextCashSession);
   }
 
-
-  function mapOrderPaymentFromDatabase(row) {
-    return {
-      id: row.id,
-      orderId: row.order_id,
-      cashSessionId: row.cash_session_id || "",
-      method: row.method || "Outro",
-      amount: Number(row.amount || 0),
-      status: row.status || "paid",
-      notes: row.notes || "",
-      createdAt: row.created_at || "",
-    };
-  }
 
   async function fetchOrderPayments() {
-    const { data, error } = await supabase.from("order_payments").select("*");
+    const { data, error } = await fetchOrderPaymentsFromSupabase();
     if (error) {
       console.error("Erro ao carregar pagamentos do caixa:", error);
       return [];
     }
-    return (Array.isArray(data) ? data : []).map(mapOrderPaymentFromDatabase);
+    return data;
   }
 
   async function loadOrderPayments() {
@@ -1897,291 +804,39 @@ function App() {
     return rows;
   }
 
-  function mapOrderFromDatabase(order, items = []) {
-    const orderStatus = order.status || DELIVERY_STATUS.WAITING_PICKUP;
-    const isReleasedToCourier = orderStatus !== DELIVERY_STATUS.WAITING_STORE_APPROVAL;
-    return {
-      id: order.id,
-      orderType: order.order_type || ORDER_TYPE.DELIVERY,
-      client: order.client || order.customer_name || "Cliente",
-      phone: order.phone || "",
-      address: order.address || "",
-      payment: order.payment || "Pix",
-      paymentStatus: order.payment_status || PAYMENT_STATUS.PENDING,
-      changeFor: order.change_for || "",
-      productsTotal: Number(order.products_total || 0),
-      deliveryFee: normalizeDeliveryFee(order.delivery_fee),
-      discount: Number(order.discount || 0),
-      courierFee: Number(order.courier_fee || 0),
-      storeFee: Number(order.store_fee || 0),
-      motorcycleType: order.motorcycle_type || "",
-      value: Number(order.value || 0),
-      status: orderStatus,
-      origin: order.origin || "store",
-      needsStoreApproval: orderStatus === DELIVERY_STATUS.WAITING_STORE_APPROVAL || (order.needs_store_approval === true && !isReleasedToCourier),
-      storeOrderApproved: order.store_order_approved === true || isReleasedToCourier,
-      approvedAt: order.approved_at || (isReleasedToCourier ? order.updated_at || order.created_at || "" : ""),
-      cashSessionId: order.cash_session_id || "",
-      originType: order.origin_type || order.origin || "",
-      tabAccountId: order.tab_account_id || null,
-      acceptedByUsername: order.accepted_by_username || "",
-      acceptedByName: order.accepted_by_name || "",
-      acceptedAt: order.accepted_at || "",
-      refusedByUsername: order.refused_by_username || "",
-      refusedAt: order.refused_at || "",
-      finalizedAt: order.finalized_at || "",
-      finalizedBy: order.finalized_by || "",
-      problemReason: order.problem_reason || "",
-      problemAt: order.problem_at || "",
-      proofUrl: order.proof_url || "",
-      reference: order.reference || "",
-      courierUsername: order.courier_username || "ALL",
-      courierName: order.courier_name || "Todos os motoboys",
-      notes: order.notes || "",
-      items: (Array.isArray(items) ? items : []).map((item) => ({
-        id: item.product_id ?? item.id,
-        name: item.name || item.product_name || "Produto",
-        price: Number(item.price || 0),
-        quantity: Number(item.quantity || 0),
-        barcode: item.barcode || "",
-        isKit: item.is_kit === true,
-        kitId: item.kit_id || null,
-      })),
-      pickedUpByUsername: order.picked_up_by_username || "",
-      pickedUpByName: order.picked_up_by_name || "",
-      pickedUpAt: order.picked_up_at || "",
-      deliveredByUsername: order.delivered_by_username || "",
-      deliveredByName: order.delivered_by_name || "",
-      deliveredAt: order.delivered_at || "",
-      ownerApproved: order.owner_approved === true,
-      ownerApprovedAt: order.owner_approved_at || "",
-      cancelledAt: order.cancelled_at || "",
-      cancellationReason: order.cancellation_reason || "",
-      launchedAt: order.launched_at || order.created_at || new Date().toISOString(),
-    };
-  }
-
-  function mapOrderToDatabase(delivery) {
-    return {
-      id: delivery.id,
-      cash_session_id: delivery.cashSessionId || null,
-      origin_type: delivery.originType || delivery.origin || "",
-      tab_account_id: delivery.tabAccountId || null,
-      order_type: delivery.orderType || ORDER_TYPE.DELIVERY,
-      client: delivery.client || "Cliente",
-      phone: delivery.phone || "",
-      address: delivery.address || "",
-      payment: delivery.payment || "Pix",
-      payment_status: delivery.paymentStatus || PAYMENT_STATUS.PENDING,
-      change_for: toNullableNumber(delivery.changeFor),
-      products_total: Number(delivery.productsTotal || 0),
-      delivery_fee: normalizeDeliveryFee(delivery.deliveryFee),
-      discount: Number(delivery.discount || 0),
-      courier_fee: Number(delivery.courierFee || 0),
-      store_fee: Number(delivery.storeFee || 0),
-      motorcycle_type: delivery.motorcycleType || "",
-      value: Number(delivery.value || 0),
-      status: delivery.status || DELIVERY_STATUS.WAITING_PICKUP,
-      origin: delivery.origin || "store",
-      needs_store_approval: delivery.needsStoreApproval === true,
-      store_order_approved: delivery.storeOrderApproved === true,
-      approved_at: delivery.approvedAt || null,
-      reference: delivery.reference || "",
-      courier_username: delivery.courierUsername || "ALL",
-      courier_name: delivery.courierName || "Todos os motoboys",
-      notes: delivery.notes || "",
-      picked_up_by_username: delivery.pickedUpByUsername || "",
-      picked_up_by_name: delivery.pickedUpByName || "",
-      picked_up_at: delivery.pickedUpAt || null,
-      delivered_by_username: delivery.deliveredByUsername || "",
-      delivered_by_name: delivery.deliveredByName || "",
-      delivered_at: delivery.deliveredAt || null,
-      owner_approved: delivery.ownerApproved === true,
-      owner_approved_at: delivery.ownerApprovedAt || null,
-      cancelled_at: delivery.cancelledAt || null,
-      cancellation_reason: delivery.cancellationReason || "",
-      accepted_by_username: delivery.acceptedByUsername || "",
-      accepted_by_name: delivery.acceptedByName || "",
-      accepted_at: delivery.acceptedAt || null,
-      refused_by_username: delivery.refusedByUsername || "",
-      refused_at: delivery.refusedAt || null,
-      finalized_at: delivery.finalizedAt || null,
-      finalized_by: delivery.finalizedBy || "",
-      problem_reason: delivery.problemReason || "",
-      problem_at: delivery.problemAt || null,
-      proof_url: delivery.proofUrl || "",
-      launched_at: delivery.launchedAt || new Date().toISOString(),
-    };
-  }
-
-  function mapOrderItemsToDatabase(orderId, items = [], cashSessionId = null) {
-    return expandItemsForStock(items).map((item) => ({
-      order_id: orderId,
-      cash_session_id: cashSessionId || null,
-      product_id: Number.isFinite(Number(item.id)) ? Number(item.id) : null,
-      name: item.name || "Produto",
-      quantity: Number(item.quantity || 0),
-      price: Number(item.price || 0),
-      barcode: item.barcode || "",
-      is_kit: item.isKit === true,
-      kit_id: item.kitId || null,
-    }));
-  }
-
-  function getMissingColumnName(error) {
-    const message = String(error?.message || error || "");
-    const patterns = [
-      /Could not find the ['"`]([^'"`]+)['"`] column/i,
-      /(?:column|coluna)\s+['"`]([^'"`]+)['"`]/i,
-      /['"`]([^'"`]+)['"`]\s+(?:column|coluna)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = message.match(pattern);
-      if (match?.[1]) return match[1];
-    }
-
-    return "";
-  }
-
-  function payloadHasColumn(payload, columnName) {
-    if (!columnName) return false;
-    if (Array.isArray(payload)) return payload.some((row) => Object.prototype.hasOwnProperty.call(row || {}, columnName));
-    return Object.prototype.hasOwnProperty.call(payload || {}, columnName);
-  }
-
-  function removeColumnFromPayload(payload, columnName) {
-    if (Array.isArray(payload)) {
-      return payload.map((row) => {
-        const nextRow = { ...(row || {}) };
-        delete nextRow[columnName];
-        return nextRow;
-      });
-    }
-
-    const nextPayload = { ...(payload || {}) };
-    delete nextPayload[columnName];
-    return nextPayload;
-  }
-
-  async function insertWithSchemaRetry(tableName, payload, selectSingle = false) {
-    let currentPayload = Array.isArray(payload) ? payload.map((row) => ({ ...(row || {}) })) : { ...(payload || {}) };
-    const ignoredColumns = [];
-
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      let query = supabase.from(tableName).insert(currentPayload);
-      if (selectSingle) query = query.select().single();
-
-      const { data, error } = await query;
-      if (!error) return { data, error: null, ignoredColumns };
-
-      const missingColumn = getMissingColumnName(error);
-      if (!missingColumn || !payloadHasColumn(currentPayload, missingColumn)) {
-        return { data: null, error, ignoredColumns };
-      }
-
-      console.warn(`Coluna ${missingColumn} não existe em ${tableName}. Enviando novamente sem essa coluna.`);
-      ignoredColumns.push(missingColumn);
-      currentPayload = removeColumnFromPayload(currentPayload, missingColumn);
-    }
-
-    return {
-      data: null,
-      error: new Error(`Não foi possível salvar em ${tableName}: muitas colunas incompatíveis com o Supabase.`),
-      ignoredColumns,
-    };
-  }
-
-  async function updateWithSchemaRetry(tableName, id, patch) {
-    let currentPatch = { ...(patch || {}) };
-    const ignoredColumns = [];
-
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      const { error } = await supabase.from(tableName).update(currentPatch).eq("id", id);
-      if (!error) return { error: null, ignoredColumns };
-
-      const missingColumn = getMissingColumnName(error);
-      if (!missingColumn || !payloadHasColumn(currentPatch, missingColumn)) {
-        return { error, ignoredColumns };
-      }
-
-      console.warn(`Coluna ${missingColumn} não existe em ${tableName}. Atualizando novamente sem essa coluna.`);
-      ignoredColumns.push(missingColumn);
-      currentPatch = removeColumnFromPayload(currentPatch, missingColumn);
-    }
-
-    return {
-      error: new Error(`Não foi possível atualizar ${tableName}: muitas colunas incompatíveis com o Supabase.`),
-      ignoredColumns,
-    };
-  }
-
-
-
-  function mapNotificationFromDatabase(row) {
-    return {
-      id: row.id,
-      type: row.type || "info",
-      title: row.title || "Notificação",
-      message: row.message || "",
-      audience: normalizeNotificationAudience(row.audience || "loja"),
-      deliveryId: row.order_id || row.deliveryId || null,
-      orderId: row.order_id || row.deliveryId || null,
-      courierUsername: row.courier_username || "",
-      read: row.read === true,
-      createdAt: row.created_at || new Date().toISOString(),
-    };
-  }
-
   async function loadNotifications() {
-    const { data, error } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80);
+    const { data, error } = await loadNotificationsFromSupabase();
     if (error) {
       console.error("Erro ao carregar notificações:", error);
       return;
     }
-    setNotifications(Array.isArray(data) ? data.map(mapNotificationFromDatabase) : []);
+    setNotifications(data);
   }
 
   async function saveNotificationToSupabase(notification) {
-    const payload = {
-      audience: normalizeNotificationAudience(notification.audience),
-      courier_username: notification.courierUsername || null,
-      type: notification.type || "info",
-      title: notification.title || "Notificação",
-      message: notification.message || "",
-      order_id: notification.orderId || notification.deliveryId || null,
-      read: notification.read === true,
-      created_at: notification.createdAt || new Date().toISOString(),
-    };
-    const { error } = await insertWithSchemaRetry("notifications", payload, false);
+    const { error } = await saveNotificationToSupabaseService(notification);
     if (error) console.error("Notificação não salva no Supabase:", error);
   }
 
   async function auditAction(action, entity, entityId, afterJson = {}, beforeJson = null, userType = isLogged ? "store" : loggedCourier ? "courier" : "customer", userName = getCurrentStoreUserName?.() || loggedCourier?.username || customerForm.name || "sistema") {
-    const { error } = await insertWithSchemaRetry("audit_logs", {
-      user_type: userType,
-      user_name: userName,
+    const { error } = await writeAuditLog({
       action,
       entity,
-      entity_id: entityId ? String(entityId) : "",
-      before_json: beforeJson,
-      after_json: afterJson,
-      created_at: new Date().toISOString(),
-    }, false);
+      entityId,
+      afterJson,
+      beforeJson,
+      userType,
+      userName,
+    });
     if (error) console.error("Auditoria não salva:", error);
   }
 
   async function registerAppError(source, error, metadata = {}) {
     try {
-      await insertWithSchemaRetry("app_errors", {
-        source,
-        message: String(error?.message || error || "Erro desconhecido"),
-        stack: String(error?.stack || ""),
-        metadata,
-        created_at: new Date().toISOString(),
-      }, false);
+      await writeAppError(source, error, metadata);
     } catch (_) {}
   }
+
 
   function mapStoreUserFromDatabase(row) {
     return {
@@ -2243,54 +898,78 @@ function App() {
     setLastAction("Sessão da loja encerrada com segurança.");
   }
 
-  function buildOrderPaymentRows(delivery) {
-    const cashSessionId = delivery.cashSessionId || cashSession.id || null;
-    if (!cashSessionId) return [];
-    const total = toSafeMoneyNumber(delivery.value, 0);
-    if (total <= 0) return [];
-    if (delivery.payment === "Misto" && delivery.mixedPayment) {
-      return [
-        ["Pix", delivery.mixedPayment.pix],
-        ["Dinheiro", delivery.mixedPayment.cash],
-        ["Cartão débito", delivery.mixedPayment.debit],
-        ["Cartão crédito", delivery.mixedPayment.credit],
-      ].filter(([, amount]) => toSafeMoneyNumber(amount, 0) > 0).map(([method, amount]) => ({
-        order_id: delivery.id,
-        cash_session_id: cashSessionId,
-        method,
-        amount: toSafeMoneyNumber(amount, 0),
-        status: delivery.paymentStatus === PAYMENT_STATUS.PAID ? "paid" : "pending",
-        notes: delivery.mixedPaymentDetails || "Pagamento misto",
-      }));
+  async function loadDeliveries() {
+    const result = await loadDeliveriesFromSupabase();
+
+    if (result.ordersError) {
+      console.error("Erro ao carregar pedidos:", result.ordersError);
+      setLastAction(
+        `PDV Entregas não conseguiu ler a tabela orders: ${result.ordersError.message || "verifique a policy SELECT de orders no Supabase."}`
+      );
+      return;
     }
-    const method = delivery.payment === "Fiado/anotado" || delivery.paymentStatus === PAYMENT_STATUS.STORE_CREDIT ? "Fiado" : (delivery.payment || "Outro");
-    return [{
-      order_id: delivery.id,
-      cash_session_id: cashSessionId,
-      method: ["Pix", "Dinheiro", "Cartão débito", "Cartão crédito", "Fiado", "Pendente", "Outro"].includes(method) ? method : "Outro",
-      amount: total,
-      status: delivery.paymentStatus === PAYMENT_STATUS.PAID ? "paid" : "pending",
-      notes: delivery.notes || "",
-    }];
+
+    if (result.itemsError) {
+      console.error("Erro ao carregar itens dos pedidos:", result.itemsError);
+      setDeliveries(result.data || []);
+      setLastAction(
+        `Pedidos carregados, mas os itens não foram lidos: ${result.itemsError.message || "verifique a policy SELECT de order_items."}`
+      );
+      return;
+    }
+
+    setDeliveries(result.data || []);
+    console.log("PDV Entregas sincronizado:", result.counts || {});
   }
 
-  async function cancelExistingOrderPayments(orderId, reason = "substituído") {
-    if (!orderId) return true;
-    const { error } = await supabase
-      .from("order_payments")
-      .update({ status: "cancelled", notes: `Pagamento ${reason}` })
-      .eq("order_id", orderId)
-      .neq("status", "cancelled");
-    if (error) console.warn("Pagamentos anteriores não foram cancelados:", error);
-    return !error;
+  async function saveDeliveryToSupabase(delivery) {
+    const orderId = delivery.id;
+    const { error: saveError, ignoredOrderColumns, ignoredItemColumns } = await insertOrderWithItemsInSupabase(
+      delivery,
+      delivery.cashSessionId || cashSession.id || null
+    );
+
+    if (saveError) {
+      console.error("Erro ao salvar pedido no Supabase:", saveError);
+      throw new Error(saveError.message || "Erro ao salvar pedido no Supabase.");
+    }
+
+    if (ignoredItemColumns.length > 0) {
+      console.warn("Itens salvos ignorando colunas inexistentes:", ignoredItemColumns);
+    }
+
+    if (ignoredOrderColumns.length > 0) {
+      console.warn("Pedido salvo ignorando colunas inexistentes:", ignoredOrderColumns);
+    }
+
+    const savedDelivery = { ...delivery, id: orderId };
+    await saveOrderPayments(savedDelivery);
+    await saveStockMovements(savedDelivery, "sale");
+    await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "" });
+
+    return savedDelivery;
+  }
+
+  async function updateDeliveryInSupabase(id, patch) {
+    const { error, ignoredColumns } = await updateOrderInSupabase(id, patch);
+
+    if (error) {
+      console.error("Erro ao atualizar pedido no Supabase:", error);
+      setLastAction(`Pedido não foi atualizado no Supabase: ${error.message || "verifique policies de UPDATE."}`);
+      return false;
+    }
+
+    if (ignoredColumns.length > 0) {
+      console.warn("Pedido atualizado ignorando colunas inexistentes:", ignoredColumns);
+    }
+
+    return true;
   }
 
   async function saveOrderPayments(delivery) {
-    const rows = buildOrderPaymentRows(delivery);
-    if (!rows.length) return true;
-    await cancelExistingOrderPayments(delivery.id, "substituído por novo registro");
-    const { error } = await insertWithSchemaRetry("order_payments", rows, false);
+    const { rows, error } = await saveOrderPaymentsInSupabase(delivery, cashSession.id || null);
     if (error) throw new Error(error.message || "Pagamentos não foram salvos em order_payments.");
+
     setOrderPayments((previous) => [
       ...previous.map((payment) => String(payment.orderId) === String(delivery.id) ? { ...payment, status: "cancelled" } : payment),
       ...rows.map((row) => ({
@@ -2307,192 +986,22 @@ function App() {
     return true;
   }
 
-  async function saveStockMovements(delivery, movementType = "sale") {
-    const cashSessionId = delivery.cashSessionId || cashSession.id || null;
-    const stockItems = expandItemsForStock(delivery.items || []);
-    if (!stockItems.length) return true;
-    const rows = stockItems.map((item) => {
-      const product = products.find((currentProduct) => Number(currentProduct.id) === Number(item.id));
-      const quantity = toPositiveInteger(item.quantity, 0);
-      const before = Number(product?.stock || 0);
-      const after = movementType === "cancel" ? before + quantity : Math.max(0, before - quantity);
-      return {
-        product_id: Number.isFinite(Number(item.id)) ? Number(item.id) : null,
-        order_id: delivery.id,
-        cash_session_id: cashSessionId,
-        movement_type: movementType,
-        quantity,
-        stock_before: before,
-        stock_after: after,
-        reason: movementType === "cancel" ? "Cancelamento/devolução" : "Venda/pedido",
-        created_by: getCurrentStoreUserName() || loggedCourier?.username || "sistema",
-        created_at: new Date().toISOString(),
-      };
-    });
-    const { error } = await insertWithSchemaRetry("product_stock_movements", rows, false);
-    if (error) console.error("Movimentação de estoque não salva:", error);
+  async function cancelExistingOrderPayments(orderId, reason = "substituído") {
+    const { error } = await cancelExistingOrderPaymentsInSupabase(orderId, reason);
+    if (error) console.warn("Pagamentos anteriores não foram cancelados:", error);
     return !error;
   }
 
-  async function loadDeliveries() {
-    // Leitura do PDV Entregas: não usa .order("launched_at") no Supabase
-    // porque algumas tabelas antigas não têm essa coluna no cache do schema.
-    // A ordenação é feita no navegador para evitar bloquear a listagem inteira.
-    const { data: ordersData, error: ordersError } = await supabase
-      .from("orders")
-      .select("*");
-
-    if (ordersError) {
-      console.error("Erro ao carregar pedidos:", ordersError);
-      setLastAction(
-        `PDV Entregas não conseguiu ler a tabela orders: ${ordersError.message || "verifique a policy SELECT de orders no Supabase."}`
-      );
-      return;
-    }
-
-    const sortedOrders = (Array.isArray(ordersData) ? ordersData : []).slice().sort((a, b) => {
-      const aTime = new Date(a.launched_at || a.created_at || 0).getTime() || Number(a.id || 0);
-      const bTime = new Date(b.launched_at || b.created_at || 0).getTime() || Number(b.id || 0);
-      return bTime - aTime;
+  async function saveStockMovements(delivery, movementType = "sale") {
+    const { error } = await saveStockMovementsInSupabase({
+      delivery,
+      movementType,
+      products,
+      cashSessionId: delivery.cashSessionId || cashSession.id || null,
+      createdBy: getCurrentStoreUserName() || loggedCourier?.username || "sistema",
     });
-
-    const { data: itemsData, error: itemsError } = await supabase
-      .from("order_items")
-      .select("*");
-
-    if (itemsError) {
-      console.error("Erro ao carregar itens dos pedidos:", itemsError);
-      setDeliveries(sortedOrders.map((order) => mapOrderFromDatabase(order, [])));
-      setLastAction(
-        `Pedidos carregados, mas os itens não foram lidos: ${itemsError.message || "verifique a policy SELECT de order_items."}`
-      );
-      return;
-    }
-
-    const itemsByOrder = (itemsData || []).reduce((acc, item) => {
-      const key = item.order_id;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(item);
-      return acc;
-    }, {});
-
-    const nextDeliveries = sortedOrders.map((order) => mapOrderFromDatabase(order, itemsByOrder[order.id] || []));
-    setDeliveries(nextDeliveries);
-    console.log("PDV Entregas sincronizado:", {
-      orders: sortedOrders.length,
-      items: Array.isArray(itemsData) ? itemsData.length : 0,
-      deliveries: nextDeliveries.length,
-    });
-  }
-
-  async function saveDeliveryToSupabase(delivery) {
-    // A tabela orders permite INSERT público, mas nem sempre permite SELECT público.
-    // Por isso o pedido é inserido sem .select().single(), usando o id já gerado pelo app.
-    const { error: orderError, ignoredColumns: ignoredOrderColumns } = await insertWithSchemaRetry(
-      "orders",
-      mapOrderToDatabase(delivery),
-      false
-    );
-
-    if (orderError) {
-      console.error("Erro ao salvar pedido no Supabase:", orderError);
-      throw new Error(orderError.message || "Erro ao salvar pedido no Supabase.");
-    }
-
-    const orderId = delivery.id;
-    const itemsPayload = mapOrderItemsToDatabase(orderId, delivery.items || [], delivery.cashSessionId || cashSession.id || null);
-
-    if (itemsPayload.length > 0) {
-      const { error: itemsError, ignoredColumns: ignoredItemColumns } = await insertWithSchemaRetry("order_items", itemsPayload, false);
-
-      if (itemsError) {
-        console.error("Erro ao salvar itens do pedido no Supabase:", itemsError);
-        throw new Error(itemsError.message || "Pedido salvo, mas os itens não foram salvos.");
-      }
-
-      if (ignoredItemColumns.length > 0) {
-        console.warn("Itens salvos ignorando colunas inexistentes:", ignoredItemColumns);
-      }
-    }
-
-    if (ignoredOrderColumns.length > 0) {
-      console.warn("Pedido salvo ignorando colunas inexistentes:", ignoredOrderColumns);
-    }
-
-    const savedDelivery = { ...delivery, id: orderId };
-    await saveOrderPayments(savedDelivery);
-    await saveStockMovements(savedDelivery, "sale");
-    await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "" });
-
-    return savedDelivery;
-  }
-
-  async function updateDeliveryInSupabase(id, patch) {
-    const dbPatch = {};
-    const fieldMap = {
-      cashSessionId: "cash_session_id",
-      originType: "origin_type",
-      tabAccountId: "tab_account_id",
-      orderType: "order_type",
-      paymentStatus: "payment_status",
-      changeFor: "change_for",
-      productsTotal: "products_total",
-      deliveryFee: "delivery_fee",
-      courierFee: "courier_fee",
-      storeFee: "store_fee",
-      motorcycleType: "motorcycle_type",
-      origin: "origin",
-      needsStoreApproval: "needs_store_approval",
-      storeOrderApproved: "store_order_approved",
-      approvedAt: "approved_at",
-      courierUsername: "courier_username",
-      courierName: "courier_name",
-      pickedUpByUsername: "picked_up_by_username",
-      pickedUpByName: "picked_up_by_name",
-      pickedUpAt: "picked_up_at",
-      deliveredByUsername: "delivered_by_username",
-      deliveredByName: "delivered_by_name",
-      deliveredAt: "delivered_at",
-      ownerApproved: "owner_approved",
-      ownerApprovedAt: "owner_approved_at",
-      cancelledAt: "cancelled_at",
-      cancellationReason: "cancellation_reason",
-      acceptedByUsername: "accepted_by_username",
-      acceptedByName: "accepted_by_name",
-      acceptedAt: "accepted_at",
-      refusedByUsername: "refused_by_username",
-      refusedAt: "refused_at",
-      finalizedAt: "finalized_at",
-      finalizedBy: "finalized_by",
-      problemReason: "problem_reason",
-      problemAt: "problem_at",
-      proofUrl: "proof_url",
-      launchedAt: "launched_at",
-    };
-
-    const unsupportedOrderPatchKeys = new Set();
-
-    Object.entries(patch).forEach(([key, value]) => {
-      if (unsupportedOrderPatchKeys.has(key)) return;
-      const dbKey = fieldMap[key] || key;
-      dbPatch[dbKey] = dbKey === "change_for" ? toNullableNumber(value) : value === "" ? null : value;
-    });
-
-    if (Object.keys(dbPatch).length === 0) return true;
-
-    const { error, ignoredColumns } = await updateWithSchemaRetry("orders", id, dbPatch);
-
-    if (error) {
-      console.error("Erro ao atualizar pedido no Supabase:", error);
-      setLastAction(`Pedido não foi atualizado no Supabase: ${error.message || "verifique policies de UPDATE."}`);
-      return false;
-    }
-
-    if (ignoredColumns.length > 0) {
-      console.warn("Pedido atualizado ignorando colunas inexistentes:", ignoredColumns);
-    }
-
-    return true;
+    if (error) console.error("Movimentação de estoque não salva:", error);
+    return !error;
   }
 
   async function persistProductStocks(nextProducts) {
@@ -3151,45 +1660,19 @@ function App() {
     if (hasDuplicateBarcode(products, barcode)) return setLastAction("Código de barras já cadastrado em outro produto.");
 
     const productId = Date.now();
-    const productToInsert = {
-      id: productId,
-      name: newProduct.name.trim(),
-      category: newProduct.category,
-      price: toNonNegativeNumber(newProduct.price, 0),
-      cost: toNonNegativeNumber(newProduct.cost, 0),
-      stock: toNonNegativeNumber(newProduct.stock, 0),
-      min_stock: toNonNegativeNumber(newProduct.minStock, 0),
-      ncm: String(newProduct.ncm || "").trim(),
-      barcode,
-      expiration_date: newProduct.expirationDate || null,
-      image_url: newProduct.imageUrl || "",
-      active: true,
-    };
+    const productToInsert = buildProductInsertPayload(newProduct, productId);
 
     // Importante: não usamos .select().single() aqui.
     // Algumas policies permitem INSERT público, mas bloqueiam SELECT no retorno.
     // Isso fazia o produto parecer que "não salvou", mesmo quando o INSERT podia ter passado.
-    const { error, ignoredColumns } = await insertWithSchemaRetry("products", productToInsert, false);
+    const { error, ignoredColumns } = await insertProductInSupabase(productToInsert);
 
     if (error) {
       console.error("Erro ao cadastrar produto no Supabase:", error);
       return setLastAction(`Produto não salvo no Supabase: ${error.message || "verifique RLS/policies de INSERT em products."}`);
     }
 
-    const savedProduct = {
-      id: productId,
-      name: productToInsert.name,
-      category: productToInsert.category || "",
-      price: productToInsert.price,
-      cost: productToInsert.cost,
-      stock: productToInsert.stock,
-      minStock: productToInsert.min_stock,
-      ncm: productToInsert.ncm || "",
-      barcode: productToInsert.barcode || "",
-      expirationDate: productToInsert.expiration_date || "",
-      imageUrl: productToInsert.image_url || "",
-      active: true,
-    };
+    const savedProduct = mapProductFromDatabase(productToInsert);
 
     setProducts((previousProducts) => [...previousProducts, savedProduct]);
     setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", ncm: "", barcode: "", imageUrl: "" });
@@ -3204,7 +1687,7 @@ function App() {
     if (hasDuplicateClientRecord(clients, newClient)) return setLastAction("Cliente não salvo: já existe cadastro com esse telefone.");
 
     const clientToInsert = mapClientToDatabase({ id: Date.now(), ...newClient });
-    const { error, ignoredColumns } = await insertWithSchemaRetry("clients", clientToInsert, false);
+    const { error, ignoredColumns } = await insertClientInSupabase(clientToInsert);
 
     if (error) {
       console.error("Erro ao cadastrar cliente no Supabase:", error);
@@ -3279,7 +1762,7 @@ function App() {
 
     const formattedClient = mapClientToDatabase(client);
     const { id: _ignoredId, ...clientPatch } = formattedClient;
-    const { error, ignoredColumns } = await updateWithSchemaRetry("clients", id, clientPatch);
+    const { error, ignoredColumns } = await updateClientInSupabase(id, clientPatch);
 
     if (error) {
       console.error("Erro ao atualizar cliente no Supabase:", error);
@@ -3305,7 +1788,7 @@ function App() {
     if (hasDuplicateCourierUsername(couriers, courierToInsert.username)) return setLastAction("Esse usuário de entregador já existe. Escolha outro usuário.");
     if (!isStrongPassword(courierToInsert.password)) return setLastAction("Senha fraca. Clique em gerar senha forte ou informe uma senha com maiúscula, minúscula, número e símbolo.");
 
-    const { error, ignoredColumns } = await insertWithSchemaRetry("couriers", courierToInsert, false);
+    const { error, ignoredColumns } = await insertCourierInSupabase(courierToInsert);
     if (error || ignoredColumns.includes("password")) {
       console.error("Erro ao cadastrar entregador no Supabase:", error, ignoredColumns);
       return setLastAction(error ? `Entregador não salvo no Supabase: ${error.message || "verifique RLS/policies de INSERT em couriers."}` : "Entregador não salvo: a tabela couriers precisa ter a coluna password para guardar a senha.");
@@ -3326,7 +1809,7 @@ function App() {
     const courier = couriers.find((item) => item.id === id);
     if (!courier) return;
     const nextActive = !courier.active;
-    const { error } = await updateWithSchemaRetry("couriers", id, { active: nextActive });
+    const { error } = await updateCourierStatusInSupabase(id, nextActive);
     if (error) {
       console.error("Erro ao atualizar entregador no Supabase:", error);
       return setLastAction(`Status do entregador não foi alterado: ${error.message || "verifique UPDATE em couriers."}`);
@@ -3339,7 +1822,7 @@ function App() {
     const product = products.find((item) => item.id === id);
     if (!product) return;
     const nextActive = !product.active;
-    const { error } = await supabase.from("products").update({ active: nextActive }).eq("id", id);
+    const { error } = await updateProductStatusInSupabase(id, nextActive);
     if (error) {
       console.error("Erro ao atualizar status do produto:", error);
       return setLastAction(`Status não salvo no Supabase: ${error.message || "verifique policies de UPDATE em products."}`);
@@ -3370,21 +1853,9 @@ function App() {
       return;
     }
 
-    const productPatch = {
-      name: product.name.trim(),
-      category: product.category,
-      price: Number(product.price || 0),
-      cost: Number(product.cost || 0),
-      stock: Number(product.stock || 0),
-      min_stock: Number(product.minStock || 0),
-      ncm: String(product.ncm || "").trim(),
-      barcode: normalizeBarcode(product.barcode),
-      expiration_date: product.expirationDate || null,
-      image_url: product.imageUrl || "",
-      active: product.active === true,
-    };
+    const productPatch = buildProductPatch(product);
 
-    const { error, ignoredColumns } = await updateWithSchemaRetry("products", id, productPatch);
+    const { error, ignoredColumns } = await updateProductInSupabase(id, productPatch);
     if (error) {
       console.error("Erro ao salvar edição do produto:", error);
       return setLastAction(`Produto não salvo no Supabase: ${error.message || "verifique policies de UPDATE em products."}`);
@@ -3426,7 +1897,7 @@ function App() {
     }
     const formattedCourier = mapCourierToDatabase(courier);
     const { id: _ignoredId, ...courierPatch } = formattedCourier;
-    const { error, ignoredColumns } = await updateWithSchemaRetry("couriers", id, courierPatch);
+    const { error, ignoredColumns } = await updateCourierInSupabase(id, courierPatch);
     if (error || ignoredColumns.includes("password")) {
       console.error("Erro ao salvar entregador no Supabase:", error, ignoredColumns);
       return setLastAction(error ? `Entregador não atualizado no Supabase: ${error.message || "verifique UPDATE em couriers."}` : "Entregador não atualizado: a tabela couriers precisa ter a coluna password para manter a senha salva.");
@@ -3703,91 +2174,41 @@ function App() {
   }
 
   function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
-    const printWindow = options.printWindow || window.open("about:blank", "_blank", "width=420,height=760");
-    if (!printWindow) {
-      setLastAction("Navegador bloqueou a impressão. Libere pop-ups e tente novamente.");
-      return false;
-    }
-    const copyBlocks = Array.from({ length: Math.max(1, copies) }, (_, index) => `
-      <section class="receipt-copy">
-        ${copies > 1 ? `<p class="copy-title">VIA ${index + 1}/${copies}</p>` : ""}
-        ${bodyHtml}
-      </section>
-    `).join("");
-    const html = `
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>${escapeHtml(title)}</title>
-          <style>
-            @page { size: 80mm auto; margin: 3mm; }
-            * { box-sizing: border-box; }
-            html, body { margin: 0; padding: 0; background: #fff; color: #000; }
-            body { width: 76mm; font-family: Arial, Helvetica, sans-serif; font-size: ${options.delivery ? "15px" : "14px"}; font-weight: 500; }
-            .receipt-copy { padding: 2mm 1mm 6mm; page-break-after: always; }
-            .receipt-copy:last-child { page-break-after: auto; }
-            h1 { font-size: ${options.delivery ? "24px" : "21px"}; margin: 0 0 3mm; text-align: center; letter-spacing: .5px; font-weight: 900; }
-            .brand { font-size: 26px; border: 2px solid #000; padding: 3mm 1mm; }
-            .copy-title { text-align: center; font-weight: 900; font-size: 15px; margin: 0 0 2mm; }
-            p { margin: 1.7mm 0; line-height: 1.28; }
-            .muted { text-align: center; font-size: 13px; }
-            .center { text-align: center; }
-            .thanks { font-size: 15px; font-weight: 900; }
-            .line { border-top: 1px dashed #000; margin: 2.7mm 0; }
-            table { width: 100%; border-collapse: collapse; font-size: ${options.delivery ? "13px" : "12px"}; }
-            th, td { padding: 1.2mm 0; border-bottom: 1px dotted #aaa; vertical-align: top; text-align: left; }
-            th:last-child, td:last-child { text-align: right; }
-            .total { font-size: ${options.delivery ? "22px" : "19px"}; font-weight: 900; text-align: right; margin-top: 2mm; }
-            .big { font-size: 18px; font-weight: 900; }
-          </style>
-        </head>
-        <body>${copyBlocks}</body>
-      </html>
-    `;
-    try {
-      printWindow.document.open();
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => { try { printWindow.print(); } catch (error) { console.error("Erro ao imprimir:", error); } }, 300);
-      return true;
-    } catch (error) {
-      console.error("Erro ao preparar impressão:", error);
-      setLastAction("Não foi possível preparar a impressão. Tente novamente.");
-      return false;
-    }
+    return printThermalHtmlBase(title, bodyHtml, copies, {
+      ...options,
+      onBlocked: () => setLastAction("Navegador bloqueou a impressão. Libere pop-ups e tente novamente."),
+      onError: () => setLastAction("Não foi possível preparar a impressão. Tente novamente."),
+    });
   }
 
 
   async function openCashRegister() {
     if (cashSession.isOpen) return setLastAction("O caixa já está aberto.");
-    const { data: existingOpen, error: existingError } = await supabase
-      .from("cash_sessions")
-      .select("id, opened_at, opening_amount")
-      .eq("status", "open")
-      .limit(1);
+
+    const { data: existingOpen, error: existingError } = await findOpenCashSessionFromSupabase();
     if (existingError) return setLastAction(`Não consegui verificar caixa aberto: ${existingError.message || "verifique cash_sessions."}`);
-    if (Array.isArray(existingOpen) && existingOpen.length > 0) {
-      const session = existingOpen[0];
-      setCashSession({ isOpen: true, id: session.id, openedAt: session.opened_at || new Date().toISOString(), closedAt: "", openingAmount: Number(session.opening_amount || 0), sangrias: [] });
+
+    if (existingOpen) {
+      setCashSession({
+        isOpen: true,
+        id: existingOpen.id,
+        openedAt: existingOpen.opened_at || new Date().toISOString(),
+        closedAt: "",
+        openingAmount: Number(existingOpen.opening_amount || 0),
+        sangrias: [],
+      });
       await loadCashData();
       return setLastAction("Já havia um caixa aberto no Supabase. O sistema foi sincronizado com esse caixa.");
     }
+
     const openingAmount = Math.max(0, Number(openingCashInput || 0));
-    const openedAt = new Date().toISOString();
-    const { data, error } = await supabase
-      .from("cash_sessions")
-      .insert({
-        status: "open",
-        opening_amount: openingAmount,
-        opened_at: openedAt,
-        opened_by: getCurrentStoreUserName(),
-        notes: "Abertura de caixa pelo painel",
-      })
-      .select("*")
-      .single();
+    const { data, error, openedAt } = await openCashSessionInSupabase({
+      openingAmount,
+      openedBy: getCurrentStoreUserName(),
+    });
+
     if (error) return setLastAction(`Caixa não aberto no Supabase: ${error.message || "verifique cash_sessions."}`);
+
     const sessionId = data?.id || "";
     setCashSession({ isOpen: true, id: sessionId, openedAt, closedAt: "", openingAmount, sangrias: [] });
     setOpeningCashInput("");
@@ -3801,15 +2222,21 @@ function App() {
     if (!cashSession.isOpen) return setLastAction("Abra o caixa antes de lançar sangria.");
     const value = Math.max(0, Number(sangriaDraft.value || 0));
     if (value <= 0) return setLastAction("Informe o valor da sangria.");
-    const movement = { id: Date.now(), value, reason: sangriaDraft.reason?.trim() || "Sangria", createdAt: new Date().toISOString() };
-    const payload = { id: movement.id, movement_type: "sangria", type: "sangria", value, amount: value, reason: movement.reason, created_at: movement.createdAt, opened_at: cashSession.openedAt || null, notes: JSON.stringify(movement) };
-    const { error } = await insertWithSchemaRetry("cash_movements", payload, false);
+
+    const { movement, error } = await insertCashSangriaInSupabase({
+      cashSession,
+      value,
+      reason: sangriaDraft.reason?.trim() || "Sangria",
+    });
+
     if (error) return setLastAction(`Sangria não salva no Supabase: ${error.message || "verifique cash_movements."}`);
+
     await auditAction("cash_sangria", "cash_sessions", cashSession.id, { value, reason: movement.reason });
     setCashSession((previous) => ({ ...previous, sangrias: [movement, ...(previous.sangrias || [])] }));
     setSangriaDraft({ value: "", reason: "" });
     setLastAction(`Sangria registrada no Supabase: ${money(value)}.`);
   }
+
 
   function printCashClosingReceipt(report, countedCash, difference, options = {}) {
     const paymentRows = [
@@ -3960,7 +2387,7 @@ function App() {
       closing_snapshot: record,
       notes: "Fechamento de caixa salvo pelo painel",
     };
-    const { error } = await supabase.from("cash_sessions").update(payload).eq("id", sessionId);
+    const { error } = await closeCashSessionInSupabase(sessionId, payload);
     if (error) throw new Error(error.message || "Fechamento não salvo no Supabase cash_sessions.");
     await auditAction("close_cash_session", "cash_sessions", sessionId, payload);
     setCashClosings((previous) => [record, ...(previous || [])]);
