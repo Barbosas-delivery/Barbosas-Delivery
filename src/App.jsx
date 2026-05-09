@@ -3847,6 +3847,53 @@ function App() {
     setLastAction("Configurações da loja restauradas para o padrão inicial e serão sincronizadas no Supabase quando possível.");
   }
 
+  function downloadJsonFile(filename, payload) {
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportOperationalBackup() {
+    const createdAt = new Date().toISOString();
+    const backup = {
+      app: "Barbosas Delivery",
+      version: "fase-15-backup-operacional",
+      createdAt,
+      storeSettings: sanitizeStoreSettings(storeSettings),
+      products,
+      productGroups,
+      promotions,
+      kits,
+      clients,
+      couriers,
+      deliveries,
+      notifications,
+      orderPayments,
+      cashSession,
+      cashClosings,
+      tabsAccounts,
+      tabCreditLimits,
+      summary: {
+        products: products.length,
+        clients: clients.length,
+        couriers: couriers.length,
+        deliveries: deliveries.length,
+        notifications: notifications.length,
+        openTabs: tabsAccounts.length,
+      },
+    };
+    const safeDate = createdAt.slice(0, 19).replace(/[:T]/g, "-");
+    downloadJsonFile(`barbosas-delivery-backup-${safeDate}.json`, backup);
+    setLastAction("Backup operacional baixado em JSON. Guarde esse arquivo em local seguro.");
+  }
+
   async function confirmManualDelivery(id) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery) return;
@@ -5317,6 +5364,14 @@ function App() {
                     <div className="md:col-span-2 rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
                       <p className="text-xs font-bold text-zinc-600">Horários cadastrados</p>
                       <p className="mt-1 text-sm text-zinc-700">{storeOpeningHoursSummary}</p>
+                    </div>
+                    <div className="md:col-span-2 rounded-3xl border border-amber-100 bg-amber-50 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-black text-amber-950">Backup operacional</p>
+                        <p className="mt-1 text-xs text-amber-900">Baixe um arquivo JSON com produtos, clientes, entregadores, pedidos, caixa, comandas, notificações e configurações atuais. Use antes de grandes alterações ou antes de subir uma nova versão.</p>
+                        <p className="mt-1 text-xs font-bold text-amber-950">Resumo atual: {products.length} produtos • {clients.length} clientes • {deliveries.length} pedidos • {couriers.length} entregadores</p>
+                      </div>
+                      <Button onClick={exportOperationalBackup} variant="secondary" className="rounded-2xl bg-white whitespace-nowrap">Baixar backup</Button>
                     </div>
                   </div>
                   <div className="mt-5 rounded-3xl border border-zinc-100 bg-zinc-50 p-4 flex items-center gap-3">
