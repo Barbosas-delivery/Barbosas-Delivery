@@ -452,6 +452,13 @@ function buildOpeningHoursSummary(schedule) {
     .join(" • ");
 }
 
+function getTodayOpeningHours(schedule, date = new Date()) {
+  const today = normalizeStoreSchedule(schedule).find((item) => Number(item.day) === date.getDay());
+  if (!today) return "Horário de hoje não configurado";
+  if (today.closed) return `${today.label}: fechado hoje`;
+  return `${today.label}: ${today.open} às ${today.close}`;
+}
+
 
 const STORE_SETTINGS_STORAGE_KEY = "barbosas-delivery-store-settings-v1";
 
@@ -1664,6 +1671,7 @@ function App() {
   const storeOpenStatus = useMemo(() => getStoreOpenStatus(normalizedStoreSchedule, currentStoreDate), [normalizedStoreSchedule, currentStoreDate]);
   const effectiveStoreIsOpen = storeOpenStatus.isOpen;
   const storeOpeningHoursSummary = useMemo(() => buildOpeningHoursSummary(normalizedStoreSchedule), [normalizedStoreSchedule]);
+  const todayOpeningHoursSummary = useMemo(() => getTodayOpeningHours(normalizedStoreSchedule, currentStoreDate), [normalizedStoreSchedule, currentStoreDate]);
   const currentEstimatedDeliveryMinutes = useMemo(() => buildEstimatedDeliveryMinutes(deliveries, false), [deliveries]);
   const nextOrderEstimatedDeliveryMinutes = useMemo(() => buildEstimatedDeliveryMinutes(deliveries, true), [deliveries]);
   const currentEstimatedDeliveryLabel = useMemo(() => formatEstimatedDeliveryTime(currentEstimatedDeliveryMinutes), [currentEstimatedDeliveryMinutes]);
@@ -4846,11 +4854,33 @@ function App() {
                       </div>
                     </div>
                   )}
-                  <div className="rounded-3xl bg-white text-zinc-950 p-4 md:p-5 shadow-sm">
-                    <h2 className="text-xl font-black mb-1">Monte seu pedido</h2>
-                    <p className="text-xs text-zinc-600"><b>Entrega para:</b> {customerForm.street}, {customerForm.number} - {customerForm.district}, {customerForm.city}/{customerForm.state}</p>
-                    <p className={`text-xs font-bold mt-1 ${effectiveStoreIsOpen ? "text-emerald-600" : "text-red-600"}`}>{effectiveStoreIsOpen ? "Estamos abertos" : "Estamos fechados no momento"} • {storeOpenStatus.message} • {storeOpeningHoursSummary}</p>
-                    <p className="text-xs text-zinc-500 mt-1">Pedido mínimo: {money(storeSettings.minimumOrderValue)} em produtos • Entrega estimada agora: {nextOrderEstimatedDeliveryLabel}</p>
+                  <div className="rounded-3xl bg-white text-zinc-950 p-4 md:p-5 shadow-sm space-y-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-wide text-zinc-400">Pedido pelo celular</p>
+                      <h2 className="text-xl font-black leading-tight">Monte seu pedido</h2>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 text-xs">
+                      <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                        <p className="font-black text-zinc-500">Entrega para</p>
+                        <p className="mt-1 font-bold text-zinc-900 break-words">{customerForm.street}, {customerForm.number}</p>
+                        <p className="text-zinc-600 break-words">{customerForm.district} • {customerForm.city}/{customerForm.state}</p>
+                      </div>
+                      <div className={`rounded-2xl border p-3 ${effectiveStoreIsOpen ? "border-emerald-100 bg-emerald-50 text-emerald-900" : "border-red-100 bg-red-50 text-red-900"}`}>
+                        <p className="font-black">{effectiveStoreIsOpen ? "Estamos abertos" : "Estamos fechados no momento"}</p>
+                        <p className="mt-1 font-bold">Hoje: {todayOpeningHoursSummary}</p>
+                        <p className="text-[11px] opacity-80">{storeOpenStatus.message}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-2xl bg-zinc-50 p-3">
+                        <p className="font-black text-zinc-500">Pedido mínimo</p>
+                        <p className="mt-1 text-sm font-black text-zinc-900">{money(storeSettings.minimumOrderValue)}</p>
+                      </div>
+                      <div className="rounded-2xl bg-zinc-50 p-3">
+                        <p className="font-black text-zinc-500">Entrega estimada</p>
+                        <p className="mt-1 text-sm font-black text-zinc-900">{nextOrderEstimatedDeliveryLabel}</p>
+                      </div>
+                    </div>
                   </div>
                   {customerNotifications.length > 0 && (
                     <div className="rounded-3xl bg-amber-50 border border-amber-200 p-4 text-amber-900">
