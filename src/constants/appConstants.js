@@ -1,4 +1,4 @@
-export const APP_VERSION = "5.2.0-fase-18";
+export const APP_VERSION = "5.2.0-fase-19";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

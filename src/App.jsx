@@ -1400,6 +1400,7 @@ function App() {
   const autoPrintInitializedRef = useRef(false);
   const backupFileInputRef = useRef(null);
   const [orderPayments, setOrderPayments] = useState([]);
+  const [processingPaymentIds, setProcessingPaymentIds] = useState([]);
   const [cashSession, setCashSession] = useState({ isOpen: false, id: "", openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [sangriaDraft, setSangriaDraft] = useState({ value: "", reason: "" });
@@ -3521,22 +3522,56 @@ function App() {
   }
 
   async function updatePaymentStatus(id, paymentStatus) {
-    const delivery = deliveries.find((item) => item.id === id);
+    const paymentKey = String(id);
+    if (processingPaymentIds.includes(paymentKey)) return setLastAction("Aguarde, o pagamento já está sendo atualizado.");
+    const delivery = deliveries.find((item) => String(item.id) === paymentKey);
     if (!delivery) return setLastAction("Pedido ou venda não encontrado.");
     const orderLabel = getOrderLabel(delivery);
     if (delivery?.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return setLastAction("Aprove o pedido antes de confirmar recebimento.");
     if (delivery?.status === DELIVERY_STATUS.CANCELLED) return setLastAction(`${orderLabel === "venda" ? "Venda cancelada" : "Pedido cancelado"} não pode ter pagamento alterado.`);
-    if (paymentStatus === PAYMENT_STATUS.PAID && delivery?.paymentStatus !== PAYMENT_STATUS.PAID && Number(delivery?.value || 0) >= 100) {
-      const confirmed = window.confirm(`Confirmar pagamento da ${orderLabel} #${id} no valor de ${money(delivery.value)}?`);
-      if (!confirmed) return setLastAction("Marcação de pagamento cancelada.");
+    if (delivery?.paymentStatus === paymentStatus) return setLastAction(`Pagamento da ${orderLabel} #${id} já está como: ${paymentStatus}.`);
+
+    const isConfirmingPayment = paymentStatus === PAYMENT_STATUS.PAID;
+    if (isConfirmingPayment && !delivery.cashSessionId && !isCashOpen) {
+      return setLastAction("Abra o caixa antes de confirmar recebimento deste pedido.");
     }
-    const updated = await updateDeliveryInSupabase(id, { paymentStatus });
-    if (!updated) return;
-    if (paymentStatus === PAYMENT_STATUS.PAID && delivery.cashSessionId) {
-      try { await saveOrderPayments({ ...delivery, paymentStatus }); await loadOrderPayments(); } catch (error) { console.error("Pagamento adicional não salvo:", error); }
+
+    const confirmMessage = isConfirmingPayment
+      ? `Confirmar recebimento da ${orderLabel} #${id} no valor de ${money(delivery.value)}?`
+      : `Reabrir recebimento da ${orderLabel} #${id}? O valor deixará de entrar como pago no fechamento.`;
+    if (!window.confirm(confirmMessage)) return setLastAction("Alteração de pagamento cancelada.");
+
+    setProcessingPaymentIds((previous) => [...previous, paymentKey]);
+    try {
+      const now = new Date().toISOString();
+      const patch = {
+        paymentStatus,
+        cashSessionId: delivery.cashSessionId || (isConfirmingPayment ? cashSession.id || "" : delivery.cashSessionId || ""),
+        paymentConfirmedAt: isConfirmingPayment ? now : "",
+        paymentConfirmedBy: isConfirmingPayment ? getCurrentStoreUserName() || "loja" : "",
+      };
+      const updated = await updateDeliveryInSupabase(id, patch);
+      if (!updated) return;
+
+      if (isConfirmingPayment) {
+        try {
+          await saveOrderPayments({ ...delivery, ...patch });
+          await loadOrderPayments();
+        } catch (error) {
+          console.error("Pagamento não salvo em order_payments:", error);
+          setLastAction("Pagamento marcado no pedido, mas não consegui registrar no caixa. Verifique order_payments.");
+        }
+      } else {
+        await cancelExistingOrderPayments(id, "reaberto pela loja");
+        setOrderPayments((previous) => previous.map((payment) => String(payment.orderId) === paymentKey ? { ...payment, status: "cancelled", notes: "Pagamento reaberto pela loja" } : payment));
+      }
+
+      setDeliveries((previousDeliveries) => previousDeliveries.map((item) => (String(item.id) === paymentKey ? { ...item, ...patch } : item)));
+      await auditAction("update_payment_status", "orders", id, { paymentStatus, value: delivery.value, cashSessionId: patch.cashSessionId || "" });
+      setLastAction(`Pagamento da ${orderLabel} #${id} atualizado para: ${paymentStatus}.`);
+    } finally {
+      setProcessingPaymentIds((previous) => previous.filter((key) => key !== paymentKey));
     }
-    setDeliveries((previousDeliveries) => previousDeliveries.map((item) => (item.id === id ? { ...item, paymentStatus } : item)));
-    setLastAction(`Pagamento da ${orderLabel} #${id} atualizado para: ${paymentStatus}.`);
   }
 
   function requestCancelDelivery(id) {
@@ -5115,7 +5150,7 @@ function App() {
                   <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
                 </div>
                 {activeDeliveryOrdersForStore.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega em aberto no momento.</p></CardBox>}
-                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
+                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
 
                 <Title title="Relatório de entregas aprovadas" subtitle="Entregas que já foram confirmadas pela loja e liberadas para o entregador." />
                 <CardBox>
@@ -5212,7 +5247,7 @@ function App() {
                 </div>
 
                 <Title title="Vendas de balcão" subtitle="Separado das entregas, mas somado ao fechamento de caixa." />
-                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
+                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
               </div>
             )}
 
@@ -5818,10 +5853,11 @@ function NotificationPanel({ title, notifications, onMarkRead }) {
   );
 }
 
-function OwnerDeliveryCard({ delivery, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent }) {
+function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent }) {
   const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
   const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
-  const canConfirmPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && !isWaitingOrderApproval && delivery.paymentStatus !== PAYMENT_STATUS.PAID;
+  const canConfirmPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && !isWaitingOrderApproval && delivery.paymentStatus !== PAYMENT_STATUS.PAID && !isPaymentProcessing;
+  const canReopenPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && delivery.paymentStatus === PAYMENT_STATUS.PAID && !isPaymentProcessing;
   return (
     <Card className="rounded-3xl border-zinc-200 shadow-sm">
       <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -5860,11 +5896,13 @@ function OwnerDeliveryCard({ delivery, onPrint, onApprove, onManualConfirm, onCa
           )}
           <span className="text-xs text-zinc-500">Produtos: {money(delivery.productsTotal ?? Number(delivery.value || 0) - (isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee)))} • Desconto: -{money(delivery.discount || 0)} • Entrega: {money(isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee))}</span>
           <span className="text-sm text-zinc-500">Pagamento: {getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails)}</span>
-          {delivery.paymentStatus === PAYMENT_STATUS.PAID && <span className="rounded-2xl border px-3 py-2 text-xs font-bold bg-emerald-50 text-emerald-700 border-emerald-100">Recebimento confirmado</span>}
+          <span className={`rounded-2xl border px-3 py-2 text-xs font-bold ${getPaymentStatusClass(delivery.paymentStatus)}`}>{delivery.paymentStatus || PAYMENT_STATUS.PENDING}</span>
+          {delivery.paymentConfirmedAt && <span className="text-[11px] text-zinc-500">Recebido em {new Date(delivery.paymentConfirmedAt).toLocaleString("pt-BR")}{delivery.paymentConfirmedBy ? ` por ${delivery.paymentConfirmedBy}` : ""}</span>}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full md:w-auto">
             <Button onClick={() => onApprove(delivery.id)} disabled={!isDeliveryOrder(delivery) || (!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>
             <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
-            <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">Confirmar pagamento</Button>
+            <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>
+            <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">Reabrir recebimento</Button>
             <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">Cancelar pedido</Button>
             <Button onClick={() => onManualConfirm(delivery.id)} disabled={!isDeliveryOrder(delivery) || isWaitingOrderApproval || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>
           </div>
