@@ -56,6 +56,16 @@ export function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
     setTimeout(() => {
       try {
         printWindow.print();
+        const closeDelaySeconds = Number(options.closeAfterPrintSeconds || 0);
+        if (closeDelaySeconds > 0) {
+          setTimeout(() => {
+            try {
+              printWindow.close();
+            } catch (error) {
+              console.error("Erro ao fechar janela de impressão:", error);
+            }
+          }, closeDelaySeconds * 1000);
+        }
       } catch (error) {
         console.error("Erro ao imprimir:", error);
       }

@@ -2726,8 +2726,29 @@ function App() {
     setCounterDraft((previousDraft) => ({ ...previousDraft, items: previousDraft.items.filter((item) => item.id !== productId) }));
   }
 
+  function getSafePrintCopies(value, fallback = 1) {
+    const copies = Math.floor(Number(value || fallback));
+    if (!Number.isFinite(copies)) return fallback;
+    return Math.min(4, Math.max(1, copies));
+  }
+
+  function getAutoPrintCopies() {
+    return getSafePrintCopies(storeSettings.customerOrderPrintCopies, 2);
+  }
+
+  function getManualReprintCopies() {
+    return getSafePrintCopies(storeSettings.manualReprintCopies, 1);
+  }
+
+  function getPrintCloseDelaySeconds() {
+    const seconds = Math.floor(Number(storeSettings.printCloseDelaySeconds || 0));
+    if (!Number.isFinite(seconds)) return 0;
+    return Math.min(10, Math.max(0, seconds));
+  }
+
   function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
     return printThermalHtmlBase(title, bodyHtml, copies, {
+      closeAfterPrintSeconds: getPrintCloseDelaySeconds(),
       ...options,
       onBlocked: () => setLastAction("Navegador bloqueou a impressão. Libere pop-ups e tente novamente."),
       onError: () => setLastAction("Não foi possível preparar a impressão. Tente novamente."),
@@ -2949,6 +2970,7 @@ function App() {
 
 
   function shouldAutoPrintIncomingCustomerOrder(delivery) {
+    if (storeSettings.autoPrintCustomerOrders === false) return false;
     if (!delivery || !isDeliveryOrder(delivery)) return false;
     if (String(delivery.id || "") === "") return false;
     if (delivery.status !== DELIVERY_STATUS.WAITING_STORE_APPROVAL) return false;
@@ -2964,7 +2986,8 @@ function App() {
     knownDeliveryIdsRef.current.add(normalizedId);
   }
 
-  function printDeliveryReceipt(delivery, copies = 1, printOptions = {}) {
+  function printDeliveryReceipt(delivery, copies = null, printOptions = {}) {
+    const receiptCopies = getSafePrintCopies(copies ?? getManualReprintCopies(), getManualReprintCopies());
     const itemsHtml = buildReceiptItemsHtml(delivery.items || []);
     const isDelivery = isDeliveryOrder(delivery);
     const body = `
@@ -2989,10 +3012,10 @@ function App() {
       <p class="center">${isDelivery ? "Via de entrega • Conferir endereço e itens" : "Conferir venda no balcão"}</p>
       ${isDelivery ? `<p class="center thanks">Barbosas Delivery agradece!</p>` : ""}
     `;
-    const printed = printThermalHtml(`${isCounterOrder(delivery) ? "VENDA" : "ENTREGA"} #${delivery.id}`, body, copies, { delivery: isDelivery, ...printOptions });
+    const printed = printThermalHtml(`${isCounterOrder(delivery) ? "VENDA" : "ENTREGA"} #${delivery.id}`, body, receiptCopies, { delivery: isDelivery, ...printOptions });
     if (printed) {
-      auditAction("print_receipt", "orders", delivery.id, { copies, orderType: delivery.orderType || ORDER_TYPE.DELIVERY, value: delivery.value });
-      setLastAction(`Impressão aberta em ${copies} via${copies > 1 ? "s" : ""}.`);
+      auditAction("print_receipt", "orders", delivery.id, { copies: receiptCopies, orderType: delivery.orderType || ORDER_TYPE.DELIVERY, value: delivery.value });
+      setLastAction(`Impressão aberta em ${receiptCopies} via${receiptCopies > 1 ? "s" : ""}.`);
     }
     return printed;
   }
@@ -3017,16 +3040,17 @@ function App() {
 
     if (!isLogged || newCustomerOrders.length === 0) return;
 
+    const autoPrintCopies = getAutoPrintCopies();
     newCustomerOrders.forEach((delivery) => {
-      const printed = printDeliveryReceipt(delivery, 2, { autoPrint: true });
+      const printed = printDeliveryReceipt(delivery, autoPrintCopies, { autoPrint: true });
       if (printed) {
         registerDeliveryAsPrinted(delivery.id);
-        setLastAction(`Pedido #${delivery.id} recebido do cliente e impressão aberta automaticamente.`);
+        setLastAction(`Pedido #${delivery.id} recebido do cliente e impressão automática aberta em ${autoPrintCopies} via${autoPrintCopies > 1 ? "s" : ""}.`);
       } else {
         setLastAction(`Pedido #${delivery.id} recebido. O navegador bloqueou a impressão automática; clique em Reimprimir no pedido.`);
       }
     });
-  }, [deliveries, deliveriesLoaded, isLogged]);
+  }, [deliveries, deliveriesLoaded, isLogged, storeSettings.autoPrintCustomerOrders, storeSettings.customerOrderPrintCopies, storeSettings.manualReprintCopies, storeSettings.printCloseDelaySeconds]);
 
   async function launchCounterSale() {
     if (!isCashOpen) return setLastAction("Abra o caixa antes de usar o PDV Balcão.");
@@ -3694,8 +3718,22 @@ function App() {
   }
 
 
+  function getPrintCloseDelaySecondsFromValue(value) {
+    const seconds = Math.floor(Number(value || 0));
+    if (!Number.isFinite(seconds)) return 0;
+    return Math.min(10, Math.max(0, seconds));
+  }
+
   function updateStoreSetting(field, value) {
-    const finalValue = ["defaultDeliveryFee", "minimumOrderValue"].includes(field) ? normalizeDeliveryFee(value) : value;
+    const moneyFields = ["defaultDeliveryFee", "minimumOrderValue"];
+    const printCopyFields = ["customerOrderPrintCopies", "manualReprintCopies"];
+    const finalValue = moneyFields.includes(field)
+      ? normalizeDeliveryFee(value)
+      : printCopyFields.includes(field)
+        ? getSafePrintCopies(value, field === "customerOrderPrintCopies" ? 2 : 1)
+        : field === "printCloseDelaySeconds"
+          ? getPrintCloseDelaySecondsFromValue(value)
+          : value;
     setStoreSettings((previousSettings) => ({ ...previousSettings, [field]: finalValue }));
     if (field === "defaultDeliveryFee") {
       setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: finalValue }));
@@ -5144,6 +5182,26 @@ function App() {
                       <p className="text-xs font-medium text-zinc-600">Tempo estimado automático</p>
                       <p className="mt-1 text-2xl font-black text-zinc-900">{nextOrderEstimatedDeliveryLabel}</p>
                       <p className="text-xs text-zinc-500">Cada entrega ativa adiciona 7 minutos. Atualiza a cada 3 segundos.</p>
+                    </div>
+                    <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4 space-y-3">
+                      <div>
+                        <p className="text-xs font-medium text-zinc-600">Impressão de pedidos</p>
+                        <p className="mt-1 text-lg font-black text-zinc-900">{storeSettings.autoPrintCustomerOrders === false ? "Automática desligada" : `Automática ligada • ${getAutoPrintCopies()} via${getAutoPrintCopies() > 1 ? "s" : ""}`}</p>
+                        <p className="text-xs text-zinc-500">Pedidos novos feitos pelo cliente tentam abrir a impressão automaticamente. Se o navegador bloquear, use Reimprimir.</p>
+                      </div>
+                      <label className="flex min-h-[48px] items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 text-sm font-bold">
+                        <input
+                          type="checkbox"
+                          checked={storeSettings.autoPrintCustomerOrders !== false}
+                          onChange={(event) => updateStoreSetting("autoPrintCustomerOrders", event.target.checked)}
+                        />
+                        Imprimir automaticamente pedidos do cliente
+                      </label>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <Input label="Vias automáticas" type="number" value={storeSettings.customerOrderPrintCopies} onChange={(value) => updateStoreSetting("customerOrderPrintCopies", value)} />
+                        <Input label="Vias no Reimprimir" type="number" value={storeSettings.manualReprintCopies} onChange={(value) => updateStoreSetting("manualReprintCopies", value)} />
+                        <Input label="Fechar impressão após (s)" type="number" value={storeSettings.printCloseDelaySeconds} onChange={(value) => updateStoreSetting("printCloseDelaySeconds", value)} />
+                      </div>
                     </div>
                     <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
                       <div className="flex items-start justify-between gap-3">
