@@ -309,6 +309,62 @@ function buildOrderTotal(items) {
   return sanitizeCustomerCart(items).reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1), 0);
 }
 
+function normalizeCouponCode(value = "") {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function normalizeCouponFromDatabase(coupon = {}) {
+  return {
+    id: coupon.id || Date.now(),
+    code: normalizeCouponCode(coupon.code),
+    description: coupon.description || "",
+    discountType: coupon.discount_type || coupon.discountType || "fixed",
+    discountValue: Number(coupon.discount_value ?? coupon.discountValue ?? 0),
+    minimumOrderValue: Number(coupon.minimum_order_value ?? coupon.minimumOrderValue ?? 0),
+    maxDiscount: Number(coupon.max_discount ?? coupon.maxDiscount ?? 0),
+    startDate: coupon.start_date || coupon.startDate || "",
+    endDate: coupon.end_date || coupon.endDate || "",
+    usageLimit: Number(coupon.usage_limit ?? coupon.usageLimit ?? 0),
+    usedCount: Number(coupon.used_count ?? coupon.usedCount ?? 0),
+    active: isTruthyActive(coupon.active),
+    createdAt: coupon.created_at || coupon.createdAt || "",
+    updatedAt: coupon.updated_at || coupon.updatedAt || "",
+  };
+}
+
+function isCouponInPeriod(coupon) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (coupon?.startDate) {
+    const start = new Date(`${coupon.startDate}T00:00:00`);
+    if (Number.isFinite(start.getTime()) && today < start) return false;
+  }
+  if (coupon?.endDate) {
+    const end = new Date(`${coupon.endDate}T23:59:59`);
+    if (Number.isFinite(end.getTime()) && new Date() > end) return false;
+  }
+  return true;
+}
+
+function getCouponDiscount(coupon, productsTotal = 0) {
+  const base = Math.max(0, Number(productsTotal || 0));
+  if (!coupon || base <= 0) return 0;
+  if (base < Number(coupon.minimumOrderValue || 0)) return 0;
+  let discount = String(coupon.discountType || "fixed") === "percent" ? base * (Number(coupon.discountValue || 0) / 100) : Number(coupon.discountValue || 0);
+  if (Number(coupon.maxDiscount || 0) > 0) discount = Math.min(discount, Number(coupon.maxDiscount || 0));
+  return normalizeDiscount(discount, base);
+}
+
+function validateCouponForCart(coupon, productsTotal = 0) {
+  if (!coupon) return { valid: false, message: "Cupom não encontrado." };
+  if (!coupon.active) return { valid: false, message: "Esse cupom está inativo." };
+  if (!isCouponInPeriod(coupon)) return { valid: false, message: "Esse cupom está fora do período de validade." };
+  if (Number(coupon.usageLimit || 0) > 0 && Number(coupon.usedCount || 0) >= Number(coupon.usageLimit || 0)) return { valid: false, message: "Esse cupom atingiu o limite de uso." };
+  if (Number(productsTotal || 0) < Number(coupon.minimumOrderValue || 0)) return { valid: false, message: `Esse cupom exige pedido mínimo de ${money(coupon.minimumOrderValue)} em produtos.` };
+  if (getCouponDiscount(coupon, productsTotal) <= 0) return { valid: false, message: "Esse cupom não gera desconto para este pedido." };
+  return { valid: true, message: "Cupom aplicado." };
+}
+
 function getActiveProductVariants(product) {
   return normalizeProductVariants(product?.variants).filter((variant) => variant.active !== false);
 }
@@ -817,6 +873,8 @@ function App() {
   const [showCustomerCheckout, setShowCustomerCheckout] = useState(false);
   const [showCustomerNeedMoreMessage, setShowCustomerNeedMoreMessage] = useState(false);
   const [customerPayment, setCustomerPayment] = useState("Pix");
+  const [customerCouponCode, setCustomerCouponCode] = useState("");
+  const [appliedCustomerCoupon, setAppliedCustomerCoupon] = useState(null);
   const [customerChangeFor, setCustomerChangeFor] = useState("");
   const [customerOrderConfirmation, setCustomerOrderConfirmation] = useState(null);
   const [customerSubmitting, setCustomerSubmitting] = useState(false);
@@ -874,6 +932,7 @@ function App() {
   }, [storeSettings, storeSettingsSyncReady]);
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
+  const [coupons, setCoupons] = useState([]);
   const [kits, setKits] = useState([]);
   const [clients, setClients] = useState(initialClients);
   const [deliveries, setDeliveries] = useState(initialDeliveries);
@@ -944,6 +1003,16 @@ function App() {
       updatedAt: promotion.updated_at || promotion.updatedAt || "",
       active: isTruthyActive(promotion.active),
     })));
+  }
+
+  async function loadCoupons() {
+    const { data, error } = await supabase.from("coupons").select("*").order("created_at", { ascending: false });
+    if (error) {
+      console.error("Erro ao carregar cupons:", error);
+      setCoupons([]);
+      return;
+    }
+    setCoupons((Array.isArray(data) ? data : []).map(normalizeCouponFromDatabase));
   }
 
   async function loadKits() {
@@ -1313,6 +1382,7 @@ function App() {
     loadClients();
     loadCouriers();
     loadPromotions();
+    loadCoupons();
     loadKits();
     loadDeliveries();
     loadTabsAccounts();
@@ -1342,6 +1412,7 @@ function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => { if (isMounted) loadClients(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "couriers" }, () => { if (isMounted) loadCouriers(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "promotions" }, () => { if (isMounted) loadPromotions(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "coupons" }, () => { if (isMounted) loadCoupons(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "kits" }, () => { if (isMounted) loadKits(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "kit_items" }, () => { if (isMounted) loadKits(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "tab_accounts" }, () => { if (isMounted) loadTabsAccounts(); })
@@ -1379,6 +1450,7 @@ function App() {
   const [productGroups, setProductGroups] = useState(initialProductGroups);
   const [newProductGroup, setNewProductGroup] = useState("");
   const [newPromotion, setNewPromotion] = useState({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
+  const [newCoupon, setNewCoupon] = useState({ code: "", description: "", discountType: "fixed", discountValue: "", minimumOrderValue: "", maxDiscount: "", usageLimit: "", startDate: "", endDate: "", active: true });
   const [promotionProductSearch, setPromotionProductSearch] = useState("");
   const [editingPromotionProductSearch, setEditingPromotionProductSearch] = useState("");
   const [editingPromotionId, setEditingPromotionId] = useState(null);
@@ -1543,7 +1615,9 @@ function App() {
   const safeCustomerCart = useMemo(() => sanitizeCustomerCart(customerCart), [customerCart]);
   const customerCartTotal = useMemo(() => buildOrderTotal(safeCustomerCart), [safeCustomerCart]);
   const customerCartItemCount = useMemo(() => safeCustomerCart.reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0), [safeCustomerCart]);
-  const customerDeliveryTotal = useMemo(() => buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee), [customerCartTotal, storeSettings.defaultDeliveryFee]);
+  const activeCoupons = useMemo(() => coupons.filter((coupon) => coupon.active && isCouponInPeriod(coupon)), [coupons]);
+  const appliedCustomerCouponDiscount = useMemo(() => getCouponDiscount(appliedCustomerCoupon, customerCartTotal), [appliedCustomerCoupon, customerCartTotal]);
+  const customerDeliveryTotal = useMemo(() => buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee, appliedCustomerCouponDiscount), [customerCartTotal, storeSettings.defaultDeliveryFee, appliedCustomerCouponDiscount]);
   const normalizedCustomerPhoneForNotifications = useMemo(() => onlyPhoneNumbers(customerForm.phone), [customerForm.phone]);
 
   function getCustomerProductCartItems(productId) {
@@ -1670,6 +1744,16 @@ function App() {
     const timer = window.setTimeout(() => setCanCloseCustomerPromo(true), 3000);
     return () => window.clearTimeout(timer);
   }, [showCustomerPromo]);
+
+  useEffect(() => {
+    if (!appliedCustomerCoupon) return;
+    const validation = validateCouponForCart(appliedCustomerCoupon, customerCartTotal);
+    if (!validation.valid) {
+      setAppliedCustomerCoupon(null);
+      setCustomerCouponCode("");
+      if (customerCartTotal > 0) setCustomerError(validation.message);
+    }
+  }, [appliedCustomerCoupon, customerCartTotal]);
 
   function addNotification(type, title, message, audience = "loja", deliveryId = null, options = {}) {
     const relatedDelivery = deliveries.find((delivery) => String(delivery.id) === String(deliveryId));
@@ -1948,6 +2032,88 @@ function App() {
     setProductGroups((previousGroups) => [...previousGroups, groupName]);
     setNewProductGroup("");
     setLastAction("Grupo de produtos criado com sucesso.");
+  }
+
+  async function addCoupon() {
+    const code = normalizeCouponCode(newCoupon.code);
+    if (!code) return setLastAction("Digite o código do cupom.");
+    if (coupons.some((coupon) => normalizeCouponCode(coupon.code) === code)) return setLastAction("Já existe um cupom com esse código.");
+    const discountValue = toNonNegativeNumber(newCoupon.discountValue, 0);
+    if (!(discountValue > 0)) return setLastAction("Informe o valor do desconto do cupom.");
+    if (newCoupon.discountType === "percent" && discountValue > 100) return setLastAction("Cupom percentual não pode passar de 100%.");
+
+    const couponToSave = {
+      id: Date.now(),
+      code,
+      description: newCoupon.description.trim(),
+      discountType: newCoupon.discountType,
+      discountValue,
+      minimumOrderValue: toNonNegativeNumber(newCoupon.minimumOrderValue, 0),
+      maxDiscount: toNonNegativeNumber(newCoupon.maxDiscount, 0),
+      usageLimit: toNonNegativeNumber(newCoupon.usageLimit, 0),
+      usedCount: 0,
+      startDate: newCoupon.startDate,
+      endDate: newCoupon.endDate,
+      active: true,
+    };
+
+    const { error } = await insertWithSchemaRetry("coupons", {
+      id: couponToSave.id,
+      code: couponToSave.code,
+      description: couponToSave.description,
+      discount_type: couponToSave.discountType,
+      discount_value: couponToSave.discountValue,
+      minimum_order_value: couponToSave.minimumOrderValue,
+      max_discount: couponToSave.maxDiscount,
+      usage_limit: couponToSave.usageLimit,
+      used_count: 0,
+      start_date: couponToSave.startDate || null,
+      end_date: couponToSave.endDate || null,
+      active: true,
+    }, false);
+    if (error) return setLastAction(`Cupom não salvo no Supabase: ${error.message || "verifique coupons."}`);
+    setCoupons((previousCoupons) => [couponToSave, ...previousCoupons]);
+    setNewCoupon({ code: "", description: "", discountType: "fixed", discountValue: "", minimumOrderValue: "", maxDiscount: "", usageLimit: "", startDate: "", endDate: "", active: true });
+    setLastAction(`Cupom ${code} cadastrado com sucesso.`);
+  }
+
+  async function toggleCouponStatus(id) {
+    const coupon = coupons.find((item) => String(item.id) === String(id));
+    if (!coupon) return;
+    const nextActive = !coupon.active;
+    const { error } = await updateWithSchemaRetry("coupons", id, { active: nextActive });
+    if (error) return setLastAction(`Status do cupom não salvo no Supabase: ${error.message || "verifique coupons."}`);
+    setCoupons((previousCoupons) => previousCoupons.map((item) => String(item.id) === String(id) ? { ...item, active: nextActive } : item));
+    if (appliedCustomerCoupon && String(appliedCustomerCoupon.id) === String(id) && !nextActive) setAppliedCustomerCoupon(null);
+    setLastAction("Status do cupom atualizado.");
+  }
+
+  async function registerCouponUsage(coupon) {
+    if (!coupon?.id) return;
+    const nextUsedCount = Number(coupon.usedCount || 0) + 1;
+    setCoupons((previousCoupons) => previousCoupons.map((item) => String(item.id) === String(coupon.id) ? { ...item, usedCount: nextUsedCount } : item));
+    const { error } = await updateWithSchemaRetry("coupons", coupon.id, { used_count: nextUsedCount });
+    if (error) console.warn("Uso do cupom não salvo no Supabase:", error);
+  }
+
+  function applyCustomerCoupon() {
+    const code = normalizeCouponCode(customerCouponCode);
+    if (!code) return setCustomerError("Digite o código do cupom.");
+    const coupon = coupons.find((item) => normalizeCouponCode(item.code) === code);
+    const validation = validateCouponForCart(coupon, customerCartTotal);
+    if (!validation.valid) {
+      setAppliedCustomerCoupon(null);
+      return setCustomerError(validation.message);
+    }
+    setAppliedCustomerCoupon(coupon);
+    setCustomerCouponCode(code);
+    setCustomerError(`Cupom ${code} aplicado: ${money(getCouponDiscount(coupon, customerCartTotal))} de desconto.`);
+  }
+
+  function removeCustomerCoupon() {
+    setAppliedCustomerCoupon(null);
+    setCustomerCouponCode("");
+    setCustomerError("Cupom removido.");
   }
 
   async function addPromotion() {
@@ -2713,7 +2879,13 @@ function App() {
       }
 
       const deliveryFee = normalizeDeliveryFee(storeSettings.defaultDeliveryFee);
-      const finalTotal = buildDeliveryTotal(syncedProductsTotal, deliveryFee);
+      const finalCouponValidation = appliedCustomerCoupon ? validateCouponForCart(appliedCustomerCoupon, syncedProductsTotal) : { valid: true };
+      if (!finalCouponValidation.valid) {
+        setAppliedCustomerCoupon(null);
+        return setCustomerError(finalCouponValidation.message);
+      }
+      const couponDiscount = getCouponDiscount(appliedCustomerCoupon, syncedProductsTotal);
+      const finalTotal = buildDeliveryTotal(syncedProductsTotal, deliveryFee, couponDiscount);
       const changeForValue = toSafeMoneyNumber(customerChangeFor, 0);
       if (customerPayment === "Dinheiro" && customerChangeFor !== "" && changeForValue > 0 && changeForValue < finalTotal) {
         return setCustomerError(`O valor para troco precisa ser maior ou igual ao total do pedido: ${money(finalTotal)}.`);
@@ -2735,6 +2907,10 @@ function App() {
         changeFor: customerPayment === "Dinheiro" ? customerChangeFor : "",
         productsTotal: syncedProductsTotal,
         deliveryFee,
+        discount: couponDiscount,
+        couponCode: appliedCustomerCoupon?.code || "",
+        couponId: appliedCustomerCoupon?.id || null,
+        couponDiscount,
         courierFee: 0,
         storeFee: 0,
         motorcycleType: "",
@@ -2781,7 +2957,10 @@ function App() {
       });
       addNotification("novo_pedido", "Novo pedido recebido", `${normalizedCustomerName} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
       addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${savedDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
+      if (appliedCustomerCoupon) await registerCouponUsage(appliedCustomerCoupon);
       setCustomerCart([]);
+      setAppliedCustomerCoupon(null);
+      setCustomerCouponCode("");
       setShowCustomerCheckout(false);
       setCustomerChangeFor("");
       setCustomerOrderConfirmation(buildOrderConfirmation(savedDelivery));
@@ -4154,6 +4333,7 @@ function App() {
       products,
       productGroups,
       promotions,
+      coupons,
       kits,
       clients,
       couriers,
@@ -4184,6 +4364,8 @@ function App() {
 
   function resetOperationalDraftsAfterBackupRestore(restoredSettings) {
     setCustomerCart([]);
+    setAppliedCustomerCoupon(null);
+    setCustomerCouponCode("");
     setCustomerOrderConfirmation(null);
     setShowCustomerCheckout(false);
     setCustomerVariantPicker({ open: false, product: null, quantities: {} });
@@ -4225,6 +4407,7 @@ function App() {
       if (Array.isArray(parsedBackup.products)) setProducts(parsedBackup.products);
       if (Array.isArray(parsedBackup.productGroups)) setProductGroups(parsedBackup.productGroups);
       if (Array.isArray(parsedBackup.promotions)) setPromotions(parsedBackup.promotions);
+      if (Array.isArray(parsedBackup.coupons)) setCoupons(parsedBackup.coupons.map(normalizeCouponFromDatabase));
       if (Array.isArray(parsedBackup.kits)) setKits(parsedBackup.kits);
       if (Array.isArray(parsedBackup.clients)) setClients(parsedBackup.clients);
       if (Array.isArray(parsedBackup.couriers)) setCouriers(parsedBackup.couriers);
@@ -4423,7 +4606,7 @@ function App() {
                     >
                       <span className="block text-[11px] font-black uppercase tracking-wide opacity-90">Carrinho atualizado</span>
                       <span className="block text-lg font-black">{customerCartItemCount} item{customerCartItemCount > 1 ? "s" : ""} • {money(customerDeliveryTotal)}</span>
-                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)} • Entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))} • tocar para conferir</span>
+                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)} • Cupom: -{money(appliedCustomerCouponDiscount)} • Entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))} • tocar para conferir</span>
                     </button>
                   )}
 
@@ -4730,6 +4913,25 @@ function App() {
                       </div>
                     ))}
 
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 space-y-2">
+                      <p className="text-xs font-black uppercase tracking-wide text-emerald-800">Cupom de desconto</p>
+                      {appliedCustomerCoupon ? (
+                        <div className="flex items-center justify-between gap-3 rounded-2xl bg-white p-3">
+                          <div>
+                            <p className="text-sm font-black text-emerald-800">{appliedCustomerCoupon.code}</p>
+                            <p className="text-xs text-zinc-500">Desconto aplicado: {money(appliedCustomerCouponDiscount)}</p>
+                          </div>
+                          <button type="button" onClick={removeCustomerCoupon} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-600">Remover</button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <input value={customerCouponCode} onChange={(event) => setCustomerCouponCode(normalizeCouponCode(event.target.value))} placeholder="Ex: BARBOSA10" className="min-w-0 flex-1 rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm font-bold uppercase outline-none" />
+                          <Button type="button" variant="secondary" onClick={applyCustomerCoupon} className="rounded-2xl !bg-white !text-zinc-950 hover:!bg-zinc-100 px-4">Aplicar</Button>
+                        </div>
+                      )}
+                      {activeCoupons.length > 0 && <p className="text-[11px] text-emerald-800">Cupons ativos disponíveis. Digite o código informado pela loja.</p>}
+                    </div>
+
                     <label className="block">
                       <span className="text-xs font-medium text-zinc-600">Forma de pagamento</span>
                       <select value={customerPayment} onChange={(event) => setCustomerPayment(event.target.value)} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none">
@@ -4754,8 +4956,9 @@ function App() {
                     <div className="border-t border-zinc-100 pt-3">
                       <p className="text-sm text-zinc-500">Produtos: {money(customerCartTotal)}</p>
                       <p className={`text-sm font-semibold ${isOrderAboveMinimum(customerCartTotal, storeSettings.minimumOrderValue) ? "text-emerald-600" : "text-red-600"}`}>Pedido mínimo: {money(storeSettings.minimumOrderValue)}</p>
+                      {appliedCustomerCouponDiscount > 0 && <p className="text-sm font-semibold text-emerald-700">Cupom {appliedCustomerCoupon?.code}: -{money(appliedCustomerCouponDiscount)}</p>}
                       <p className="text-sm text-zinc-500">Taxa de entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))}</p>
-                      <p className="text-2xl font-black">Total: {money(buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee))}</p>
+                      <p className="text-2xl font-black">Total: {money(customerDeliveryTotal)}</p>
                     </div>
 
                     {customerError && <p className={`text-sm ${customerError.includes("enviado") ? "text-emerald-600" : "text-red-600"}`}>{customerError}</p>}
@@ -5277,6 +5480,41 @@ function App() {
                   )}
 
                   <Button onClick={addPromotion} className="mt-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Cadastrar promoção</Button>
+                </CardBox>
+
+                <CardBox>
+                  <h3 className="font-bold text-lg mb-4">Cupons de desconto</h3>
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900 mb-4">
+                    <p className="font-bold">Use cupons para campanhas rápidas.</p>
+                    <p>O cliente digita o código na finalização. O desconto entra sobre os produtos e a taxa de entrega continua separada.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <Input label="Código do cupom" value={newCoupon.code} onChange={(value) => setNewCoupon({ ...newCoupon, code: normalizeCouponCode(value) })} placeholder="BARBOSA10" />
+                    <Input label="Descrição interna" value={newCoupon.description} onChange={(value) => setNewCoupon({ ...newCoupon, description: value })} placeholder="Ex: campanha do fim de semana" />
+                    <label className="block"><span className="text-xs font-medium text-zinc-600">Tipo</span><select value={newCoupon.discountType} onChange={(event) => setNewCoupon({ ...newCoupon, discountType: event.target.value, maxDiscount: event.target.value === "fixed" ? "" : newCoupon.maxDiscount })} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 outline-none"><option value="fixed">Valor fixo em R$</option><option value="percent">Porcentagem</option></select></label>
+                    <Input label={newCoupon.discountType === "percent" ? "Desconto (%)" : "Desconto (R$)"} type="number" value={newCoupon.discountValue} onChange={(value) => setNewCoupon({ ...newCoupon, discountValue: value })} placeholder={newCoupon.discountType === "percent" ? "10" : "5,00"} />
+                    <Input label="Pedido mínimo" type="number" value={newCoupon.minimumOrderValue} onChange={(value) => setNewCoupon({ ...newCoupon, minimumOrderValue: value })} placeholder="0,00" />
+                    <Input label="Desconto máximo" type="number" value={newCoupon.maxDiscount} onChange={(value) => setNewCoupon({ ...newCoupon, maxDiscount: value })} placeholder="Opcional" />
+                    <Input label="Limite de usos" type="number" value={newCoupon.usageLimit} onChange={(value) => setNewCoupon({ ...newCoupon, usageLimit: value })} placeholder="0 = sem limite" />
+                    <Input label="Início" type="date" value={newCoupon.startDate} onChange={(value) => setNewCoupon({ ...newCoupon, startDate: value })} />
+                    <Input label="Fim" type="date" value={newCoupon.endDate} onChange={(value) => setNewCoupon({ ...newCoupon, endDate: value })} />
+                  </div>
+                  <Button onClick={addCoupon} className="mt-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Cadastrar cupom</Button>
+                  <div className="mt-5 grid gap-3">
+                    {coupons.length === 0 && <p className="text-sm text-zinc-500">Nenhum cupom cadastrado.</p>}
+                    {coupons.map((coupon) => (
+                      <div key={coupon.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
+                        <div>
+                          <p className="text-lg font-black">{coupon.code}</p>
+                          <p className="text-sm text-zinc-600">{coupon.description || "Sem descrição"}</p>
+                          <p className="text-xs text-zinc-500">{coupon.discountType === "percent" ? `${coupon.discountValue}%` : money(coupon.discountValue)} • mínimo {money(coupon.minimumOrderValue)} • usado {coupon.usedCount}{coupon.usageLimit > 0 ? `/${coupon.usageLimit}` : ""}</p>
+                          <p className="text-xs text-zinc-500">Validade: {coupon.startDate || "sem início"} até {coupon.endDate || "sem fim"} • {coupon.active ? "ativo" : "inativo"}</p>
+                          {coupon.active && !isCouponInPeriod(coupon) && <p className="text-xs font-bold text-amber-700">Fora do período de validade.</p>}
+                        </div>
+                        <Button onClick={() => toggleCouponStatus(coupon.id)} variant="secondary" className="rounded-2xl">{coupon.active ? "Inativar" : "Ativar"}</Button>
+                      </div>
+                    ))}
+                  </div>
                 </CardBox>
 
                 <CardBox>
