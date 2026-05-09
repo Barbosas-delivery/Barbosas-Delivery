@@ -3,6 +3,18 @@ import { insertWithSchemaRetry, updateWithSchemaRetry } from "./supabaseSchema";
 import { normalizeBarcode } from "../utils/formatters";
 import { toNonNegativeNumber } from "../utils/numbers";
 
+export function normalizeProductVariants(variants) {
+  const parsed = typeof variants === "string" ? (() => { try { return JSON.parse(variants); } catch { return []; } })() : variants;
+  return (Array.isArray(parsed) ? parsed : [])
+    .map((variant, index) => ({
+      id: variant.id || `${Date.now()}-${index}`,
+      name: String(variant.name || "").trim(),
+      imageUrl: variant.imageUrl || variant.image_url || "",
+      active: variant.active !== false,
+    }))
+    .filter((variant) => variant.name);
+}
+
 export function mapProductFromDatabase(product) {
   return {
     id: product.id,
@@ -12,10 +24,12 @@ export function mapProductFromDatabase(product) {
     cost: Number(product.cost || 0),
     stock: Number(product.stock || 0),
     minStock: Number(product.min_stock || 0),
-    ncm: product.ncm || "",
+    deletedAt: product.deleted_at || product.deletedAt || "",
     barcode: product.barcode || "",
     expirationDate: product.expiration_date || "",
     imageUrl: product.image_url || "",
+    hasVariants: product.has_variants === true || product.hasVariants === true,
+    variants: normalizeProductVariants(product.variants || product.product_variants || []),
     active: product.active === true,
   };
 }
@@ -30,10 +44,11 @@ export function buildProductInsertPayload(newProduct, productId) {
     cost: toNonNegativeNumber(newProduct.cost, 0),
     stock: toNonNegativeNumber(newProduct.stock, 0),
     min_stock: toNonNegativeNumber(newProduct.minStock, 0),
-    ncm: String(newProduct.ncm || "").trim(),
     barcode,
     expiration_date: newProduct.expirationDate || null,
     image_url: newProduct.imageUrl || "",
+    has_variants: newProduct.hasVariants === true,
+    variants: normalizeProductVariants(newProduct.variants),
     active: true,
   };
 }
@@ -46,10 +61,11 @@ export function buildProductPatch(product) {
     cost: Number(product.cost || 0),
     stock: Number(product.stock || 0),
     min_stock: Number(product.minStock || 0),
-    ncm: String(product.ncm || "").trim(),
     barcode: normalizeBarcode(product.barcode),
     expiration_date: product.expirationDate || null,
     image_url: product.imageUrl || "",
+    has_variants: product.hasVariants === true,
+    variants: normalizeProductVariants(product.variants),
     active: product.active === true,
   };
 }
@@ -61,7 +77,7 @@ export async function loadProductsFromSupabase() {
     .order("name", { ascending: true });
 
   return {
-    products: Array.isArray(data) ? data.map(mapProductFromDatabase) : [],
+    products: Array.isArray(data) ? data.filter((product) => !product.deleted_at).map(mapProductFromDatabase) : [],
     error,
   };
 }
@@ -77,4 +93,12 @@ export async function updateProductInSupabase(id, productPatch) {
 export async function updateProductStatusInSupabase(id, active) {
   const { error } = await supabase.from("products").update({ active }).eq("id", id);
   return { error };
+}
+
+export async function updateProductImageInSupabase(id, imageUrl) {
+  return updateWithSchemaRetry("products", id, { image_url: imageUrl || "" });
+}
+
+export async function softDeleteProductInSupabase(id) {
+  return updateWithSchemaRetry("products", id, { active: false, deleted_at: new Date().toISOString() });
 }

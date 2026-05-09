@@ -5,10 +5,18 @@ export const initialStoreSettings = {
   storePhone: "(43) 98873-6791",
   defaultDeliveryFee: DELIVERY_FEE,
   minimumOrderValue: 20,
-  estimatedDeliveryTime: "15 a 25 minutinhos",
   whatsappMessage: "Olá, seu pedido da Barbosa's está em andamento.",
   openingHours: "Segunda a quinta das 09:00 às 00:00 • Sexta e sábado das 09:00 às 03:00 • Domingo das 13:00 às 00:00",
   isOpen: true,
+  schedule: [
+    { day: 1, label: "Segunda", closed: false, open: "09:00", close: "00:00" },
+    { day: 2, label: "Terça", closed: false, open: "09:00", close: "00:00" },
+    { day: 3, label: "Quarta", closed: false, open: "09:00", close: "00:00" },
+    { day: 4, label: "Quinta", closed: false, open: "09:00", close: "00:00" },
+    { day: 5, label: "Sexta", closed: false, open: "09:00", close: "03:00" },
+    { day: 6, label: "Sábado", closed: false, open: "09:00", close: "03:00" },
+    { day: 0, label: "Domingo", closed: false, open: "13:00", close: "00:00" },
+  ],
 };
 
 export const initialProductGroups = ["Bebidas", "Refrigerantes", "Energéticos", "Salgadinhos", "Copões"];
@@ -53,7 +61,6 @@ export const initialProducts = [
     cost: 8,
     stock: 42,
     minStock: 10,
-    ncm: "22086000",
     barcode: "7890000000011",
     active: true,
   },
@@ -65,7 +72,6 @@ export const initialProducts = [
     cost: 3.1,
     stock: 8,
     minStock: 12,
-    ncm: "22021000",
     barcode: "7894900011517",
     active: true,
   },

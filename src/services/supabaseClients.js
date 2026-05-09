@@ -1,6 +1,7 @@
 import { supabase } from "../supabaseClient";
 import { insertWithSchemaRetry, updateWithSchemaRetry } from "./supabaseSchema";
 import { formatBrazilMobilePhone, onlyPhoneNumbers, formatCep } from "../utils/formatters";
+import { isTruthyActive } from "../utils/auth";
 
 export function mapClientFromDatabase(client) {
   return {
@@ -14,6 +15,8 @@ export function mapClientFromDatabase(client) {
     city: client.city || "",
     state: client.state || "",
     reference: client.reference || "",
+    active: isTruthyActive(client.active),
+    deletedAt: client.deleted_at || client.deletedAt || "",
   };
 }
 
@@ -30,6 +33,7 @@ export function mapClientToDatabase(client) {
     city: String(client.city || "").trim(),
     state: String(client.state || "").toUpperCase().slice(0, 2),
     reference: String(client.reference || "").trim(),
+    active: isTruthyActive(client.active),
   };
 }
 
@@ -40,7 +44,7 @@ export async function loadClientsFromSupabase() {
     .order("name", { ascending: true });
 
   return {
-    clients: Array.isArray(data) ? data.map(mapClientFromDatabase) : [],
+    clients: Array.isArray(data) ? data.filter((client) => isTruthyActive(client.active) && !client.deleted_at).map(mapClientFromDatabase) : [],
     error,
   };
 }
@@ -51,4 +55,8 @@ export async function insertClientInSupabase(clientToInsert) {
 
 export async function updateClientInSupabase(id, clientPatch) {
   return updateWithSchemaRetry("clients", id, clientPatch);
+}
+
+export async function softDeleteClientInSupabase(id) {
+  return updateWithSchemaRetry("clients", id, { active: false, deleted_at: new Date().toISOString() });
 }

@@ -1,6 +1,7 @@
-export const APP_VERSION = "5.1.0-revisado";
+export const APP_VERSION = "5.2.0-fase-5";
 
 export const DELIVERY_FEE = 5;
+export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
 export const COURIER_DELIVERY_SHARE = 0.7;
 export const STORE_DELIVERY_SHARE = 0.3;
 

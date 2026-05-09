@@ -10,6 +10,7 @@ export function mapCourierFromDatabase(courier = {}) {
     password: normalizeCourierCredential(courier.password),
     active: isTruthyActive(courier.active),
     createdAt: courier.created_at || courier.createdAt || "",
+    deletedAt: courier.deleted_at || courier.deletedAt || "",
     motorcycleType: courier.motorcycle_type || courier.motorcycleType || "Moto própria",
   };
 }
@@ -33,7 +34,7 @@ export async function loadCouriersFromSupabase() {
     .order("name", { ascending: true });
 
   return {
-    couriers: error ? [] : (Array.isArray(data) ? data.map(mapCourierFromDatabase) : []),
+    couriers: error ? [] : (Array.isArray(data) ? data.filter((courier) => !courier.deleted_at).map(mapCourierFromDatabase) : []),
     error,
   };
 }
@@ -48,4 +49,8 @@ export async function updateCourierStatusInSupabase(id, active) {
 
 export async function updateCourierInSupabase(id, courierPatch) {
   return updateWithSchemaRetry("couriers", id, courierPatch);
+}
+
+export async function softDeleteCourierInSupabase(id) {
+  return updateWithSchemaRetry("couriers", id, { active: false, deleted_at: new Date().toISOString() });
 }

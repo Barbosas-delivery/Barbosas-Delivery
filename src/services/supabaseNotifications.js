@@ -13,6 +13,7 @@ export function mapNotificationFromDatabase(row) {
     orderId: row.order_id || row.deliveryId || null,
     courierUsername: row.courier_username || "",
     read: row.read === true,
+    readAt: row.read_at || null,
     createdAt: row.created_at || new Date().toISOString(),
   };
 }
@@ -32,6 +33,7 @@ export async function saveNotificationToSupabaseService(notification) {
     message: notification.message || "",
     order_id: notification.orderId || notification.deliveryId || null,
     read: notification.read === true,
+    read_at: notification.readAt || null,
     created_at: notification.createdAt || new Date().toISOString(),
   };
 

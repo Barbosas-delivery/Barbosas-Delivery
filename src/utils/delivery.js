@@ -4,6 +4,7 @@ import {
   DELIVERY_FEE,
   COURIER_DELIVERY_SHARE,
   STORE_DELIVERY_SHARE,
+  ESTIMATED_DELIVERY_MINUTES_PER_ORDER,
 } from "../constants/appConstants";
 import { getPaymentLabel } from "./payments";
 
@@ -81,6 +82,32 @@ export function calculateStoreFee(deliveryFee = DELIVERY_FEE, motorcycleType = "
   return isStoreMotorcycle(motorcycleType) ? finalFee * STORE_DELIVERY_SHARE : 0;
 }
 
+
+export function isActiveDeliveryForEstimate(delivery) {
+  if (!isDeliveryOrder(delivery)) return false;
+  return [
+    DELIVERY_STATUS.WAITING_STORE_APPROVAL,
+    DELIVERY_STATUS.WAITING_PICKUP,
+    DELIVERY_STATUS.OUT_FOR_DELIVERY,
+    DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
+    DELIVERY_STATUS.DELIVERY_PROBLEM,
+  ].includes(delivery?.status);
+}
+
+export function getActiveDeliveryEstimateQueue(deliveries = []) {
+  return (Array.isArray(deliveries) ? deliveries : []).filter(isActiveDeliveryForEstimate);
+}
+
+export function buildEstimatedDeliveryMinutes(deliveries = [], includeNextOrder = false) {
+  const activeCount = getActiveDeliveryEstimateQueue(deliveries).length + (includeNextOrder ? 1 : 0);
+  return Math.max(ESTIMATED_DELIVERY_MINUTES_PER_ORDER, activeCount * ESTIMATED_DELIVERY_MINUTES_PER_ORDER);
+}
+
+export function formatEstimatedDeliveryTime(minutes) {
+  const safeMinutes = Math.max(ESTIMATED_DELIVERY_MINUTES_PER_ORDER, Number(minutes || 0));
+  return `${safeMinutes} minuto${safeMinutes === 1 ? "" : "s"}`;
+}
+
 export function getCourierMotorcycleType(couriers, courierUsername) {
   const normalizedUsername = String(courierUsername || "").trim().toLowerCase();
   const courier = couriers.find((item) => item.username.toLowerCase() === normalizedUsername);
@@ -120,6 +147,7 @@ export function buildOrderConfirmation(delivery) {
     id: delivery.id,
     total: delivery.value,
     payment: getPaymentLabel(delivery.payment, delivery.changeFor),
+    estimatedDeliveryMinutes: delivery.estimatedDeliveryMinutes || null,
   };
 }
 
