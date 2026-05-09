@@ -390,6 +390,59 @@ function buildOpeningHoursSummary(schedule) {
 }
 
 
+const STORE_SETTINGS_STORAGE_KEY = "barbosas-delivery-store-settings-v1";
+
+function clampPrintCopies(value, fallback = 1) {
+  return Math.min(5, Math.max(1, toPositiveInteger(value, fallback)));
+}
+
+function clampPrintCloseDelaySeconds(value) {
+  const seconds = Math.floor(Number(value || 0));
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.min(10, Math.max(0, seconds));
+}
+
+function sanitizeStoreSettings(settings = {}) {
+  const source = settings && typeof settings === "object" ? settings : {};
+  const schedule = normalizeStoreSchedule(source.schedule || initialStoreSettings.schedule);
+
+  return {
+    ...initialStoreSettings,
+    ...source,
+    storeName: String(source.storeName || initialStoreSettings.storeName).trim() || initialStoreSettings.storeName,
+    storePhone: formatBrazilMobilePhone(source.storePhone || initialStoreSettings.storePhone),
+    defaultDeliveryFee: normalizeDeliveryFee(source.defaultDeliveryFee ?? initialStoreSettings.defaultDeliveryFee),
+    minimumOrderValue: toNonNegativeNumber(source.minimumOrderValue ?? initialStoreSettings.minimumOrderValue, initialStoreSettings.minimumOrderValue),
+    whatsappMessage: String(source.whatsappMessage || initialStoreSettings.whatsappMessage),
+    autoPrintCustomerOrders: source.autoPrintCustomerOrders !== false,
+    customerOrderPrintCopies: clampPrintCopies(source.customerOrderPrintCopies, initialStoreSettings.customerOrderPrintCopies || 2),
+    manualReprintCopies: clampPrintCopies(source.manualReprintCopies, initialStoreSettings.manualReprintCopies || 1),
+    printCloseDelaySeconds: clampPrintCloseDelaySeconds(source.printCloseDelaySeconds),
+    schedule,
+    openingHours: buildOpeningHoursSummary(schedule),
+  };
+}
+
+function loadStoreSettingsFromLocalStorage() {
+  if (typeof window === "undefined") return sanitizeStoreSettings(initialStoreSettings);
+  try {
+    const storedSettings = window.localStorage.getItem(STORE_SETTINGS_STORAGE_KEY);
+    return sanitizeStoreSettings(storedSettings ? JSON.parse(storedSettings) : initialStoreSettings);
+  } catch {
+    return sanitizeStoreSettings(initialStoreSettings);
+  }
+}
+
+function saveStoreSettingsToLocalStorage(settings) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORE_SETTINGS_STORAGE_KEY, JSON.stringify(sanitizeStoreSettings(settings)));
+  } catch {
+    // O navegador pode bloquear localStorage em modo privado; o app continua usando o estado atual.
+  }
+}
+
+
 
 
 
@@ -762,12 +815,12 @@ function App() {
   const [showCustomerPromo, setShowCustomerPromo] = useState(false);
   const [canCloseCustomerPromo, setCanCloseCustomerPromo] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [storeSettings, setStoreSettings] = useState({
-    ...initialStoreSettings,
-    schedule: normalizeStoreSchedule(initialStoreSettings.schedule),
-  });
+  const [storeSettings, setStoreSettings] = useState(() => loadStoreSettingsFromLocalStorage());
   const [showStoreScheduleModal, setShowStoreScheduleModal] = useState(false);
   const [currentStoreDate, setCurrentStoreDate] = useState(() => new Date());
+  useEffect(() => {
+    saveStoreSettingsToLocalStorage(storeSettings);
+  }, [storeSettings]);
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
   const [kits, setKits] = useState([]);
@@ -1254,6 +1307,8 @@ function App() {
       supabase.removeChannel(ordersChannel);
       supabase.removeChannel(productsClientsChannel);
     };
+  // Carregamento inicial intencional: as funções chamadas aqui não devem reiniciar os canais a cada render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1262,7 +1317,7 @@ function App() {
   }, []);
 
   const [deliveryProductSearch, setDeliveryProductSearch] = useState("");
-  const [deliveryDraft, setDeliveryDraft] = useState({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: initialStoreSettings.defaultDeliveryFee, discount: 0 });
+  const [deliveryDraft, setDeliveryDraft] = useState(() => ({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: storeSettings.defaultDeliveryFee, discount: 0 }));
   const [counterProductSearch, setCounterProductSearch] = useState("");
   const [counterKitSearch, setCounterKitSearch] = useState("");
   const [counterDraft, setCounterDraft] = useState({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
@@ -3040,6 +3095,8 @@ function App() {
         setLastAction(`Pedido #${delivery.id} recebido. O navegador bloqueou a impressão automática; clique em Reimprimir no pedido.`);
       }
     });
+  // Impressão automática intencionalmente observa apenas dados e configurações persistentes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveries, deliveriesLoaded, isLogged, storeSettings.autoPrintCustomerOrders, storeSettings.customerOrderPrintCopies, storeSettings.manualReprintCopies, storeSettings.printCloseDelaySeconds]);
 
   async function launchCounterSale() {
@@ -3704,9 +3761,7 @@ function App() {
 
 
   function getPrintCloseDelaySecondsFromValue(value) {
-    const seconds = Math.floor(Number(value || 0));
-    if (!Number.isFinite(seconds)) return 0;
-    return Math.min(10, Math.max(0, seconds));
+    return clampPrintCloseDelaySeconds(value);
   }
 
   function updateStoreSetting(field, value) {
@@ -3738,6 +3793,15 @@ function App() {
         openingHours: buildOpeningHoursSummary(nextSchedule),
       };
     });
+  }
+
+  function resetStoreSettingsToDefault() {
+    const confirmed = window.confirm("Restaurar as configurações da loja para o padrão inicial? Taxa, pedido mínimo, horários, WhatsApp e impressão serão redefinidos neste navegador.");
+    if (!confirmed) return;
+    const defaultSettings = sanitizeStoreSettings(initialStoreSettings);
+    setStoreSettings(defaultSettings);
+    setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: defaultSettings.defaultDeliveryFee }));
+    setLastAction("Configurações da loja restauradas para o padrão inicial neste navegador.");
   }
 
   async function confirmManualDelivery(id) {
@@ -5158,6 +5222,13 @@ function App() {
               <div className="space-y-6">
                 <Title title="Configurações da loja" subtitle="Altere informações importantes da loja sem mexer no código." />
                 <CardBox>
+                  <div className="mb-4 rounded-3xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-black">Configurações salvas neste navegador</p>
+                      <p className="text-xs">Nome da loja, taxa, pedido mínimo, horários, WhatsApp e impressão continuam após atualizar a página.</p>
+                    </div>
+                    <Button onClick={resetStoreSettingsToDefault} variant="secondary" className="rounded-2xl bg-white">Restaurar padrão</Button>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <Input label="Nome da loja" value={storeSettings.storeName} onChange={(value) => updateStoreSetting("storeName", value)} />
                     <Input label="WhatsApp da loja" value={storeSettings.storePhone} onChange={(value) => updateStoreSetting("storePhone", formatBrazilMobilePhone(value))} />
