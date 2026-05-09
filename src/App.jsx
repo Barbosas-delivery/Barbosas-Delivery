@@ -1375,6 +1375,7 @@ function App() {
   const [newCourier, setNewCourier] = useState({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
   const todayInput = getDateInputValue(new Date());
   const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+  const [stockAdjustmentDraft, setStockAdjustmentDraft] = useState({ productId: "", mode: "entrada", quantity: "", targetStock: "", reason: "Reposição de estoque" });
   const [productGroups, setProductGroups] = useState(initialProductGroups);
   const [newProductGroup, setNewProductGroup] = useState("");
   const [newPromotion, setNewPromotion] = useState({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
@@ -1438,6 +1439,23 @@ function App() {
       return searchable.includes(term);
     });
   }, [products, search]);
+
+  const stockControlSummary = useMemo(() => {
+    const activeProducts = products.filter((product) => product.active === true);
+    const lowStockProducts = activeProducts.filter((product) => Number(product.stock || 0) <= Number(product.minStock || 0));
+    const outOfStockProducts = activeProducts.filter((product) => Number(product.stock || 0) <= 0);
+    return {
+      activeCount: activeProducts.length,
+      lowStockCount: lowStockProducts.length,
+      outOfStockCount: outOfStockProducts.length,
+      totalCostValue: activeProducts.reduce((sum, product) => sum + Number(product.cost || 0) * Number(product.stock || 0), 0),
+      totalSaleValue: activeProducts.reduce((sum, product) => sum + Number(product.price || 0) * Number(product.stock || 0), 0),
+    };
+  }, [products]);
+
+  const selectedStockAdjustmentProduct = useMemo(() => {
+    return products.find((product) => String(product.id) === String(stockAdjustmentDraft.productId));
+  }, [products, stockAdjustmentDraft.productId]);
 
   const deliveryProductResults = useMemo(() => {
     const availableProducts = getActiveProducts(products);
@@ -3106,6 +3124,85 @@ function App() {
     downloadCsvFile(`barbosas-categorias-${buildReportFileDate()}.csv`, headers, rows);
     auditAction("export_category_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
     setLastAction("Relatório de categorias exportado em CSV.");
+  }
+
+  function exportStockCsv() {
+    const headers = ["Produto", "Grupo", "Código", "Status", "Estoque", "Estoque mínimo", "Preço custo", "Preço venda", "Valor custo em estoque", "Valor venda em estoque"];
+    const rows = products.map((product) => [
+      product.name || "",
+      product.category || "",
+      product.barcode || "",
+      product.active ? "Ativo" : "Inativo",
+      Number(product.stock || 0),
+      Number(product.minStock || 0),
+      money(product.cost || 0),
+      money(product.price || 0),
+      money(Number(product.cost || 0) * Number(product.stock || 0)),
+      money(Number(product.price || 0) * Number(product.stock || 0)),
+    ]);
+    downloadCsvFile(`barbosas-estoque-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+    auditAction("export_stock_csv", "products", "stock", { rows: rows.length });
+    setLastAction("Estoque exportado em CSV.");
+  }
+
+  async function applyManualStockAdjustment() {
+    const product = selectedStockAdjustmentProduct;
+    if (!product) return setLastAction("Selecione um produto para ajustar o estoque.");
+    const currentStock = Number(product.stock || 0);
+    const quantity = toPositiveInteger(stockAdjustmentDraft.quantity, 0);
+    const targetStock = toPositiveInteger(stockAdjustmentDraft.targetStock, 0);
+    const reason = String(stockAdjustmentDraft.reason || "").trim();
+    if (!reason) return setLastAction("Informe o motivo do ajuste de estoque.");
+
+    let nextStock;
+    let movementType;
+    let movementQuantity;
+
+    if (stockAdjustmentDraft.mode === "entrada") {
+      if (quantity <= 0) return setLastAction("Informe a quantidade de entrada.");
+      nextStock = currentStock + quantity;
+      movementQuantity = quantity;
+      movementType = "manual_entry";
+    } else if (stockAdjustmentDraft.mode === "saida") {
+      if (quantity <= 0) return setLastAction("Informe a quantidade de saída.");
+      if (quantity > currentStock) return setLastAction(`Saída maior que o estoque atual de ${product.name}. Disponível: ${currentStock}.`);
+      nextStock = currentStock - quantity;
+      movementQuantity = quantity;
+      movementType = "manual_exit";
+    } else {
+      nextStock = targetStock;
+      movementQuantity = Math.abs(nextStock - currentStock);
+      movementType = "manual_correction";
+    }
+
+    const { error } = await updateWithSchemaRetry("products", product.id, { stock: nextStock });
+    if (error) {
+      console.error("Erro ao ajustar estoque:", error);
+      return setLastAction(`Estoque não ajustado no Supabase: ${error.message || "verifique a tabela products."}`);
+    }
+
+    setProducts((previousProducts) => previousProducts.map((currentProduct) => (
+      String(currentProduct.id) === String(product.id) ? { ...currentProduct, stock: nextStock } : currentProduct
+    )));
+
+    const movementRow = {
+      product_id: Number.isFinite(Number(product.id)) ? Number(product.id) : null,
+      order_id: null,
+      cash_session_id: cashSession.id || null,
+      movement_type: movementType,
+      quantity: movementQuantity,
+      stock_before: currentStock,
+      stock_after: nextStock,
+      reason,
+      created_by: getCurrentStoreUserName() || "loja",
+      created_at: new Date().toISOString(),
+    };
+    const { error: movementError } = await insertWithSchemaRetry("product_stock_movements", movementRow, false);
+    if (movementError) console.warn("Movimento manual de estoque não salvo:", movementError);
+
+    auditAction("manual_stock_adjustment", "products", product.id, { product: product.name, from: currentStock, to: nextStock, reason });
+    setStockAdjustmentDraft({ productId: "", mode: "entrada", quantity: "", targetStock: "", reason: "Reposição de estoque" });
+    setLastAction(movementError ? "Estoque ajustado, mas o histórico não foi salvo. Rode a migração da Fase 22." : `Estoque de ${product.name} ajustado de ${currentStock} para ${nextStock}.`);
   }
 
   function printCashClosingFromRecord(closing) {
@@ -4814,6 +4911,52 @@ function App() {
                     )}
                   </div>
                   <Button onClick={addProduct} className="mt-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Cadastrar produto</Button>
+                </CardBox>
+
+                <CardBox>
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    <div>
+                      <h3 className="font-bold text-lg">Controle de estoque</h3>
+                      <p className="text-sm text-zinc-500">Ajuste entradas, saídas e correções sem precisar editar o produto inteiro.</p>
+                    </div>
+                    <Button onClick={exportStockCsv} variant="secondary" className="rounded-2xl">CSV estoque</Button>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+                    <Metric title="Produtos ativos" value={stockControlSummary.activeCount} icon="package" />
+                    <Metric title="Estoque baixo" value={stockControlSummary.lowStockCount} icon="alert" />
+                    <Metric title="Sem estoque" value={stockControlSummary.outOfStockCount} icon="alert" />
+                    <Metric title="Custo em estoque" value={money(stockControlSummary.totalCostValue)} icon="money" />
+                    <Metric title="Venda potencial" value={money(stockControlSummary.totalSaleValue)} icon="chart" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-3">
+                    <label className="block">
+                      <span className="text-xs font-medium text-zinc-600">Produto</span>
+                      <select value={stockAdjustmentDraft.productId} onChange={(event) => setStockAdjustmentDraft({ ...stockAdjustmentDraft, productId: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                        <option value="">Selecione um produto</option>
+                        {products.map((product) => <option key={product.id} value={product.id}>{product.name} • estoque {product.stock}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-zinc-600">Tipo de ajuste</span>
+                      <select value={stockAdjustmentDraft.mode} onChange={(event) => setStockAdjustmentDraft({ ...stockAdjustmentDraft, mode: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                        <option value="entrada">Entrada / reposição</option>
+                        <option value="saida">Saída / perda</option>
+                        <option value="correcao">Correção para estoque exato</option>
+                      </select>
+                    </label>
+                    {stockAdjustmentDraft.mode === "correcao" ? (
+                      <Input label="Novo estoque exato" type="number" value={stockAdjustmentDraft.targetStock} onChange={(value) => setStockAdjustmentDraft({ ...stockAdjustmentDraft, targetStock: value })} />
+                    ) : (
+                      <Input label="Quantidade" type="number" value={stockAdjustmentDraft.quantity} onChange={(value) => setStockAdjustmentDraft({ ...stockAdjustmentDraft, quantity: value })} />
+                    )}
+                    <Input label="Motivo" value={stockAdjustmentDraft.reason} onChange={(value) => setStockAdjustmentDraft({ ...stockAdjustmentDraft, reason: value })} placeholder="Ex: compra, avaria, contagem" />
+                    <div className="flex items-end"><Button onClick={applyManualStockAdjustment} className="w-full rounded-2xl bg-zinc-950 hover:bg-zinc-800">Aplicar ajuste</Button></div>
+                  </div>
+                  {selectedStockAdjustmentProduct && (
+                    <div className="mt-3 rounded-2xl border border-zinc-100 bg-zinc-50 p-3 text-sm text-zinc-700">
+                      Produto selecionado: <b>{selectedStockAdjustmentProduct.name}</b> • estoque atual <b>{selectedStockAdjustmentProduct.stock}</b> • mínimo {selectedStockAdjustmentProduct.minStock}
+                    </div>
+                  )}
                 </CardBox>
 
                 <CardBox>
