@@ -626,6 +626,42 @@ function getCartMatchKey(item) {
   return String(item.cartKey || item.id || item.productId || "");
 }
 
+function getCustomerCartLineIdentity(item) {
+  if (!item || typeof item !== "object") return "";
+  if (item.isKit === true) return `kit-${item.kitId || item.id || ""}`;
+  if (item.variantId) return `product-${item.id || item.productId || ""}-variant-${item.variantId}`;
+  return `product-${item.id || item.productId || ""}`;
+}
+
+function mergeCustomerCartItems(cart) {
+  const merged = [];
+  sanitizeCustomerCart(cart).forEach((item) => {
+    const identity = getCustomerCartLineIdentity(item) || getCartMatchKey(item);
+    const existingIndex = merged.findIndex((currentItem) => (getCustomerCartLineIdentity(currentItem) || getCartMatchKey(currentItem)) === identity);
+    if (existingIndex >= 0) {
+      merged[existingIndex] = {
+        ...merged[existingIndex],
+        quantity: toPositiveInteger(merged[existingIndex].quantity, 0) + toPositiveInteger(item.quantity, 0),
+      };
+      return;
+    }
+    merged.push(item);
+  });
+  return merged;
+}
+
+function getCustomerCheckoutIssue({ cart, products, productsTotal, minimumOrderValue, storeIsOpen, storeMessage, customerForm, payment, changeFor, deliveryTotal }) {
+  if (!storeIsOpen) return `A loja está fechada no momento. ${storeMessage || "Tente novamente dentro do horário de atendimento."}`;
+  if (!isCustomerFormComplete(customerForm)) return "Confira seus dados de entrega antes de finalizar.";
+  if (customerForm?.phone && !isValidBrazilMobilePhone(customerForm.phone)) return "Telefone inválido. Corrija o número antes de finalizar.";
+  const validation = validateOrderItems(cart, products);
+  if (!validation.valid) return validation.message;
+  if (!isOrderAboveMinimum(productsTotal, minimumOrderValue)) return `Pedido mínimo de ${money(minimumOrderValue)} em produtos. Adicione mais itens para finalizar.`;
+  const changeForValue = toSafeMoneyNumber(changeFor, 0);
+  if (payment === "Dinheiro" && changeFor !== "" && changeForValue > 0 && changeForValue < deliveryTotal) return `O valor para troco precisa ser maior ou igual ao total do pedido: ${money(deliveryTotal)}.`;
+  return "";
+}
+
 function getDateInputValue(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -714,6 +750,9 @@ function runSelfTests() {
     { name: "Cliente vê somente produtos ativos", passed: getActiveProducts([{ active: true }, { active: false }]).length === 1 },
     { name: "Grupos de produtos não podem duplicar", passed: hasDuplicateGroup(["Bebidas"], "bebidas") === true },
     { name: "Cliente vê grupos com produtos ativos", passed: getVisibleProductGroups(initialProducts, initialProductGroups).includes("Bebidas") === true },
+    { name: "Carrinho do cliente soma linhas repetidas do mesmo sabor", passed: mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }]).length === 1 && mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }])[0].quantity === 3 },
+    { name: "Checkout do cliente bloqueia loja fechada", passed: getCustomerCheckoutIssue({ cart: [{ id: 1, price: 20, quantity: 1 }], products: [{ id: 1, active: true, stock: 10, name: "Teste" }], productsTotal: 20, minimumOrderValue: 10, storeIsOpen: false, storeMessage: "Abre às 09:00", customerForm: { name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }, payment: "Pix", changeFor: "", deliveryTotal: 25 }).includes("fechada") },
+    { name: "Checkout do cliente bloqueia troco menor que total", passed: getCustomerCheckoutIssue({ cart: [{ id: 1, price: 20, quantity: 1 }], products: [{ id: 1, active: true, stock: 10, name: "Teste" }], productsTotal: 20, minimumOrderValue: 10, storeIsOpen: true, storeMessage: "Aberto", customerForm: { name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }, payment: "Dinheiro", changeFor: "10", deliveryTotal: 25 }).includes("troco") },
     { name: "Entregas sem motoboy também aparecem para todos os entregadores", passed: getCourierDeliveries(initialDeliveries).every((delivery) => delivery.courierUsername === "ALL") },
     { name: "PDV balcão não aparece para entregadores", passed: getCourierDeliveries([...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).length === initialDeliveries.length },
     { name: "Tipo de pedido inválido não quebra validações", passed: isDeliveryOrder(null) === false && isCounterOrder(null) === false },
@@ -1791,6 +1830,19 @@ function App() {
   const activeCoupons = useMemo(() => coupons.filter((coupon) => coupon.active && isCouponInPeriod(coupon)), [coupons]);
   const appliedCustomerCouponDiscount = useMemo(() => getCouponDiscount(appliedCustomerCoupon, customerCartTotal), [appliedCustomerCoupon, customerCartTotal]);
   const customerDeliveryTotal = useMemo(() => buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee, appliedCustomerCouponDiscount), [customerCartTotal, storeSettings.defaultDeliveryFee, appliedCustomerCouponDiscount]);
+  const customerCheckoutIssue = useMemo(() => getCustomerCheckoutIssue({
+    cart: safeCustomerCart,
+    products,
+    productsTotal: customerCartTotal,
+    minimumOrderValue: storeSettings.minimumOrderValue,
+    storeIsOpen: effectiveStoreIsOpen,
+    storeMessage: storeOpenStatus.message,
+    customerForm,
+    payment: customerPayment,
+    changeFor: customerChangeFor,
+    deliveryTotal: customerDeliveryTotal,
+  }), [safeCustomerCart, products, customerCartTotal, storeSettings.minimumOrderValue, effectiveStoreIsOpen, storeOpenStatus.message, customerForm, customerPayment, customerChangeFor, customerDeliveryTotal]);
+  const canSubmitCustomerOrder = !customerSubmitting && !customerCheckoutIssue;
   const normalizedCustomerPhoneForNotifications = useMemo(() => onlyPhoneNumbers(customerForm.phone), [customerForm.phone]);
 
   function getCustomerProductCartItems(productId) {
@@ -2982,7 +3034,7 @@ function App() {
         cartKey: `prod-${product.id}-var-${variant.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       }));
 
-      const nextCart = [...currentCart, ...newItems];
+      const nextCart = mergeCustomerCartItems([...currentCart, ...newItems]);
       const validation = validateOrderItems(nextCart, products);
       if (!validation.valid) {
         setCustomerError(validation.message);
@@ -3031,9 +3083,7 @@ function App() {
 
   async function submitCustomerOrder() {
     if (customerSubmitting) return;
-    if (!effectiveStoreIsOpen) return setCustomerError(`A loja está fechada no momento. ${storeOpenStatus.message || "Tente novamente dentro do horário de atendimento."}`);
-    if (!isCustomerFormComplete(customerForm)) return setCustomerError("Confira seus dados de entrega antes de enviar o pedido.");
-    if (customerForm.phone && !isValidBrazilMobilePhone(customerForm.phone)) return setCustomerError("Telefone inválido. Corrija o número antes de enviar o pedido.");
+    if (customerCheckoutIssue) return setCustomerError(customerCheckoutIssue);
 
     setCustomerSubmitting(true);
     try {
@@ -4759,7 +4809,7 @@ function App() {
           <Card className="bg-zinc-900 border-zinc-800 shadow-2xl rounded-3xl">
             <CardContent className="p-4 sm:p-6 md:p-8">
               <div className={customerSubmitted ? "flex flex-col md:flex-row md:items-center gap-4 mb-8 justify-center" : "flex flex-col md:flex-row md:items-center gap-4 mb-8 md:justify-between"}>
-                <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-2xl font-bold text-white">Barbosas Delivery</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Informe seus dados para continuar"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
+                <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-2xl font-bold text-white">{storeSettings.storeName || "Barbosas Delivery"}</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Informe seus dados para continuar"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
                 {!customerSubmitted && (
                   <div className="grid grid-cols-3 w-full md:w-auto rounded-2xl bg-zinc-800 p-1 border border-zinc-700">
                     <button type="button" onClick={() => setEntryMode("customer")} className={`px-4 py-2 rounded-xl text-sm font-semibold ${entryMode === "customer" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>Cliente</button>
@@ -4797,8 +4847,8 @@ function App() {
                       className="fixed left-3 right-3 bottom-3 z-40 rounded-3xl bg-emerald-600 px-4 py-3 pb-safe text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700 active:scale-[0.99] touch-manipulation"
                     >
                       <span className="block text-[11px] font-black uppercase tracking-wide opacity-90">Carrinho atualizado</span>
-                      <span className="block text-lg font-black">{customerCartItemCount} item{customerCartItemCount > 1 ? "s" : ""} • {money(customerDeliveryTotal)}</span>
-                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)} • Cupom: -{money(appliedCustomerCouponDiscount)} • Entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))} • tocar para conferir</span>
+                      <span className="block text-lg font-black">{customerCartItemCount} item{customerCartItemCount > 1 ? "s" : ""} • Total {money(customerDeliveryTotal)}</span>
+                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)}{appliedCustomerCouponDiscount > 0 ? ` • Cupom: -${money(appliedCustomerCouponDiscount)}` : ""} • Entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))} • tocar para conferir pedido</span>
                     </button>
                   )}
 
@@ -5175,10 +5225,11 @@ function App() {
                       <p className="text-2xl font-black">Total: {money(customerDeliveryTotal)}</p>
                     </div>
 
+                    {customerCheckoutIssue && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">{customerCheckoutIssue}</p>}
                     {customerError && <p className={`text-sm ${customerError.includes("enviado") ? "text-emerald-600" : "text-red-600"}`}>{customerError}</p>}
 
                     <div className="grid grid-cols-1 gap-2">
-                      <Button onClick={submitCustomerOrder} disabled={customerSubmitting || safeCustomerCart.length === 0} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6 disabled:opacity-60 disabled:cursor-not-allowed">{customerSubmitting ? "Enviando pedido..." : "Enviar pedido para a loja"}</Button>
+                      <Button onClick={submitCustomerOrder} disabled={!canSubmitCustomerOrder} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6 disabled:opacity-60 disabled:cursor-not-allowed">{customerSubmitting ? "Enviando pedido..." : "Enviar pedido para a loja"}</Button>
                     </div>
                       </div>
                     </div>
