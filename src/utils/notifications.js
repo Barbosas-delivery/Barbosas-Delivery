@@ -21,8 +21,10 @@ export function createNotification(type, title, message, audience = "loja", deli
     deliveryId,
     orderId: deliveryId,
     courierUsername,
+    customerPhone: String(options.customerPhone || ""),
     read: false,
     readAt: null,
+    resolvedAt: options.resolvedAt || null,
     createdAt: new Date().toISOString(),
   };
 }
@@ -42,14 +44,18 @@ export function isNotificationForAudience(notification, audience, currentCourier
   return !notificationCourierUsername || !loggedCourierUsername || notificationCourierUsername === loggedCourierUsername;
 }
 
+export function isNotificationActive(notification) {
+  return notification?.read !== true && !notification?.readAt && !notification?.read_at && !notification?.resolvedAt && !notification?.resolved_at;
+}
+
 export function getUnreadNotificationCount(notifications, audience, currentCourierUsername = "") {
   return (Array.isArray(notifications) ? notifications : []).filter(
-    (notification) => isNotificationForAudience(notification, audience, currentCourierUsername) && !notification.read
+    (notification) => isNotificationForAudience(notification, audience, currentCourierUsername) && isNotificationActive(notification)
   ).length;
 }
 
 export function getAudienceNotifications(notifications, audience, currentCourierUsername = "") {
   return (Array.isArray(notifications) ? notifications : [])
-    .filter((notification) => isNotificationForAudience(notification, audience, currentCourierUsername))
+    .filter((notification) => isNotificationForAudience(notification, audience, currentCourierUsername) && isNotificationActive(notification))
     .sort((a, b) => new Date(b.createdAt || b.created_at || 0) - new Date(a.createdAt || a.created_at || 0));
 }

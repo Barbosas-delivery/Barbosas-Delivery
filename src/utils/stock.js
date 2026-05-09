@@ -60,9 +60,15 @@ export function syncOrderItemsWithProducts(items, products) {
     const product = products.find((currentProduct) => currentProduct.id === item.id);
     return {
       ...item,
-      name: product?.name || item.name,
-      price: Number(product?.price ?? item.price ?? 0),
+      name: item.variantName ? (item.name || product?.name || "Produto") : (product?.name || item.name),
+      productName: item.productName || product?.name || item.name,
+      price: Number(item.price ?? product?.price ?? 0),
+      originalPrice: Number(item.originalPrice ?? product?.price ?? item.price ?? 0),
+      promotionId: item.promotionId || null,
       barcode: product?.barcode || item.barcode,
+      variantId: item.variantId || null,
+      variantName: item.variantName || "",
+      imageUrl: item.imageUrl || product?.imageUrl || "",
     };
   });
 }

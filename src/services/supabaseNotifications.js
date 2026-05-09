@@ -12,8 +12,10 @@ export function mapNotificationFromDatabase(row) {
     deliveryId: row.order_id || row.deliveryId || null,
     orderId: row.order_id || row.deliveryId || null,
     courierUsername: row.courier_username || "",
+    customerPhone: row.customer_phone || "",
     read: row.read === true,
     readAt: row.read_at || null,
+    resolvedAt: row.resolved_at || null,
     createdAt: row.created_at || new Date().toISOString(),
   };
 }
@@ -28,12 +30,14 @@ export async function saveNotificationToSupabaseService(notification) {
   const payload = {
     audience: normalizeNotificationAudience(notification.audience),
     courier_username: notification.courierUsername || null,
+    customer_phone: notification.customerPhone || null,
     type: notification.type || "info",
     title: notification.title || "Notificação",
     message: notification.message || "",
     order_id: notification.orderId || notification.deliveryId || null,
     read: notification.read === true,
     read_at: notification.readAt || null,
+    resolved_at: notification.resolvedAt || null,
     created_at: notification.createdAt || new Date().toISOString(),
   };
 

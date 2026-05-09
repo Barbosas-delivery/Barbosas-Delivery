@@ -1425,6 +1425,33 @@ function App() {
 
   const safeCustomerCart = useMemo(() => sanitizeCustomerCart(customerCart), [customerCart]);
   const customerCartTotal = useMemo(() => buildOrderTotal(safeCustomerCart), [safeCustomerCart]);
+  const customerCartItemCount = useMemo(() => safeCustomerCart.reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0), [safeCustomerCart]);
+  const customerDeliveryTotal = useMemo(() => buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee), [customerCartTotal, storeSettings.defaultDeliveryFee]);
+  const normalizedCustomerPhoneForNotifications = useMemo(() => onlyPhoneNumbers(customerForm.phone), [customerForm.phone]);
+
+  function getCustomerProductCartItems(productId) {
+    return safeCustomerCart.filter((item) => item.isKit !== true && String(item.id) === String(productId));
+  }
+
+  function getCustomerProductCartQuantity(productId) {
+    return getCustomerProductCartItems(productId).reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0);
+  }
+
+  function getCustomerProductCartSubtotal(productId) {
+    return getCustomerProductCartItems(productId).reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 0), 0);
+  }
+
+  function getCustomerKitCartQuantity(kitId) {
+    return safeCustomerCart
+      .filter((item) => item.isKit === true && String(item.kitId) === String(kitId))
+      .reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0);
+  }
+
+  function getCustomerKitCartSubtotal(kitId) {
+    return safeCustomerCart
+      .filter((item) => item.isKit === true && String(item.kitId) === String(kitId))
+      .reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 0), 0);
+  }
   const filteredClients = useMemo(() => {
     const term = clientSearch.toLowerCase().trim();
     if (!term) return clients;
@@ -1486,7 +1513,18 @@ function App() {
   const passedTests = selfTests.filter((test) => test.passed).length;
   const ownerNotifications = useMemo(() => getAudienceNotifications(notifications, "loja"), [notifications]);
   const courierNotifications = useMemo(() => getAudienceNotifications(notifications, "courier", loggedCourier?.username), [notifications, loggedCourier?.username]);
-  const customerNotifications = useMemo(() => getAudienceNotifications(notifications, "customer"), [notifications]);
+  const customerNotifications = useMemo(() => {
+    if (!normalizedCustomerPhoneForNotifications) return [];
+    return getAudienceNotifications(notifications, "customer").filter((notification) => {
+      const notificationPhone = onlyPhoneNumbers(notification.customerPhone || notification.customer_phone);
+      const relatedDelivery = deliveries.find((delivery) => String(delivery.id) === String(notification.orderId || notification.deliveryId));
+      const relatedPhone = onlyPhoneNumbers(relatedDelivery?.phone || "");
+      if (notificationPhone && notificationPhone !== normalizedCustomerPhoneForNotifications) return false;
+      if (!notificationPhone && relatedPhone && relatedPhone !== normalizedCustomerPhoneForNotifications) return false;
+      if (!notificationPhone && !relatedPhone) return false;
+      return true;
+    });
+  }, [notifications, normalizedCustomerPhoneForNotifications, deliveries]);
   const ownerUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "loja"), [notifications]);
   const courierUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "courier", loggedCourier?.username), [notifications, loggedCourier?.username]);
   const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate, orderPayments), [deliveries, reportRange, orderPayments]);
@@ -1506,7 +1544,9 @@ function App() {
   }, [showCustomerPromo]);
 
   function addNotification(type, title, message, audience = "loja", deliveryId = null, options = {}) {
-    const notification = createNotification(type, title, message, audience, deliveryId, options);
+    const relatedDelivery = deliveries.find((delivery) => String(delivery.id) === String(deliveryId));
+    const normalizedCustomerPhone = onlyPhoneNumbers(options.customerPhone || relatedDelivery?.phone || (normalizeNotificationAudience(audience) === "customer" ? customerForm.phone : ""));
+    const notification = createNotification(type, title, message, audience, deliveryId, { ...options, customerPhone: normalizedCustomerPhone });
     setNotifications((previousNotifications) => [notification, ...previousNotifications]);
     saveNotificationToSupabase(notification);
     try {
@@ -1518,24 +1558,48 @@ function App() {
     } catch (_) {}
   }
 
-  async function markNotificationsRead(audience, courierUsername = "") {
+  async function markNotificationsRead(audience, courierUsername = "", customerPhone = "") {
     const normalizedAudience = normalizeNotificationAudience(audience);
     const normalizedCourierUsername = String(courierUsername || "").trim().toLowerCase();
+    const normalizedCustomerPhone = onlyPhoneNumbers(customerPhone);
     const readAt = new Date().toISOString();
 
     setNotifications((previousNotifications) =>
       previousNotifications.map((notification) => {
         const notificationAudience = normalizeNotificationAudience(notification.audience);
         const notificationCourierUsername = String(notification.courierUsername || notification.courier_username || "").trim().toLowerCase();
+        const notificationCustomerPhone = onlyPhoneNumbers(notification.customerPhone || notification.customer_phone);
         const isSameAudience = notificationAudience === normalizedAudience;
         const isSameCourier = normalizedAudience !== "courier" || !normalizedCourierUsername || !notificationCourierUsername || notificationCourierUsername === normalizedCourierUsername;
-        return isSameAudience && isSameCourier ? { ...notification, read: true, readAt } : notification;
+        const isSameCustomer = normalizedAudience !== "customer" || !normalizedCustomerPhone || notificationCustomerPhone === normalizedCustomerPhone;
+        return isSameAudience && isSameCourier && isSameCustomer ? { ...notification, read: true, readAt, resolvedAt: readAt } : notification;
       })
     );
 
-    let query = supabase.from("notifications").update({ read: true, read_at: readAt }).eq("audience", normalizedAudience);
+    let query = supabase.from("notifications").update({ read: true, read_at: readAt, resolved_at: readAt }).eq("audience", normalizedAudience);
     if (normalizedAudience === "courier" && normalizedCourierUsername) query = query.or(`courier_username.is.null,courier_username.eq.${normalizedCourierUsername}`);
+    if (normalizedAudience === "customer" && normalizedCustomerPhone) query = query.eq("customer_phone", normalizedCustomerPhone);
     await query;
+  }
+
+  async function resolveOrderNotifications(deliveryId, audiences = ["loja", "courier", "customer"]) {
+    const resolvedAt = new Date().toISOString();
+    const normalizedAudiences = audiences.map((audience) => normalizeNotificationAudience(audience));
+
+    setNotifications((previousNotifications) =>
+      previousNotifications.map((notification) => {
+        const notificationOrderId = String(notification.orderId || notification.deliveryId || "");
+        const notificationAudience = normalizeNotificationAudience(notification.audience);
+        if (notificationOrderId !== String(deliveryId) || !normalizedAudiences.includes(notificationAudience)) return notification;
+        return { ...notification, read: true, readAt: notification.readAt || resolvedAt, resolvedAt };
+      })
+    );
+
+    await supabase
+      .from("notifications")
+      .update({ read: true, read_at: resolvedAt, resolved_at: resolvedAt })
+      .eq("order_id", deliveryId)
+      .in("audience", normalizedAudiences);
   }
 
   async function handleLogin(event) {
@@ -3080,6 +3144,7 @@ function App() {
         return { ...delivery, ...patch };
       })
     );
+    await resolveOrderNotifications(id, ["courier"]);
     addNotification("entrega_aceita", "Entrega aceita", `Pedido #${id} saiu para entrega com ${loggedCourier?.name || "entregador"}.`, "loja", id);
     addNotification("entrega_atribuida", "Entrega atribuída a você", `Você aceitou o pedido #${id}. Faça a entrega e marque como entregue ao chegar no cliente.`, "courier", id, { courierUsername: loggedCourier?.username });
     setLastAction(`Pedido #${id} saiu para entrega com ${loggedCourier?.name || "entregador"}.`);
@@ -3110,6 +3175,7 @@ function App() {
         return { ...delivery, ...patch };
       })
     );
+    await resolveOrderNotifications(id, ["courier"]);
     addNotification("entrega_aguardando_aprovacao", "Entrega aguardando aprovação", `Pedido #${id} foi marcado como entregue por ${loggedCourier?.name || "entregador"}.`, "loja", id);
     setLastAction(`Pedido #${id} enviado para aprovação da loja.`);
   }
@@ -3144,7 +3210,10 @@ function App() {
         return { ...delivery, ...statusPatch };
       })
     );
-    if (status === DELIVERY_STATUS.OUT_FOR_DELIVERY) addNotification("pedido_saiu", "Pedido saiu para entrega", `Seu pedido #${id} saiu da loja e está a caminho.`, "customer", id);
+    if (status === DELIVERY_STATUS.OUT_FOR_DELIVERY) {
+      await resolveOrderNotifications(id, ["customer"]);
+      addNotification("pedido_saiu", "Pedido saiu para entrega", `Seu pedido #${id} saiu da loja e está a caminho.`, "customer", id, { customerPhone: deliveryToUpdate.phone });
+    }
     if (status === DELIVERY_STATUS.DELIVERY_PROBLEM) {
       addNotification("problema_entrega", "Problema na entrega", `Pedido #${id} foi marcado com problema por ${loggedCourier?.name || "entregador"}.`, "loja", id);
       addNotification("problema_registrado", "Problema registrado", `Problema do pedido #${id} enviado para a loja.`, "courier", id, { courierUsername: loggedCourier?.username });
@@ -3184,6 +3253,7 @@ function App() {
         approvedAt,
       };
       setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...localPatch } : delivery));
+      await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "courier", id);
       setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
       await loadDeliveries();
@@ -3210,6 +3280,7 @@ function App() {
           return { ...delivery, ...patch };
         })
       );
+      await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
       if (currentDelivery.deliveredByName) {
         addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} finalizado pela loja.`, "courier", id, { courierUsername: currentDelivery.deliveredByUsername || currentDelivery.pickedUpByUsername || currentDelivery.acceptedByUsername });
       }
@@ -3291,6 +3362,7 @@ function App() {
     await saveStockMovements(delivery, "cancel");
     await auditAction("cancel_order", "orders", id, { reason: cancellationText, value: delivery.value, cashSessionId: delivery.cashSessionId || "" }, delivery);
     if (isDeliveryOrder(delivery)) {
+      await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
       addNotification("pedido_cancelado", "Pedido cancelado", `Pedido #${id} cancelado. Motivo: ${cancellationText}.`, "loja", id);
       if (delivery.pickedUpByUsername || delivery.acceptedByUsername) {
         addNotification("entrega_cancelada", "Entrega cancelada", `Pedido #${id} foi cancelado pela loja.`, "courier", id, { courierUsername: delivery.pickedUpByUsername || delivery.acceptedByUsername });
@@ -3620,6 +3692,7 @@ function App() {
           : item
       )
     );
+    await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
     setLastAction(`Pedido #${id} finalizado pela loja.`);
   }
 
@@ -3756,12 +3829,12 @@ function App() {
                   {safeCustomerCart.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => { setShowCustomerNeedMoreMessage(true); setShowCustomerCheckout(false); }}
-                      className="fixed left-4 right-4 bottom-4 z-40 rounded-2xl bg-emerald-600 px-5 py-4 text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700"
+                      onClick={() => { setShowCustomerNeedMoreMessage(false); setShowCustomerCheckout(true); }}
+                      className="fixed left-3 right-3 bottom-3 z-40 rounded-3xl bg-emerald-600 px-4 py-3 text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700 active:scale-[0.99] touch-manipulation"
                     >
-                      <span className="block text-xs font-semibold opacity-90">{safeCustomerCart.length} item{safeCustomerCart.length > 1 ? "s" : ""} no pedido</span>
-                      <span className="block text-base font-black">Finalizar pedido</span>
-                      <span className="block text-xs font-semibold opacity-90">Total: {money(buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee))}</span>
+                      <span className="block text-[11px] font-black uppercase tracking-wide opacity-90">Carrinho atualizado</span>
+                      <span className="block text-lg font-black">{customerCartItemCount} item{customerCartItemCount > 1 ? "s" : ""} • {money(customerDeliveryTotal)}</span>
+                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)} • Entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))} • tocar para conferir</span>
                     </button>
                   )}
 
@@ -3821,9 +3894,25 @@ function App() {
                     <h2 className="text-xl font-black mb-1">Monte seu pedido</h2>
                     <p className="text-xs text-zinc-600"><b>Entrega para:</b> {customerForm.street}, {customerForm.number} - {customerForm.district}, {customerForm.city}/{customerForm.state}</p>
                     <p className={`text-xs font-bold mt-1 ${effectiveStoreIsOpen ? "text-emerald-600" : "text-red-600"}`}>{effectiveStoreIsOpen ? "Estamos abertos" : "Estamos fechados no momento"} • {storeOpenStatus.message} • {storeOpeningHoursSummary}</p>
-                    <p className="text-xs text-zinc-500 mt-1">Pedido mínimo: {money(storeSettings.minimumOrderValue)} em produtos • Entrega estimada: {nextOrderEstimatedDeliveryLabel} • atualiza a cada 3 segundos</p>
+                    <p className="text-xs text-zinc-500 mt-1">Pedido mínimo: {money(storeSettings.minimumOrderValue)} em produtos • Entrega estimada agora: {nextOrderEstimatedDeliveryLabel}</p>
                   </div>
-                  {customerNotifications.length > 0 && <div className="rounded-3xl bg-amber-50 border border-amber-200 p-4 text-amber-900"><p className="font-black text-sm mb-1">Atualizações do pedido</p>{customerNotifications.slice(0, 3).map((notification) => <p key={notification.id} className="text-xs">• {notification.message}</p>)}</div>}
+                  {customerNotifications.length > 0 && (
+                    <div className="rounded-3xl bg-amber-50 border border-amber-200 p-4 text-amber-900">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-sm mb-1">Atualizações do pedido</p>
+                          {customerNotifications.slice(0, 3).map((notification) => <p key={notification.id} className="text-xs">• {notification.message}</p>)}
+                        </div>
+                        <button type="button" onClick={() => markNotificationsRead("customer", "", normalizedCustomerPhoneForNotifications)} className="shrink-0 rounded-xl bg-white px-3 py-2 text-[11px] font-black text-amber-900 shadow-sm">Ok</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {customerError && !showCustomerCheckout && !customerVariantPicker.open && (
+                    <div className={`rounded-3xl border p-3 text-sm font-bold ${customerError.includes("adicionado") || customerError.includes("enviado") ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>
+                      {customerError}
+                    </div>
+                  )}
 
                   <div className="sticky top-3 z-20 rounded-3xl bg-white text-zinc-950 p-3 space-y-3 shadow-lg md:static md:shadow-none">
                     <SearchBox value={customerProductSearch} onChange={setCustomerProductSearch} placeholder="Buscar produto por nome, grupo ou código" />
@@ -3858,6 +3947,9 @@ function App() {
                                 <Button onClick={() => addKitToCustomerCart(kit)} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-1.5 h-auto text-xs">
                                   Adicionar
                                 </Button>
+                                {getCustomerKitCartQuantity(kit.id) > 0 && (
+                                  <p className="mt-2 rounded-xl bg-emerald-50 px-2 py-1 text-[11px] font-black text-emerald-700">No pedido: {getCustomerKitCartQuantity(kit.id)} • {money(getCustomerKitCartSubtotal(kit.id))}</p>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -3875,27 +3967,38 @@ function App() {
                       <div key={section.group} className="space-y-3">
                         <h3 className="text-white font-black text-sm px-1 uppercase tracking-wide">{section.group}</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {section.products.map((product) => (
-                            <div key={product.id} className="rounded-2xl bg-white text-zinc-950 p-3 border border-zinc-100 shadow-sm">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3 min-w-0 flex-1">
-                                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-zinc-100 bg-white">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" /> : <div className="h-full w-full bg-white" />}</div>
-                                  <div className="min-w-0">
-                                    <p className="font-black text-sm leading-tight truncate">{product.name}</p>
-                                    <p className="text-[11px] text-zinc-500 mt-0.5">{product.category} • estoque {product.stock}</p>
-                                    {productHasActiveVariants(product) && <p className="text-[11px] font-bold text-purple-700 mt-0.5">Escolha os sabores</p>}
+                          {section.products.map((product) => {
+                            const productQuantityInCart = getCustomerProductCartQuantity(product.id);
+                            const productSubtotalInCart = getCustomerProductCartSubtotal(product.id);
+                            const hasProductInCart = productQuantityInCart > 0;
+                            return (
+                              <div key={product.id} className={`rounded-2xl bg-white text-zinc-950 p-3 border shadow-sm ${hasProductInCart ? "border-emerald-300 ring-1 ring-emerald-100" : "border-zinc-100"}`}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-zinc-100 bg-white">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" /> : <div className="h-full w-full bg-white" />}</div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-black text-base leading-tight break-words">{product.name}</p>
+                                      <p className="text-[11px] text-zinc-500 mt-1">{product.category} • estoque {product.stock}</p>
+                                      {productHasActiveVariants(product) && <p className="text-[11px] font-bold text-purple-700 mt-1">Escolha os sabores</p>}
+                                      {hasProductInCart && (
+                                        <div className="mt-2 rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-800">
+                                          <p className="text-xs font-black">No pedido: {productQuantityInCart} unidade{productQuantityInCart > 1 ? "s" : ""}</p>
+                                          <p className="text-xs font-semibold">Subtotal deste produto: {money(productSubtotalInCart)}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    {getProductActivePromotion(product, promotions) && <p className="text-[11px] text-zinc-400 line-through">{money(product.price)}</p>}
+                                    <p className="text-base font-black text-emerald-700">{money(getProductSalePrice(product, promotions))}</p>
+                                    <Button onClick={() => addProductToCustomerCart(product)} disabled={Number(product.stock || 0) <= 0} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-3 h-auto text-xs touch-manipulation">
+                                      {Number(product.stock || 0) <= 0 ? "Sem estoque" : productHasActiveVariants(product) ? (hasProductInCart ? "Adicionar sabores" : "Escolher") : (hasProductInCart ? "+1" : "Adicionar")}
+                                    </Button>
                                   </div>
                                 </div>
-                                <div className="text-right shrink-0">
-                                  {getProductActivePromotion(product, promotions) && <p className="text-[11px] text-zinc-400 line-through">{money(product.price)}</p>}
-                                  <p className="text-sm font-black text-emerald-700">{money(getProductSalePrice(product, promotions))}</p>
-                                  <Button onClick={() => addProductToCustomerCart(product)} disabled={Number(product.stock || 0) <= 0} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-2 h-auto text-xs">
-                                    {Number(product.stock || 0) <= 0 ? "Sem estoque" : productHasActiveVariants(product) ? "Escolher" : "Adicionar"}
-                                  </Button>
-                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
