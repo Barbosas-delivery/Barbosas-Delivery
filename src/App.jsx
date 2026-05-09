@@ -259,6 +259,7 @@ const ICONS = {
   save: "💾",
   money: "💰",
   bell: "🔔",
+  tools: "🧰",
 };
 
 function normalizeCustomerCartItem(item, index = 0) {
@@ -4656,6 +4657,7 @@ function App() {
     { id: "clients", label: "Clientes", icon: "users" },
     { id: "couriers", label: "Entregadores", icon: "truck" },
     { id: "access", label: "Acessos", icon: "users" },
+    { id: "diagnostics", label: "Diagnóstico", icon: "tools" },
   ];
 
   const visibleTabs = tabs.filter((tab) => canCurrentStoreAccess(tab.id));
@@ -5212,6 +5214,26 @@ function App() {
             {lastAction && <div className="bg-white border border-zinc-200 rounded-3xl px-5 py-4 flex items-center gap-3 shadow-sm"><Icon name="check" className="text-emerald-600" /><p className="text-sm text-zinc-700">{lastAction}</p></div>}
 
             {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} onInactivateProduct={toggleProductStatus} />}
+
+            {activeTab === "diagnostics" && (
+              <DiagnosticsTab
+                appVersion={APP_VERSION}
+                storeSettings={storeSettings}
+                storeSettingsSyncStatus={storeSettingsSyncStatus}
+                products={products}
+                clients={clients}
+                couriers={couriers}
+                deliveries={deliveries}
+                notifications={notifications}
+                cashSession={cashSession}
+                coupons={coupons}
+                kits={kits}
+                promotions={promotions}
+                storeUsersStatus={storeUsersStatus}
+                selfTests={selfTests}
+                passedTests={passedTests}
+              />
+            )}
 
             {activeTab === "products" && (
               <div className="space-y-6">
@@ -6727,6 +6749,153 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+
+function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, products, clients, couriers, deliveries, notifications, cashSession, coupons, kits, promotions, storeUsersStatus, selfTests, passedTests }) {
+  const isBrowser = typeof window !== "undefined";
+  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
+  const localStorageOk = (() => {
+    if (!isBrowser) return false;
+    try {
+      const key = "barbosas_delivery_diag_test";
+      window.localStorage.setItem(key, "ok");
+      window.localStorage.removeItem(key);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const serviceWorkerSupported = typeof navigator !== "undefined" && "serviceWorker" in navigator;
+  const pwaMode = isBrowser && (window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator?.standalone === true);
+  const supabaseUrlConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL);
+  const supabaseKeyConfigured = Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
+  const activeProducts = (products || []).filter((product) => product.active !== false && !product.deletedAt).length;
+  const lowStockProducts = (products || []).filter((product) => product.active !== false && Number(product.stock || 0) <= Number(product.minStock || 0)).length;
+  const activeCouriers = (couriers || []).filter((courier) => courier.active !== false).length;
+  const activeOrders = (deliveries || []).filter((delivery) => ![DELIVERY_STATUS.CANCELLED, DELIVERY_STATUS.CONFIRMED_DELIVERED].includes(delivery.status)).length;
+  const unreadNotifications = (notifications || []).filter((notification) => !notification.read && !notification.readAt && !notification.resolvedAt).length;
+  const printMode = storeSettings?.printSettings?.mode === "local" ? "Serviço local" : "Navegador";
+  const localPrintUrl = storeSettings?.printSettings?.localServiceUrl || "Não configurada";
+  const whatsappReady = Boolean(onlyPhoneNumbers(storeSettings?.whatsapp || ""));
+  const operatingMode = getStoreOpenStatus(storeSettings?.schedule || initialStoreSettings.schedule, new Date()).isOpen ? "Aberta agora" : "Fechada agora";
+
+  const checks = [
+    { name: "Supabase URL configurada", ok: supabaseUrlConfigured, detail: supabaseUrlConfigured ? "VITE_SUPABASE_URL encontrada" : "Configure VITE_SUPABASE_URL no .env" },
+    { name: "Supabase chave configurada", ok: supabaseKeyConfigured, detail: supabaseKeyConfigured ? "VITE_SUPABASE_ANON_KEY encontrada" : "Configure VITE_SUPABASE_ANON_KEY no .env" },
+    { name: "Navegador online", ok: online, detail: online ? "Conexão detectada" : "Sem conexão detectada pelo navegador" },
+    { name: "LocalStorage disponível", ok: localStorageOk, detail: localStorageOk ? "Backup/configurações locais podem ser usados" : "O navegador bloqueou armazenamento local" },
+    { name: "PWA disponível", ok: serviceWorkerSupported, detail: serviceWorkerSupported ? (pwaMode ? "Rodando como app instalado" : "Pode ser instalado/adicionado à tela inicial") : "Navegador sem suporte a Service Worker" },
+    { name: "WhatsApp da loja", ok: whatsappReady, detail: whatsappReady ? "Número configurado" : "Configure o WhatsApp nas configurações da loja" },
+    { name: "Testes internos", ok: passedTests === selfTests.length, detail: `${passedTests}/${selfTests.length} testes aprovados` },
+  ];
+
+  const exportDiagnostics = () => {
+    const payload = {
+      app: "Barbosa's Delivery",
+      version: appVersion,
+      generatedAt: new Date().toISOString(),
+      browser: isBrowser ? window.navigator.userAgent : "indisponível",
+      online,
+      pwaMode,
+      serviceWorkerSupported,
+      localStorageOk,
+      supabase: { urlConfigured: supabaseUrlConfigured, keyConfigured: supabaseKeyConfigured },
+      store: {
+        name: storeSettings?.storeName,
+        syncStatus: storeSettingsSyncStatus,
+        openStatus: operatingMode,
+        printMode,
+        localPrintUrl,
+        whatsappConfigured: whatsappReady,
+      },
+      counts: {
+        products: (products || []).length,
+        activeProducts,
+        lowStockProducts,
+        clients: (clients || []).length,
+        couriers: (couriers || []).length,
+        activeCouriers,
+        deliveries: (deliveries || []).length,
+        activeOrders,
+        notifications: (notifications || []).length,
+        unreadNotifications,
+        coupons: (coupons || []).length,
+        kits: (kits || []).length,
+        promotions: (promotions || []).length,
+      },
+      checks,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `diagnostico-barbosas-delivery-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-6">
+      <Title title="Diagnóstico do sistema" subtitle="Conferência rápida de ambiente, Supabase, PWA, impressão, loja e dados carregados." />
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Metric title="Versão" value={appVersion || "Atual"} icon="shield" />
+        <Metric title="Supabase" value={supabaseUrlConfigured && supabaseKeyConfigured ? "Configurado" : "Pendente"} icon="save" />
+        <Metric title="Loja" value={operatingMode} icon="calendar" />
+        <Metric title="Impressão" value={printMode} icon="tools" />
+        <Metric title="Produtos ativos" value={activeProducts} icon="package" />
+        <Metric title="Pedidos ativos" value={activeOrders} icon="truck" />
+        <Metric title="Entregadores ativos" value={activeCouriers} icon="users" />
+        <Metric title="Notificações novas" value={unreadNotifications} icon="bell" />
+      </div>
+
+      <CardBox>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-bold text-lg">Checklist técnico</h3>
+            <p className="text-sm text-zinc-500">Use esta área quando algo não carregar, não imprimir ou não sincronizar.</p>
+          </div>
+          <Button onClick={exportDiagnostics} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Baixar diagnóstico</Button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {checks.map((check) => (
+            <div key={check.name} className={`rounded-2xl border p-4 ${check.ok ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
+              <p className={`font-black ${check.ok ? "text-emerald-800" : "text-amber-800"}`}>{check.ok ? "✅" : "⚠️"} {check.name}</p>
+              <p className="mt-1 text-sm text-zinc-600">{check.detail}</p>
+            </div>
+          ))}
+        </div>
+      </CardBox>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <CardBox>
+          <h3 className="font-bold text-lg mb-4">Sincronização e configurações</h3>
+          <div className="space-y-2 text-sm text-zinc-700">
+            <p><b>Status:</b> {storeSettingsSyncStatus}</p>
+            <p><b>Usuários da loja:</b> {storeUsersStatus || "Sem leitura recente"}</p>
+            <p><b>Caixa:</b> {cashSession?.isOpen ? `Aberto desde ${new Date(cashSession.openedAt).toLocaleString("pt-BR")}` : "Fechado"}</p>
+            <p><b>WhatsApp:</b> {whatsappReady ? storeSettings.whatsapp : "Não configurado"}</p>
+            <p><b>Serviço local de impressão:</b> {localPrintUrl}</p>
+          </div>
+        </CardBox>
+
+        <CardBox>
+          <h3 className="font-bold text-lg mb-4">Dados carregados</h3>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <p className="rounded-2xl bg-zinc-50 p-3"><b>Produtos:</b><br />{(products || []).length}</p>
+            <p className="rounded-2xl bg-zinc-50 p-3"><b>Clientes:</b><br />{(clients || []).length}</p>
+            <p className="rounded-2xl bg-zinc-50 p-3"><b>Pedidos:</b><br />{(deliveries || []).length}</p>
+            <p className="rounded-2xl bg-zinc-50 p-3"><b>Entregadores:</b><br />{(couriers || []).length}</p>
+            <p className="rounded-2xl bg-zinc-50 p-3"><b>Cupons:</b><br />{(coupons || []).length}</p>
+            <p className="rounded-2xl bg-zinc-50 p-3"><b>Kits:</b><br />{(kits || []).length}</p>
+          </div>
+        </CardBox>
+      </div>
+    </div>
   );
 }
 
