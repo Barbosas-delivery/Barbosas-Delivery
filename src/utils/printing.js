@@ -1,13 +1,6 @@
 import { escapeHtml } from "./formatters";
 
-export function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
-  const printWindow = options.printWindow || window.open("about:blank", "_blank", "width=420,height=760");
-
-  if (!printWindow) {
-    options.onBlocked?.();
-    return false;
-  }
-
+function buildThermalHtml(title, bodyHtml, copies = 1, options = {}) {
   const safeCopies = Math.max(1, Number(copies || 1));
   const copyBlocks = Array.from({ length: safeCopies }, (_, index) => `
     <section class="receipt-copy">
@@ -16,7 +9,7 @@ export function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
     </section>
   `).join("");
 
-  const html = `
+  return `
     <!doctype html>
     <html>
       <head>
@@ -47,6 +40,61 @@ export function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
       <body>${copyBlocks}</body>
     </html>
   `;
+}
+
+function sendToLocalPrintService(title, html, copies, options = {}) {
+  const config = options.localPrintService || {};
+  const endpoint = String(config.url || "").trim();
+  if (!endpoint) return false;
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutMs = Math.min(15000, Math.max(1000, Number(config.timeoutMs || 5000)));
+  const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      app: "barbosas-delivery",
+      title,
+      html,
+      copies,
+      widthMm: 80,
+      createdAt: new Date().toISOString(),
+    }),
+    signal: controller?.signal,
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Serviço local retornou HTTP ${response.status}`);
+      options.onLocalPrintSuccess?.();
+    })
+    .catch((error) => {
+      console.error("Erro ao enviar para serviço local de impressão:", error);
+      options.onLocalPrintError?.(error);
+    })
+    .finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+    });
+
+  return true;
+}
+
+export function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
+  const safeCopies = Math.max(1, Number(copies || 1));
+  const html = buildThermalHtml(title, bodyHtml, safeCopies, options);
+  const localServiceEnabled = options.localPrintService?.enabled === true;
+  const useBrowserFallback = options.localPrintService?.fallbackToBrowser !== false;
+
+  if (localServiceEnabled && sendToLocalPrintService(title, html, safeCopies, options)) {
+    if (!useBrowserFallback) return true;
+  }
+
+  const printWindow = options.printWindow || window.open("about:blank", "_blank", "width=420,height=760");
+
+  if (!printWindow) {
+    options.onBlocked?.();
+    return false;
+  }
 
   try {
     printWindow.document.open();

@@ -464,6 +464,22 @@ function clampPrintCloseDelaySeconds(value) {
   return Math.min(10, Math.max(0, seconds));
 }
 
+function sanitizePrintOutputMode(value) {
+  return value === "local_service" ? "local_service" : "browser";
+}
+
+function sanitizeLocalPrintServiceUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return initialStoreSettings.localPrintServiceUrl || "http://localhost:9191/print";
+  return url;
+}
+
+function clampLocalPrintTimeoutMs(value) {
+  const timeout = Math.floor(Number(value || 5000));
+  if (!Number.isFinite(timeout)) return 5000;
+  return Math.min(15000, Math.max(1000, timeout));
+}
+
 function sanitizeStoreSettings(settings = {}) {
   const source = settings && typeof settings === "object" ? settings : {};
   const schedule = normalizeStoreSchedule(source.schedule || initialStoreSettings.schedule);
@@ -480,6 +496,10 @@ function sanitizeStoreSettings(settings = {}) {
     customerOrderPrintCopies: clampPrintCopies(source.customerOrderPrintCopies, initialStoreSettings.customerOrderPrintCopies || 2),
     manualReprintCopies: clampPrintCopies(source.manualReprintCopies, initialStoreSettings.manualReprintCopies || 1),
     printCloseDelaySeconds: clampPrintCloseDelaySeconds(source.printCloseDelaySeconds),
+    printOutputMode: sanitizePrintOutputMode(source.printOutputMode || initialStoreSettings.printOutputMode),
+    localPrintServiceUrl: sanitizeLocalPrintServiceUrl(source.localPrintServiceUrl || initialStoreSettings.localPrintServiceUrl),
+    localPrintFallbackToBrowser: source.localPrintFallbackToBrowser !== false,
+    localPrintTimeoutMs: clampLocalPrintTimeoutMs(source.localPrintTimeoutMs || initialStoreSettings.localPrintTimeoutMs),
     schedule,
     openingHours: buildOpeningHoursSummary(schedule),
   };
@@ -3219,11 +3239,20 @@ function App() {
   }
 
   function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
+    const localPrintEnabled = storeSettings.printOutputMode === "local_service";
     return printThermalHtmlBase(title, bodyHtml, copies, {
       closeAfterPrintSeconds: getPrintCloseDelaySeconds(),
+      localPrintService: {
+        enabled: localPrintEnabled,
+        url: storeSettings.localPrintServiceUrl,
+        fallbackToBrowser: storeSettings.localPrintFallbackToBrowser !== false,
+        timeoutMs: storeSettings.localPrintTimeoutMs,
+      },
       ...options,
-      onBlocked: () => setLastAction("Navegador bloqueou a impressão. Libere pop-ups e tente novamente."),
+      onBlocked: () => setLastAction(localPrintEnabled ? "Serviço local acionado, mas o navegador bloqueou a impressão de apoio. Verifique o serviço local ou use Reimprimir." : "Navegador bloqueou a impressão. Libere pop-ups e tente novamente."),
       onError: () => setLastAction("Não foi possível preparar a impressão. Tente novamente."),
+      onLocalPrintSuccess: () => setLastAction("Pedido enviado para o serviço local de impressão."),
+      onLocalPrintError: () => setLastAction("Não consegui enviar para o serviço local de impressão. Verifique se o programa local está aberto."),
     });
   }
 
@@ -4404,7 +4433,13 @@ function App() {
         ? getSafePrintCopies(value, field === "customerOrderPrintCopies" ? 2 : 1)
         : field === "printCloseDelaySeconds"
           ? getPrintCloseDelaySecondsFromValue(value)
-          : value;
+          : field === "printOutputMode"
+            ? sanitizePrintOutputMode(value)
+            : field === "localPrintServiceUrl"
+              ? String(value || "").trim()
+              : field === "localPrintTimeoutMs"
+                ? clampLocalPrintTimeoutMs(value)
+                : value;
     setStoreSettings((previousSettings) => ({ ...previousSettings, [field]: finalValue }));
     if (field === "defaultDeliveryFee") {
       setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: finalValue }));
@@ -6181,6 +6216,36 @@ function App() {
                         <Input label="Vias automáticas" type="number" value={storeSettings.customerOrderPrintCopies} onChange={(value) => updateStoreSetting("customerOrderPrintCopies", value)} />
                         <Input label="Vias no Reimprimir" type="number" value={storeSettings.manualReprintCopies} onChange={(value) => updateStoreSetting("manualReprintCopies", value)} />
                         <Input label="Fechar impressão após (s)" type="number" value={storeSettings.printCloseDelaySeconds} onChange={(value) => updateStoreSetting("printCloseDelaySeconds", value)} />
+                      </div>
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-3 space-y-3">
+                        <div>
+                          <p className="text-xs font-black text-zinc-700">Impressão local avançada</p>
+                          <p className="text-xs text-zinc-500">Use apenas se existir um programa de impressão rodando no computador da loja. Se não tiver, mantenha em Navegador.</p>
+                        </div>
+                        <label className="block text-xs font-bold text-zinc-600">Modo de impressão
+                          <select
+                            value={storeSettings.printOutputMode || "browser"}
+                            onChange={(event) => updateStoreSetting("printOutputMode", event.target.value)}
+                            className="mt-1 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm font-bold text-zinc-900 outline-none focus:ring-2 focus:ring-amber-300"
+                          >
+                            <option value="browser">Navegador / janela de impressão</option>
+                            <option value="local_service">Serviço local automático</option>
+                          </select>
+                        </label>
+                        {storeSettings.printOutputMode === "local_service" && (
+                          <div className="grid grid-cols-1 gap-3">
+                            <Input label="URL do serviço local" value={storeSettings.localPrintServiceUrl} onChange={(value) => updateStoreSetting("localPrintServiceUrl", value)} />
+                            <Input label="Tempo máximo de resposta (ms)" type="number" value={storeSettings.localPrintTimeoutMs} onChange={(value) => updateStoreSetting("localPrintTimeoutMs", value)} />
+                            <label className="flex min-h-[48px] items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 text-sm font-bold">
+                              <input
+                                type="checkbox"
+                                checked={storeSettings.localPrintFallbackToBrowser !== false}
+                                onChange={(event) => updateStoreSetting("localPrintFallbackToBrowser", event.target.checked)}
+                              />
+                              Abrir impressão do navegador como apoio
+                            </label>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">

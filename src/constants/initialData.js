@@ -10,6 +10,10 @@ export const initialStoreSettings = {
   customerOrderPrintCopies: 2,
   manualReprintCopies: 1,
   printCloseDelaySeconds: 3,
+  printOutputMode: "browser",
+  localPrintServiceUrl: "http://localhost:9191/print",
+  localPrintFallbackToBrowser: true,
+  localPrintTimeoutMs: 5000,
   openingHours: "Segunda a quinta das 09:00 às 00:00 • Sexta e sábado das 09:00 às 03:00 • Domingo das 13:00 às 00:00",
   isOpen: true,
   schedule: [
