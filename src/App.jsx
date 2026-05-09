@@ -812,6 +812,7 @@ function App() {
   const [customerPayment, setCustomerPayment] = useState("Pix");
   const [customerChangeFor, setCustomerChangeFor] = useState("");
   const [customerOrderConfirmation, setCustomerOrderConfirmation] = useState(null);
+  const [customerSubmitting, setCustomerSubmitting] = useState(false);
   const [selectedCustomerGroup, setSelectedCustomerGroup] = useState("Todos");
   const [showCustomerPromo, setShowCustomerPromo] = useState(false);
   const [canCloseCustomerPromo, setCanCloseCustomerPromo] = useState(false);
@@ -2653,82 +2654,104 @@ function App() {
   }
 
   async function submitCustomerOrder() {
+    if (customerSubmitting) return;
     if (!effectiveStoreIsOpen) return setCustomerError(`A loja está fechada no momento. ${storeOpenStatus.message || "Tente novamente dentro do horário de atendimento."}`);
-    const cartForSubmit = sanitizeCustomerCart(safeCustomerCart);
-    const validation = validateOrderItems(cartForSubmit, products);
-    if (!validation.valid) return setCustomerError(validation.message);
+    if (!isCustomerFormComplete(customerForm)) return setCustomerError("Confira seus dados de entrega antes de enviar o pedido.");
+    if (customerForm.phone && !isValidBrazilMobilePhone(customerForm.phone)) return setCustomerError("Telefone inválido. Corrija o número antes de enviar o pedido.");
 
-    const syncedItems = syncOrderItemsWithProducts(cartForSubmit, products);
-    const syncedProductsTotal = buildOrderTotal(syncedItems);
-    if (!isOrderAboveMinimum(syncedProductsTotal, storeSettings.minimumOrderValue)) {
-      return setCustomerError(`Pedido mínimo de ${money(storeSettings.minimumOrderValue)} em produtos. Adicione mais itens para finalizar.`);
-    }
-
-    const estimatedDeliveryMinutes = buildEstimatedDeliveryMinutes(deliveries, true);
-
-    const newDelivery = {
-      id: Date.now(),
-      cashSessionId: cashSession.id || "",
-      originType: "delivery",
-      orderType: ORDER_TYPE.DELIVERY,
-      client: customerForm.name,
-      phone: customerForm.phone,
-      address: `${customerForm.street}, ${customerForm.number} - ${customerForm.district}, ${customerForm.city}/${customerForm.state}`,
-      payment: customerPayment,
-      paymentStatus: PAYMENT_STATUS.PENDING,
-      changeFor: customerPayment === "Dinheiro" ? customerChangeFor : null,
-      productsTotal: syncedProductsTotal,
-      deliveryFee: normalizeDeliveryFee(storeSettings.defaultDeliveryFee),
-      courierFee: 0,
-      storeFee: 0,
-      motorcycleType: "",
-      value: buildDeliveryTotal(syncedProductsTotal, storeSettings.defaultDeliveryFee),
-      estimatedDeliveryMinutes,
-      whatsappStatus: "not_sent",
-      whatsappOpenedAt: "",
-      whatsappSentAt: "",
-      whatsappMessage: "",
-      status: DELIVERY_STATUS.WAITING_STORE_APPROVAL,
-      origin: "customer",
-      needsStoreApproval: true,
-      storeOrderApproved: false,
-      approvedAt: "",
-      reference: customerForm.reference,
-      courierUsername: "ALL",
-      courierName: "Todos os motoboys",
-      notes: "Pedido enviado pelo cliente",
-      items: syncedItems,
-      pickedUpByUsername: "",
-      pickedUpByName: "",
-      pickedUpAt: "",
-      deliveredByUsername: "",
-      deliveredByName: "",
-      deliveredAt: "",
-      ownerApproved: false,
-      ownerApprovedAt: "",
-      launchedAt: new Date().toISOString(),
-    };
-
-    let savedDelivery;
+    setCustomerSubmitting(true);
     try {
-      savedDelivery = await saveDeliveryToSupabase(newDelivery);
-    } catch (error) {
-      return setCustomerError(`Erro ao enviar pedido para a loja: ${error.message || "verifique Supabase."}`);
-    }
+      const normalizedCustomerName = String(customerForm.name || "").trim();
+      const normalizedCustomerPhone = formatBrazilMobilePhone(customerForm.phone);
+      const normalizedCustomerCep = formatCep(customerForm.cep);
+      const normalizedAddress = `${String(customerForm.street || "").trim()}, ${String(customerForm.number || "").trim()} - ${String(customerForm.district || "").trim()}, ${String(customerForm.city || "").trim()}/${String(customerForm.state || "").trim().toUpperCase().slice(0, 2)}`;
+      const cartForSubmit = sanitizeCustomerCart(safeCustomerCart);
+      const validation = validateOrderItems(cartForSubmit, products);
+      if (!validation.valid) return setCustomerError(validation.message);
 
-    setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
-    setProducts((previousProducts) => {
-      const nextProducts = reduceProductStock(previousProducts, syncedItems);
-      persistProductStocks(nextProducts);
-      return nextProducts;
-    });
-    addNotification("novo_pedido", "Novo pedido recebido", `${customerForm.name} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
-    addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${savedDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", savedDelivery.id);
-    setCustomerCart([]);
-    setShowCustomerCheckout(false);
-    setCustomerChangeFor("");
-    setCustomerOrderConfirmation(buildOrderConfirmation(savedDelivery));
-    setCustomerError("Pedido enviado para a loja. Aguarde a confirmação.");
+      const syncedItems = syncOrderItemsWithProducts(cartForSubmit, products);
+      const syncedProductsTotal = buildOrderTotal(syncedItems);
+      if (!isOrderAboveMinimum(syncedProductsTotal, storeSettings.minimumOrderValue)) {
+        return setCustomerError(`Pedido mínimo de ${money(storeSettings.minimumOrderValue)} em produtos. Adicione mais itens para finalizar.`);
+      }
+
+      const deliveryFee = normalizeDeliveryFee(storeSettings.defaultDeliveryFee);
+      const finalTotal = buildDeliveryTotal(syncedProductsTotal, deliveryFee);
+      const changeForValue = toSafeMoneyNumber(customerChangeFor, 0);
+      if (customerPayment === "Dinheiro" && customerChangeFor !== "" && changeForValue > 0 && changeForValue < finalTotal) {
+        return setCustomerError(`O valor para troco precisa ser maior ou igual ao total do pedido: ${money(finalTotal)}.`);
+      }
+
+      const estimatedDeliveryMinutes = buildEstimatedDeliveryMinutes(deliveries, true);
+      const initialPaymentStatus = customerPayment === "Pix" ? PAYMENT_STATUS.PENDING : PAYMENT_STATUS.RECEIVABLE;
+
+      const newDelivery = {
+        id: Date.now(),
+        cashSessionId: cashSession.id || "",
+        originType: "delivery",
+        orderType: ORDER_TYPE.DELIVERY,
+        client: normalizedCustomerName,
+        phone: normalizedCustomerPhone,
+        address: normalizedAddress,
+        payment: customerPayment,
+        paymentStatus: initialPaymentStatus,
+        changeFor: customerPayment === "Dinheiro" ? customerChangeFor : "",
+        productsTotal: syncedProductsTotal,
+        deliveryFee,
+        courierFee: 0,
+        storeFee: 0,
+        motorcycleType: "",
+        value: finalTotal,
+        estimatedDeliveryMinutes,
+        whatsappStatus: "not_sent",
+        whatsappOpenedAt: "",
+        whatsappSentAt: "",
+        whatsappMessage: "",
+        status: DELIVERY_STATUS.WAITING_STORE_APPROVAL,
+        origin: "customer",
+        needsStoreApproval: true,
+        storeOrderApproved: false,
+        approvedAt: "",
+        reference: customerForm.reference,
+        courierUsername: "ALL",
+        courierName: "Todos os motoboys",
+        notes: "Pedido enviado pelo cliente",
+        items: syncedItems,
+        pickedUpByUsername: "",
+        pickedUpByName: "",
+        pickedUpAt: "",
+        deliveredByUsername: "",
+        deliveredByName: "",
+        deliveredAt: "",
+        ownerApproved: false,
+        ownerApprovedAt: "",
+        launchedAt: new Date().toISOString(),
+      };
+
+      let savedDelivery;
+      try {
+        savedDelivery = await saveDeliveryToSupabase(newDelivery);
+      } catch (error) {
+        return setCustomerError(`Erro ao enviar pedido para a loja: ${error.message || "verifique Supabase."}`);
+      }
+
+      setCustomerForm((previousForm) => ({ ...previousForm, name: normalizedCustomerName, phone: normalizedCustomerPhone, cep: normalizedCustomerCep, state: String(previousForm.state || "").trim().toUpperCase().slice(0, 2) }));
+      setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
+      setProducts((previousProducts) => {
+        const nextProducts = reduceProductStock(previousProducts, syncedItems);
+        persistProductStocks(nextProducts);
+        return nextProducts;
+      });
+      addNotification("novo_pedido", "Novo pedido recebido", `${normalizedCustomerName} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
+      addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${savedDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
+      setCustomerCart([]);
+      setShowCustomerCheckout(false);
+      setCustomerChangeFor("");
+      setCustomerOrderConfirmation(buildOrderConfirmation(savedDelivery));
+      setCustomerError("Pedido enviado para a loja. Aguarde a confirmação.");
+    } finally {
+      setCustomerSubmitting(false);
+    }
   }
 
   function addProductToDelivery(product) {
@@ -3422,6 +3445,7 @@ function App() {
       };
       setDeliveries((previousDeliveries) => previousDeliveries.map((delivery) => delivery.id === id ? { ...delivery, ...localPatch } : delivery));
       await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
+      addNotification("pedido_aprovado", "Pedido aprovado", `Pedido #${id} aprovado pela loja. Em breve um entregador fará a retirada.`, "customer", id, { customerPhone: currentDelivery.phone });
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "courier", id);
       setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
       await loadDeliveries();
@@ -3449,6 +3473,7 @@ function App() {
         })
       );
       await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
+      addNotification("pedido_entregue", "Pedido entregue", `Pedido #${id} foi entregue e finalizado pela loja. Obrigado pela preferência!`, "customer", id, { customerPhone: currentDelivery.phone });
       if (currentDelivery.deliveredByName) {
         addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} finalizado pela loja.`, "courier", id, { courierUsername: currentDelivery.deliveredByUsername || currentDelivery.pickedUpByUsername || currentDelivery.acceptedByUsername });
       }
@@ -3532,6 +3557,7 @@ function App() {
     if (isDeliveryOrder(delivery)) {
       await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
       addNotification("pedido_cancelado", "Pedido cancelado", `Pedido #${id} cancelado. Motivo: ${cancellationText}.`, "loja", id);
+      addNotification("pedido_cancelado_cliente", "Pedido cancelado", `Pedido #${id} foi cancelado pela loja. Motivo: ${cancellationText}.`, "customer", id, { customerPhone: delivery.phone });
       if (delivery.pickedUpByUsername || delivery.acceptedByUsername) {
         addNotification("entrega_cancelada", "Entrega cancelada", `Pedido #${id} foi cancelado pela loja.`, "courier", id, { courierUsername: delivery.pickedUpByUsername || delivery.acceptedByUsername });
       }
@@ -4443,7 +4469,7 @@ function App() {
                     {customerError && <p className={`text-sm ${customerError.includes("enviado") ? "text-emerald-600" : "text-red-600"}`}>{customerError}</p>}
 
                     <div className="grid grid-cols-1 gap-2">
-                      <Button onClick={submitCustomerOrder} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6">Enviar pedido para a loja</Button>
+                      <Button onClick={submitCustomerOrder} disabled={customerSubmitting || safeCustomerCart.length === 0} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6 disabled:opacity-60 disabled:cursor-not-allowed">{customerSubmitting ? "Enviando pedido..." : "Enviar pedido para a loja"}</Button>
                     </div>
                       </div>
                     </div>
