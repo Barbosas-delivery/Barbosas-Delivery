@@ -5,7 +5,7 @@ import { insertWithSchemaRetry, updateWithSchemaRetry } from "./supabaseSchema";
 export function parseJsonNotes(value, fallback) {
   try {
     return value ? JSON.parse(value) : fallback;
-  } catch (_) {
+  } catch {
     return fallback;
   }
 }

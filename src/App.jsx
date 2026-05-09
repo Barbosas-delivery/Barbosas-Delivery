@@ -59,7 +59,6 @@ import {
   TAB_FAST_PAYMENT_BONUS,
   TAB_DELAY_PENALTY,
   TAB_DELAY_LIMIT_HOURS,
-  STORAGE_24_MONTHS_MS,
 } from "./constants/appConstants";
 import {
   initialStoreSettings,
@@ -224,7 +223,9 @@ function keepInputFocused(event, focusKey) {
     if (document.activeElement !== target) target.focus({ preventScroll: true });
     try {
       if (typeof start === "number" && typeof end === "number") target.setSelectionRange(start, end);
-    } catch (_) {}
+    } catch {
+      // Mantém o foco sem interromper a digitação caso o navegador não permita setSelectionRange.
+    }
     window.scrollTo(scrollX, scrollY);
   });
 }
@@ -254,23 +255,6 @@ const ICONS = {
   bell: "🔔",
 };
 
-function readStoredValue(key, fallback) {
-  // Registro permanente deve vir do Supabase. O navegador não é mais usado como apoio.
-  return fallback;
-}
-
-function writeStoredValue(key, value) {
-  // Intencionalmente vazio: nada permanente fica salvo no navegador.
-}
-
-function pruneRecordsByMonths(records, dateFields = ["closedAt", "createdAt", "launchedAt"]) {
-  const minTime = Date.now() - STORAGE_24_MONTHS_MS;
-  return (Array.isArray(records) ? records : []).filter((record) => {
-    const time = dateFields.map((field) => new Date(record?.[field] || 0).getTime()).find((value) => Number.isFinite(value) && value > 0);
-    return !time || time >= minTime;
-  });
-}
-
 function normalizeCustomerCartItem(item, index = 0) {
   if (!item || typeof item !== "object") return null;
   const isKit = item.isKit === true;
@@ -297,12 +281,21 @@ function sanitizeCustomerCart(cart) {
 }
 
 function hasCurrencyValue(text, value) {
-  const normalized = String(text || "").replace(/ /g, " ").replace(/&nbsp;/g, " ");
-  return normalized.includes(money(value).replace(/ /g, " "));
+  const normalized = String(text || "").replace(/\u00a0/g, " ").replace(/&nbsp;/g, " ");
+  return normalized.includes(money(value).replace(/\u00a0/g, " "));
 }
 
 function hasDuplicateBarcode(products, barcode) {
   return products.some((product) => String(product.barcode) === String(barcode));
+}
+
+function hasDuplicateClientRecord(clients, client, currentClientId = null) {
+  const normalizedPhone = onlyPhoneNumbers(client?.phone);
+  if (!normalizedPhone) return false;
+  return (Array.isArray(clients) ? clients : []).some((existingClient) => {
+    if (currentClientId !== null && String(existingClient.id) === String(currentClientId)) return false;
+    return onlyPhoneNumbers(existingClient.phone) === normalizedPhone;
+  });
 }
 
 function isProductBarcodeAvailable(products, barcode, currentProductId) {
@@ -486,14 +479,6 @@ function getCartMatchKey(item) {
 
 function getDateInputValue(date) {
   return date.toISOString().slice(0, 10);
-}
-
-function isDateInRange(isoDate, startDate, endDate) {
-  if (!isoDate) return false;
-  const value = isoDate.slice(0, 10);
-  if (startDate && value < startDate) return false;
-  if (endDate && value > endDate) return false;
-  return true;
 }
 
 function isCustomerFormComplete(customer) {
@@ -975,7 +960,9 @@ function App() {
   async function registerAppError(source, error, metadata = {}) {
     try {
       await writeAppError(source, error, metadata);
-    } catch (_) {}
+    } catch {
+      // Falha de auditoria de erro não deve travar o fluxo principal.
+    }
   }
 
 
@@ -1316,7 +1303,6 @@ function App() {
   const [tabProductSearch, setTabProductSearch] = useState("");
   const [tabProductSearchByTab, setTabProductSearchByTab] = useState({});
   const [tabLimitDrafts, setTabLimitDrafts] = useState({});
-  const [tabProductSelectByTab, setTabProductSelectByTab] = useState({});
   const [tabProductQuantityByTab, setTabProductQuantityByTab] = useState({});
   const [closingTabId, setClosingTabId] = useState(null);
   const [tabClosingPayment, setTabClosingPayment] = useState("Dinheiro");
@@ -1560,7 +1546,9 @@ function App() {
         audio.play().catch(() => {});
       }
       if (notification.audience === "courier" && navigator.vibrate) navigator.vibrate([160, 80, 160]);
-    } catch (_) {}
+    } catch {
+      // Alertas sonoros e vibração são recursos opcionais do navegador.
+    }
   }
 
   async function markNotificationsRead(audience, courierUsername = "", customerPhone = "") {
@@ -1684,7 +1672,7 @@ function App() {
       if (!response.ok || data.erro) return setCustomerError("CEP não encontrado. Confira o número digitado ou preencha manualmente.");
       setCustomerForm((previousForm) => ({ ...previousForm, cep: formatCep(cepNumbers), street: data.logradouro || previousForm.street, district: data.bairro || previousForm.district, city: data.localidade || previousForm.city, state: data.uf || previousForm.state }));
       setCustomerError("Endereço encontrado. Confira rua, número e bairro antes de continuar.");
-    } catch (error) {
+    } catch {
       setCustomerError("Não foi possível consultar o CEP agora. Preencha o endereço manualmente.");
     }
   }
@@ -2133,7 +2121,7 @@ function App() {
         )
       );
       setLastAction("Endereço do cliente atualizado pelo CEP.");
-    } catch (error) {
+    } catch {
       setLastAction("Não foi possível consultar o CEP agora. Edite o endereço manualmente.");
     }
   }
@@ -2159,7 +2147,8 @@ function App() {
     }
 
     const formattedClient = mapClientToDatabase(client);
-    const { id: _ignoredId, ...clientPatch } = formattedClient;
+    const clientPatch = { ...formattedClient };
+    delete clientPatch.id;
     const { error, ignoredColumns } = await updateClientInSupabase(id, clientPatch);
 
     if (error) {
@@ -2369,7 +2358,8 @@ function App() {
       return;
     }
     const formattedCourier = mapCourierToDatabase(courier);
-    const { id: _ignoredId, ...courierPatch } = formattedCourier;
+    const courierPatch = { ...formattedCourier };
+    delete courierPatch.id;
     const { error, ignoredColumns } = await updateCourierInSupabase(id, courierPatch);
     if (error || ignoredColumns.includes("password")) {
       console.error("Erro ao salvar entregador no Supabase:", error, ignoredColumns);
@@ -2390,7 +2380,7 @@ function App() {
       if (!response.ok || data.erro) return setLastAction("CEP não encontrado. Confira o número digitado.");
       setNewClient((previousClient) => ({ ...previousClient, cep: formatCep(cepNumbers), street: data.logradouro || previousClient.street, district: data.bairro || previousClient.district, city: data.localidade || previousClient.city, state: data.uf || previousClient.state }));
       setLastAction("CEP encontrado: " + data.localidade + "/" + data.uf + ". Confira rua, bairro e número antes de cadastrar.");
-    } catch (error) {
+    } catch {
       setLastAction("Não foi possível consultar o CEP agora. Preencha o endereço manualmente.");
     }
   }
@@ -3597,11 +3587,6 @@ function App() {
     const nextTab = { ...tab, items: (tab.items || []).filter((item) => Number(item.id) !== Number(productId)) };
     try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Item não removido no Supabase: ${error.message || "verifique tab_accounts."}`); }
     setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
-  }
-
-
-  function updateTabPayment(tabId, payment) {
-    setTabsAccounts((previous) => previous.map((tab) => tab.id === tabId ? { ...tab, payment } : tab));
   }
 
   function startClosingTab(tabId) {
@@ -5567,6 +5552,7 @@ function OwnerDeliveryCard({ delivery, onPrint, onApprove, onManualConfirm, onCa
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full md:w-auto">
             <Button onClick={() => onApprove(delivery.id)} disabled={!isDeliveryOrder(delivery) || (!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>
             <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
+            <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">Confirmar pagamento</Button>
             <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">Cancelar pedido</Button>
             <Button onClick={() => onManualConfirm(delivery.id)} disabled={!isDeliveryOrder(delivery) || isWaitingOrderApproval || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>
           </div>
