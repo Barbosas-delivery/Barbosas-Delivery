@@ -8,6 +8,42 @@ export function normalizeStoreLogin(value) {
   return normalizeStoreCredential(value).toLowerCase();
 }
 
+export const STORE_USER_ROLES = [
+  { value: "admin", label: "Administrador" },
+  { value: "gerente", label: "Gerente" },
+  { value: "caixa", label: "Caixa" },
+  { value: "operador", label: "Operador" },
+];
+
+export function normalizeStoreRole(role) {
+  const normalizedRole = String(role || "operador").trim().toLowerCase();
+  return STORE_USER_ROLES.some((item) => item.value === normalizedRole) ? normalizedRole : "operador";
+}
+
+export function getStoreRoleLabel(role) {
+  const normalizedRole = normalizeStoreRole(role);
+  return STORE_USER_ROLES.find((item) => item.value === normalizedRole)?.label || "Operador";
+}
+
+export function isStoreAdminRole(role) {
+  return normalizeStoreRole(role) === "admin";
+}
+
+export function canManageStoreUsers(role) {
+  return isStoreAdminRole(role);
+}
+
+export function canAccessStoreTab(role, tabId) {
+  const normalizedRole = normalizeStoreRole(role);
+  if (normalizedRole === "admin") return true;
+  const permissions = {
+    gerente: ["dashboard", "products", "kits", "promos", "deliveries", "counter", "cash", "tabs", "settings", "clients", "couriers"],
+    caixa: ["dashboard", "deliveries", "counter", "cash", "tabs", "clients"],
+    operador: ["dashboard", "deliveries", "counter", "clients"],
+  };
+  return (permissions[normalizedRole] || permissions.operador).includes(tabId);
+}
+
 export function isValidLogin(login, password) {
   // Fallback legado para não travar a operação caso a tabela store_users ainda não exista.
   // A regra principal do Bloco 3 passa a ser validar a loja em store_users no Supabase.

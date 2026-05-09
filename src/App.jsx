@@ -164,6 +164,11 @@ import {
 import {
   normalizeStoreCredential,
   normalizeStoreLogin,
+  STORE_USER_ROLES,
+  normalizeStoreRole,
+  getStoreRoleLabel,
+  canManageStoreUsers,
+  canAccessStoreTab,
   isValidLogin,
   isStoreLoginLocked,
   getStoreLockMessage,
@@ -852,6 +857,10 @@ class AppErrorBoundary extends React.Component {
 function App() {
   const [isLogged, setIsLogged] = useState(false);
   const [storeSession, setStoreSession] = useState(null);
+  const [storeUsers, setStoreUsers] = useState([]);
+  const [storeUsersStatus, setStoreUsersStatus] = useState("");
+  const [editingStoreUserId, setEditingStoreUserId] = useState(null);
+  const [newStoreUser, setNewStoreUser] = useState({ name: "", username: "", email: "", password: generateStrongPassword(), role: "operador", active: true });
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -1146,10 +1155,129 @@ function App() {
       username: normalizeStoreLogin(row.username || row.login || row.email),
       email: normalizeStoreLogin(row.email || ""),
       password: normalizeStoreCredential(row.password || row.password_text || row.password_hash || ""),
-      role: row.role || "operador",
+      role: normalizeStoreRole(row.role || "operador"),
       active: isTruthyActive(row.active),
       createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
     };
+  }
+
+  function mapStoreUserToDatabase(user) {
+    return {
+      name: String(user.name || "").trim(),
+      username: normalizeStoreLogin(user.username),
+      email: normalizeStoreLogin(user.email || ""),
+      password: normalizeStoreCredential(user.password),
+      role: normalizeStoreRole(user.role),
+      active: user.active !== false,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function getCurrentStoreRole() {
+    return normalizeStoreRole(storeSession?.role);
+  }
+
+  function canCurrentStoreAccess(tabId) {
+    return canAccessStoreTab(getCurrentStoreRole(), tabId);
+  }
+
+  function canCurrentStoreManageUsers() {
+    return canManageStoreUsers(getCurrentStoreRole());
+  }
+
+  async function loadStoreUsers() {
+    try {
+      const { data, error } = await supabase.from("store_users").select("*").order("created_at", { ascending: false });
+      if (error) {
+        const message = String(error.message || "").toLowerCase();
+        const unavailable = error.code === "42P01" || message.includes("store_users") || message.includes("does not exist") || message.includes("schema cache");
+        setStoreUsersStatus(unavailable ? "Crie a tabela store_users para liberar o gerenciamento de acessos da loja." : `Não foi possível carregar usuários: ${error.message}`);
+        return [];
+      }
+      const mappedUsers = (Array.isArray(data) ? data : []).map(mapStoreUserFromDatabase);
+      setStoreUsers(mappedUsers);
+      setStoreUsersStatus(mappedUsers.length ? "Usuários carregados do Supabase." : "Nenhum usuário cadastrado no Supabase ainda.");
+      return mappedUsers;
+    } catch (error) {
+      setStoreUsersStatus(`Erro ao carregar usuários: ${error.message || error}`);
+      return [];
+    }
+  }
+
+  function hasDuplicateStoreUser(value, currentId = null) {
+    const normalizedValue = normalizeStoreLogin(value);
+    if (!normalizedValue) return false;
+    return storeUsers.some((user) => user.id !== currentId && (normalizeStoreLogin(user.username) === normalizedValue || normalizeStoreLogin(user.email) === normalizedValue));
+  }
+
+  async function addStoreUser() {
+    if (!canCurrentStoreManageUsers()) return setLastAction("Apenas administradores podem criar acessos da loja.");
+    const payload = mapStoreUserToDatabase(newStoreUser);
+    if (!payload.name || !payload.username || !payload.password) return setLastAction("Preencha nome, usuário e senha do novo acesso.");
+    if (hasDuplicateStoreUser(payload.username) || (payload.email && hasDuplicateStoreUser(payload.email))) return setLastAction("Esse usuário ou e-mail já está cadastrado.");
+    if (!isStrongPassword(payload.password)) return setLastAction("Senha fraca. Gere uma senha forte antes de criar o acesso.");
+
+    const { data, error } = await supabase.from("store_users").insert({ ...payload, created_at: new Date().toISOString() }).select("*").single();
+    if (error) {
+      await registerAppError("store_users_insert", error, { username: payload.username });
+      return setLastAction(`Usuário da loja não salvo: ${error.message || "verifique a tabela store_users e as policies de INSERT."}`);
+    }
+
+    const savedUser = mapStoreUserFromDatabase(data);
+    setStoreUsers((previousUsers) => [savedUser, ...previousUsers]);
+    setNewStoreUser({ name: "", username: "", email: "", password: generateStrongPassword(), role: "operador", active: true });
+    setLastAction(`Acesso criado para ${savedUser.name}. Usuário: ${savedUser.username} • Perfil: ${getStoreRoleLabel(savedUser.role)}`);
+    await auditAction("create_store_user", "store_users", savedUser.id || savedUser.username, { username: savedUser.username, role: savedUser.role }, null, "store", getCurrentStoreUserName());
+  }
+
+  function updateStoreUserField(id, field, value) {
+    setStoreUsers((previousUsers) => previousUsers.map((user) => (user.id === id ? { ...user, [field]: value } : user)));
+  }
+
+  function regenerateStoreUserPassword(id = null) {
+    const nextPassword = generateStrongPassword();
+    if (!id) {
+      setNewStoreUser((previousUser) => ({ ...previousUser, password: nextPassword }));
+      return setLastAction("Nova senha forte gerada para o novo acesso da loja.");
+    }
+    setStoreUsers((previousUsers) => previousUsers.map((user) => (user.id === id ? { ...user, password: nextPassword } : user)));
+    setLastAction("Nova senha forte gerada para o acesso selecionado.");
+  }
+
+  async function saveStoreUserEdits(id) {
+    if (!canCurrentStoreManageUsers()) return setLastAction("Apenas administradores podem editar acessos da loja.");
+    const user = storeUsers.find((item) => item.id === id);
+    if (!user) return;
+    const payload = mapStoreUserToDatabase(user);
+    if (!payload.name || !payload.username || !payload.password) return setLastAction("Nome, usuário e senha são obrigatórios.");
+    if (hasDuplicateStoreUser(payload.username, id) || (payload.email && hasDuplicateStoreUser(payload.email, id))) return setLastAction("Esse usuário ou e-mail já pertence a outro acesso.");
+    if (!isStrongPassword(payload.password)) return setLastAction("Senha fraca. Gere uma senha forte antes de salvar.");
+
+    const { data, error } = await supabase.from("store_users").update(payload).eq("id", id).select("*").single();
+    if (error) {
+      await registerAppError("store_users_update", error, { id });
+      return setLastAction(`Acesso não atualizado: ${error.message || "verifique UPDATE em store_users."}`);
+    }
+
+    const savedUser = mapStoreUserFromDatabase(data);
+    setStoreUsers((previousUsers) => previousUsers.map((item) => (item.id === id ? savedUser : item)));
+    setEditingStoreUserId(null);
+    setLastAction(`Acesso de ${savedUser.name} atualizado.`);
+    await auditAction("update_store_user", "store_users", savedUser.id || savedUser.username, { username: savedUser.username, role: savedUser.role, active: savedUser.active }, null, "store", getCurrentStoreUserName());
+  }
+
+  async function toggleStoreUserStatus(id) {
+    if (!canCurrentStoreManageUsers()) return setLastAction("Apenas administradores podem bloquear ou ativar acessos.");
+    const user = storeUsers.find((item) => item.id === id);
+    if (!user) return;
+    if (String(storeSession?.id || "") === String(id) && user.active) return setLastAction("Você não pode bloquear o próprio acesso em uso.");
+    const payload = { active: !user.active, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase.from("store_users").update(payload).eq("id", id).select("*").single();
+    if (error) return setLastAction(`Status do acesso não atualizado: ${error.message || "verifique UPDATE em store_users."}`);
+    const savedUser = mapStoreUserFromDatabase(data);
+    setStoreUsers((previousUsers) => previousUsers.map((item) => (item.id === id ? savedUser : item)));
+    setLastAction(`${savedUser.name} ${savedUser.active ? "ativado" : "bloqueado"}.`);
   }
 
   async function findStoreUserByLoginCredentials(inputLogin, inputPassword) {
@@ -1196,8 +1324,24 @@ function App() {
     setIsLogged(false);
     setStoreSession(null);
     setPassword("");
+    setStoreUsers([]);
+    setStoreUsersStatus("");
     setLastAction("Sessão da loja encerrada com segurança.");
   }
+
+  useEffect(() => {
+    if (!isLogged || !canCurrentStoreManageUsers()) return;
+    loadStoreUsers();
+    // O carregamento deve acontecer somente quando a sessão/perfil mudar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLogged, storeSession?.role]);
+
+  useEffect(() => {
+    if (!isLogged || canCurrentStoreAccess(activeTab)) return;
+    setActiveTab("dashboard");
+    // A validação de aba deve acompanhar apenas sessão, perfil e aba ativa.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLogged, activeTab, storeSession?.role]);
 
   async function loadDeliveries() {
     const result = await loadDeliveriesFromSupabase();
@@ -4476,7 +4620,10 @@ function App() {
     { id: "settings", label: "Configurações", icon: "save" },
     { id: "clients", label: "Clientes", icon: "users" },
     { id: "couriers", label: "Entregadores", icon: "truck" },
+    { id: "access", label: "Acessos", icon: "users" },
   ];
+
+  const visibleTabs = tabs.filter((tab) => canCurrentStoreAccess(tab.id));
 
   if (loggedCourier) {
     return (
@@ -5015,7 +5162,7 @@ function App() {
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)] gap-4 xl:gap-6">
           <aside className="bg-white rounded-3xl p-2 shadow-sm border border-zinc-200 h-fit sticky top-[92px] z-10 overflow-x-auto whitespace-nowrap xl:whitespace-normal xl:sticky xl:top-28 -mx-1 xl:mx-0 flex xl:block gap-2">
-            {tabs.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`shrink-0 xl:w-full flex items-center gap-2 xl:gap-3 px-4 py-3 rounded-2xl text-left transition ${activeTab === tab.id ? "bg-zinc-950 text-white" : "hover:bg-zinc-100 text-zinc-700"}`}><Icon name={tab.icon} /><span className="font-medium">{tab.label}</span></button>)}
+            {visibleTabs.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`shrink-0 xl:w-full flex items-center gap-2 xl:gap-3 px-4 py-3 rounded-2xl text-left transition ${activeTab === tab.id ? "bg-zinc-950 text-white" : "hover:bg-zinc-100 text-zinc-700"}`}><Icon name={tab.icon} /><span className="font-medium">{tab.label}</span></button>)}
           </aside>
 
           <section className="space-y-6 min-w-0">
@@ -6231,6 +6378,98 @@ function App() {
                                   <Button onClick={() => setEditingCourierId(null)} variant="secondary" className="rounded-2xl">Cancelar</Button>
                                   <Button onClick={() => saveCourierEdits(courier.id)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Salvar alterações</Button>
                                 </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardBox>
+              </div>
+            )}
+
+            {activeTab === "access" && (
+              <div className="space-y-6">
+                <Title title="Acessos da loja" subtitle="Crie usuários internos e limite o que cada perfil pode abrir no painel da loja." />
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <Metric title="Usuários ativos" value={storeUsers.filter((user) => user.active).length} icon="users" />
+                  <Metric title="Administradores" value={storeUsers.filter((user) => normalizeStoreRole(user.role) === "admin" && user.active).length} icon="user" />
+                  <Metric title="Bloqueados" value={storeUsers.filter((user) => !user.active).length} icon="lock" />
+                  <Metric title="Perfil atual" value={getStoreRoleLabel(getCurrentStoreRole())} icon="save" />
+                </div>
+
+                <CardBox>
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                    <div>
+                      <h3 className="font-bold text-lg">Novo usuário da loja</h3>
+                      <p className="text-sm text-zinc-500 mt-1">Apenas administradores conseguem criar, editar ou bloquear acessos.</p>
+                    </div>
+                    <Button onClick={loadStoreUsers} variant="secondary" className="rounded-2xl">Atualizar lista</Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mt-4">
+                    <Input label="Nome" value={newStoreUser.name} onChange={(value) => setNewStoreUser({ ...newStoreUser, name: value })} placeholder="Ex: Operador Caixa" />
+                    <Input label="Usuário" value={newStoreUser.username} onChange={(value) => setNewStoreUser({ ...newStoreUser, username: value })} placeholder="Ex: caixa01" />
+                    <Input label="E-mail opcional" value={newStoreUser.email} onChange={(value) => setNewStoreUser({ ...newStoreUser, email: value })} placeholder="opcional" />
+                    <Input label="Senha forte" value={newStoreUser.password} onChange={(value) => setNewStoreUser({ ...newStoreUser, password: value })} />
+                    <label className="block">
+                      <span className="text-xs font-medium text-zinc-600">Perfil</span>
+                      <select value={newStoreUser.role} onChange={(event) => setNewStoreUser({ ...newStoreUser, role: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                        {STORE_USER_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex flex-col gap-2 md:justify-end">
+                      <Button onClick={() => regenerateStoreUserPassword()} variant="secondary" className="rounded-2xl">Gerar senha</Button>
+                      <Button onClick={addStoreUser} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Criar acesso</Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Perfis: Administrador vê tudo e gerencia acessos. Gerente vê operação e cadastros. Caixa vê vendas/caixa/comandas. Operador vê painel, entregas, balcão e clientes.
+                  </div>
+                  {storeUsersStatus && <p className="mt-3 text-sm text-zinc-500">{storeUsersStatus}</p>}
+                </CardBox>
+
+                <CardBox>
+                  <h3 className="font-bold text-lg mb-4">Usuários cadastrados</h3>
+                  <div className="grid gap-3">
+                    {storeUsers.length === 0 && <p className="text-sm text-zinc-500">Nenhum usuário carregado. Rode a migração da Fase 24 e clique em Atualizar lista.</p>}
+                    {storeUsers.map((user) => {
+                      const isEditing = editingStoreUserId === user.id;
+                      return (
+                        <div key={user.id || user.username} className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 space-y-3">
+                          {!isEditing ? (
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                              <div>
+                                <p className="font-bold">{user.name}</p>
+                                <p className="text-sm text-zinc-600">Usuário: {user.username} {user.email ? `• ${user.email}` : ""}</p>
+                                <p className="text-sm text-zinc-500">Perfil: {getStoreRoleLabel(user.role)} • Status: {user.active ? "Ativo" : "Bloqueado"}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button onClick={() => setEditingStoreUserId(user.id)} variant="secondary" className="rounded-2xl">Editar</Button>
+                                <Button onClick={() => toggleStoreUserStatus(user.id)} variant="secondary" className={`rounded-2xl ${user.active ? "text-red-700" : "text-emerald-700"}`}>{user.active ? "Bloquear" : "Ativar"}</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                                <Input label="Nome" value={user.name} onChange={(value) => updateStoreUserField(user.id, "name", value)} />
+                                <Input label="Usuário" value={user.username} onChange={(value) => updateStoreUserField(user.id, "username", value)} />
+                                <Input label="E-mail" value={user.email} onChange={(value) => updateStoreUserField(user.id, "email", value)} />
+                                <Input label="Senha" value={user.password} onChange={(value) => updateStoreUserField(user.id, "password", value)} />
+                                <label className="block">
+                                  <span className="text-xs font-medium text-zinc-600">Perfil</span>
+                                  <select value={normalizeStoreRole(user.role)} onChange={(event) => updateStoreUserField(user.id, "role", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                                    {STORE_USER_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                                  </select>
+                                </label>
+                              </div>
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button onClick={() => regenerateStoreUserPassword(user.id)} variant="secondary" className="rounded-2xl">Gerar nova senha</Button>
+                                <Button onClick={() => setEditingStoreUserId(null)} variant="secondary" className="rounded-2xl">Cancelar</Button>
+                                <Button onClick={() => saveStoreUserEdits(user.id)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Salvar acesso</Button>
                               </div>
                             </div>
                           )}
