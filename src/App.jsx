@@ -3048,6 +3048,66 @@ function App() {
     if (printed) auditAction("print_product_sales_report", "reports", `${reportRange.startDate}_${reportRange.endDate}`, { products: topProducts.length });
   }
 
+  function setReportQuickRange(kind) {
+    const now = new Date();
+    const toInputDate = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+    const today = toInputDate(now);
+    if (kind === "today") {
+      setReportRange({ startDate: today, endDate: today });
+      return;
+    }
+    if (kind === "last7") {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 6);
+      setReportRange({ startDate: toInputDate(start), endDate: today });
+      return;
+    }
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    setReportRange({ startDate: toInputDate(startOfMonth), endDate: today });
+  }
+
+  function exportPeriodSalesCsv() {
+    const headers = ["Pedido", "Data", "Cliente", "Telefone", "Tipo", "Status", "Pagamento", "Status pagamento", "Subtotal produtos", "Taxa entrega", "Desconto", "Total"];
+    const rows = periodSalesReport.orders.map((order) => [
+      getOrderLabel(order),
+      order.launchedAt || order.createdAt || "",
+      order.client || order.customerName || "",
+      formatBrazilMobilePhone(order.phone || ""),
+      isDeliveryOrder(order) ? "Entrega" : "Balcão/Comanda",
+      order.status || "",
+      order.payment || "",
+      order.paymentStatus || "",
+      toSafeMoneyNumber(order.productsTotal, buildDiscountedProductsTotal(buildOrderTotal(order.items || []), normalizeDiscount(order.discount, buildOrderTotal(order.items || [])))).toFixed(2).replace(".", ","),
+      toSafeMoneyNumber(order.deliveryFee, 0).toFixed(2).replace(".", ","),
+      toSafeMoneyNumber(order.discount, 0).toFixed(2).replace(".", ","),
+      toSafeMoneyNumber(order.value, 0).toFixed(2).replace(".", ","),
+    ]);
+    downloadCsvFile(`barbosas-vendas-${buildReportFileDate()}.csv`, headers, rows);
+    auditAction("export_period_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
+    setLastAction("Relatório de vendas exportado em CSV.");
+  }
+
+  function exportProductSalesCsv() {
+    const headers = ["Produto", "Tipo", "Quantidade", "Pedidos", "Ticket médio", "Total vendido"];
+    const rows = productSalesReport.map((row) => [row.name, row.kind || "Produto", row.quantity, row.orders, money(row.averageTicket), money(row.total)]);
+    downloadCsvFile(`barbosas-produtos-${buildReportFileDate()}.csv`, headers, rows);
+    auditAction("export_product_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
+    setLastAction("Ranking de produtos exportado em CSV.");
+  }
+
+  function exportCategorySalesCsv() {
+    const headers = ["Categoria", "Itens vendidos", "Produtos", "Total vendido"];
+    const rows = categorySalesReport.map((row) => [row.category, row.quantity, row.products, money(row.total)]);
+    downloadCsvFile(`barbosas-categorias-${buildReportFileDate()}.csv`, headers, rows);
+    auditAction("export_category_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
+    setLastAction("Relatório de categorias exportado em CSV.");
+  }
+
   function printCashClosingFromRecord(closing) {
     const report = closing.closingSnapshot || {
       totalSold: closing.totalSold || 0,
@@ -3955,9 +4015,8 @@ function App() {
     setLastAction("Configurações da loja restauradas para o padrão inicial e serão sincronizadas no Supabase quando possível.");
   }
 
-  function downloadJsonFile(filename, payload) {
-    const json = JSON.stringify(payload, null, 2);
-    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  function downloadFile(filename, content, type = "text/plain;charset=utf-8") {
+    const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -3966,6 +4025,26 @@ function App() {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function downloadJsonFile(filename, payload) {
+    downloadFile(filename, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+  }
+
+  function csvValue(value) {
+    const text = String(value ?? "");
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  function downloadCsvFile(filename, headers, rows) {
+    const csv = [headers, ...rows].map((row) => row.map(csvValue).join(";")).join("\n");
+    downloadFile(filename, `\uFEFF${csv}`, "text/csv;charset=utf-8");
+  }
+
+  function buildReportFileDate() {
+    const start = reportRange.startDate || "inicio";
+    const end = reportRange.endDate || "hoje";
+    return `${start}_a_${end}`;
   }
 
   function exportOperationalBackup() {
@@ -5356,12 +5435,21 @@ function App() {
                       <h3 className="font-bold text-lg">Relatório de vendas por período</h3>
                       <p className="text-sm text-zinc-500">Busca por data com Pix, débito, crédito, dinheiro, pendências e cancelamentos.</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 w-full md:w-auto">
-                      <Input label="Data inicial" type="date" value={reportRange.startDate} onChange={(value) => setReportRange({ ...reportRange, startDate: value })} />
-                      <Input label="Data final" type="date" value={reportRange.endDate} onChange={(value) => setReportRange({ ...reportRange, endDate: value })} />
+                    <div className="grid gap-2 w-full md:w-auto">
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input label="Data inicial" type="date" value={reportRange.startDate} onChange={(value) => setReportRange({ ...reportRange, startDate: value })} />
+                        <Input label="Data final" type="date" value={reportRange.endDate} onChange={(value) => setReportRange({ ...reportRange, endDate: value })} />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button onClick={() => setReportQuickRange("today")} variant="secondary" className="rounded-xl px-3 py-2 text-xs">Hoje</Button>
+                        <Button onClick={() => setReportQuickRange("last7")} variant="secondary" className="rounded-xl px-3 py-2 text-xs">7 dias</Button>
+                        <Button onClick={() => setReportQuickRange("month")} variant="secondary" className="rounded-xl px-3 py-2 text-xs">Mês</Button>
+                      </div>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Metric title="Pedidos válidos" value={periodSalesReport.totalOrders || 0} icon="box" />
+                    <Metric title="Ticket médio" value={money(periodSalesReport.averageTicket || 0)} icon="money" />
                     <Metric title="Total vendido" value={money(periodSalesReport.totalSold)} icon="money" />
                     <Metric title="Total recebido" value={money(periodSalesReport.totalPaid)} icon="check" />
                     <Metric title="Pix" value={money(periodSalesReport.byPayment?.Pix || 0)} icon="money" />
@@ -5379,9 +5467,12 @@ function App() {
                       <h3 className="font-bold text-lg">Produtos mais vendidos</h3>
                       <p className="text-sm text-zinc-500">Ranking por quantidade e valor vendido no período pesquisado.</p>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Button onClick={printPeriodSalesReport} className="rounded-2xl">Imprimir relatório de vendas</Button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+                      <Button onClick={printPeriodSalesReport} className="rounded-2xl">Imprimir vendas</Button>
                       <Button onClick={printProductSalesReport} variant="secondary" className="rounded-2xl">Imprimir produtos</Button>
+                      <Button onClick={exportPeriodSalesCsv} variant="secondary" className="rounded-2xl">CSV vendas</Button>
+                      <Button onClick={exportProductSalesCsv} variant="secondary" className="rounded-2xl">CSV produtos</Button>
+                      <Button onClick={exportCategorySalesCsv} variant="secondary" className="rounded-2xl">CSV categorias</Button>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

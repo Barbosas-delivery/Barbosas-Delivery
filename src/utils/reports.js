@@ -230,13 +230,20 @@ export function buildPeriodSalesReport(deliveries, startDate, endDate, orderPaym
   }
 
   const totalPaid = Object.values(byPayment).reduce((sum, value) => sum + toSafeMoneyNumber(value, 0), 0);
+  const paidOrders = activeOrders.filter((delivery) => delivery.paymentStatus === PAYMENT_STATUS.PAID);
+  const pendingOrders = activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID);
+  const totalSold = activeOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0);
   return {
     orders: periodDeliveries,
     activeOrders,
     cancelledOrders,
-    totalSold: activeOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+    paidOrders,
+    pendingOrders,
+    totalOrders: activeOrders.length,
+    totalSold,
     totalPaid,
-    pendingAmount: activeOrders.filter((delivery) => delivery.paymentStatus !== PAYMENT_STATUS.PAID).reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
+    averageTicket: activeOrders.length ? totalSold / activeOrders.length : 0,
+    pendingAmount: pendingOrders.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
     byPayment,
     deliveryOrders: activeOrders.filter((delivery) => isDeliveryOrder(delivery)).length,
     counterOrders: activeOrders.filter((delivery) => isCounterOrder(delivery)).length,
