@@ -6,6 +6,7 @@ Sistema de delivery, PDV, entregas, caixa, estoque, cupons, notificações, impr
 
 - [Manual de instalação e operação](./MANUAL-DO-SISTEMA.md)
 - [Checklist de teste real de produção](./CHECKLIST-TESTE-PRODUCAO.md)
+- [Histórico de fases](./docs/HISTORICO-DE-FASES.md)
 
 ## Comandos principais
 
@@ -16,5 +17,9 @@ npm run build
 ```
 ## Diagnóstico
 
-A Fase 30 adiciona a aba **Diagnóstico** para conferir ambiente, Supabase, PWA, impressão e dados carregados. Veja `docs/DIAGNOSTICO-SISTEMA.md`.
+A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA, impressão e dados carregados. Veja `docs/DIAGNOSTICO-SISTEMA.md`.
 
+
+## Versão atual
+
+`6.0.0-fase-32`

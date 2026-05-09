@@ -4565,7 +4565,7 @@ function App() {
     const createdAt = new Date().toISOString();
     const backup = {
       app: "Barbosas Delivery",
-      version: "fase-16-backup-operacional",
+      version: APP_VERSION,
       createdAt,
       storeSettings: sanitizeStoreSettings(storeSettings),
       products,
