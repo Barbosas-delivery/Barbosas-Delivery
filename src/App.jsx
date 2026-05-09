@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { insertWithSchemaRetry, updateWithSchemaRetry } from "./services/supabaseSchema";
 import {
@@ -1060,6 +1060,7 @@ function App() {
     }
 
     setDeliveries(result.data || []);
+    setDeliveriesLoaded(true);
     console.log("PDV Entregas sincronizado:", result.counts || {});
   }
 
@@ -1300,6 +1301,10 @@ function App() {
   const [editingCourierId, setEditingCourierId] = useState(null);
   const [editingProductId, setEditingProductId] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
+  const knownDeliveryIdsRef = useRef(new Set());
+  const autoPrintedDeliveryIdsRef = useRef(new Set());
+  const autoPrintInitializedRef = useRef(false);
   const [orderPayments, setOrderPayments] = useState([]);
   const [cashSession, setCashSession] = useState({ isOpen: false, id: "", openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
   const [openingCashInput, setOpeningCashInput] = useState("");
@@ -2943,6 +2948,22 @@ function App() {
   }
 
 
+  function shouldAutoPrintIncomingCustomerOrder(delivery) {
+    if (!delivery || !isDeliveryOrder(delivery)) return false;
+    if (String(delivery.id || "") === "") return false;
+    if (delivery.status !== DELIVERY_STATUS.WAITING_STORE_APPROVAL) return false;
+    if (delivery.origin !== "customer") return false;
+    if (autoPrintedDeliveryIdsRef.current.has(String(delivery.id))) return false;
+    return true;
+  }
+
+  function registerDeliveryAsPrinted(deliveryId) {
+    const normalizedId = String(deliveryId || "");
+    if (!normalizedId) return;
+    autoPrintedDeliveryIdsRef.current.add(normalizedId);
+    knownDeliveryIdsRef.current.add(normalizedId);
+  }
+
   function printDeliveryReceipt(delivery, copies = 1, printOptions = {}) {
     const itemsHtml = buildReceiptItemsHtml(delivery.items || []);
     const isDelivery = isDeliveryOrder(delivery);
@@ -2975,6 +2996,37 @@ function App() {
     }
     return printed;
   }
+
+  useEffect(() => {
+    if (!deliveriesLoaded) return;
+
+    const currentIds = new Set(deliveries.map((delivery) => String(delivery.id || "")).filter(Boolean));
+
+    if (!autoPrintInitializedRef.current) {
+      knownDeliveryIdsRef.current = currentIds;
+      autoPrintInitializedRef.current = true;
+      return;
+    }
+
+    const knownIds = knownDeliveryIdsRef.current;
+    const newCustomerOrders = deliveries
+      .filter((delivery) => !knownIds.has(String(delivery.id || "")) && shouldAutoPrintIncomingCustomerOrder(delivery))
+      .sort((first, second) => new Date(first.launchedAt || first.createdAt || 0).getTime() - new Date(second.launchedAt || second.createdAt || 0).getTime());
+
+    knownDeliveryIdsRef.current = currentIds;
+
+    if (!isLogged || newCustomerOrders.length === 0) return;
+
+    newCustomerOrders.forEach((delivery) => {
+      const printed = printDeliveryReceipt(delivery, 2, { autoPrint: true });
+      if (printed) {
+        registerDeliveryAsPrinted(delivery.id);
+        setLastAction(`Pedido #${delivery.id} recebido do cliente e impressão aberta automaticamente.`);
+      } else {
+        setLastAction(`Pedido #${delivery.id} recebido. O navegador bloqueou a impressão automática; clique em Reimprimir no pedido.`);
+      }
+    });
+  }, [deliveries, deliveriesLoaded, isLogged]);
 
   async function launchCounterSale() {
     if (!isCashOpen) return setLastAction("Abra o caixa antes de usar o PDV Balcão.");
@@ -3120,6 +3172,7 @@ function App() {
     });
     addNotification("pedido_pdv_entrega", "Pedido lançado no PDV Entregas", `Pedido #${savedDelivery.id} de ${selectedDeliveryClient.name} foi lançado com total de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
     addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${savedDelivery.id} liberado para retirada na loja.`, "courier", savedDelivery.id);
+    registerDeliveryAsPrinted(savedDelivery.id);
     printDeliveryReceipt(savedDelivery, 2);
     setDeliveryDraft({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: storeSettings.defaultDeliveryFee, discount: 0 });
     setDeliveryProductSearch("");
