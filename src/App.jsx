@@ -1540,6 +1540,17 @@ function App() {
     return getCustomerProductCartItems(productId).reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 0), 0);
   }
 
+  function decreaseCustomerProductCartQuantity(productId) {
+    const firstCartItem = getCustomerProductCartItems(productId)[0];
+    if (!firstCartItem) return;
+    const currentQuantity = toPositiveInteger(firstCartItem.quantity, 1);
+    if (currentQuantity <= 1) {
+      removeCustomerCartItem(firstCartItem.cartKey || firstCartItem.id);
+      return;
+    }
+    updateCustomerCartQuantity(firstCartItem.cartKey || firstCartItem.id, currentQuantity - 1);
+  }
+
   function getCustomerKitCartQuantity(kitId) {
     return safeCustomerCart
       .filter((item) => item.isKit === true && String(item.kitId) === String(kitId))
@@ -4232,7 +4243,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => { setShowCustomerNeedMoreMessage(false); setShowCustomerCheckout(true); }}
-                      className="fixed left-3 right-3 bottom-3 z-40 rounded-3xl bg-emerald-600 px-4 py-3 text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700 active:scale-[0.99] touch-manipulation"
+                      className="fixed left-3 right-3 bottom-3 z-40 rounded-3xl bg-emerald-600 px-4 py-3 pb-safe text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700 active:scale-[0.99] touch-manipulation"
                     >
                       <span className="block text-[11px] font-black uppercase tracking-wide opacity-90">Carrinho atualizado</span>
                       <span className="block text-lg font-black">{customerCartItemCount} item{customerCartItemCount > 1 ? "s" : ""} • {money(customerDeliveryTotal)}</span>
@@ -4306,6 +4317,27 @@ function App() {
                           {customerNotifications.slice(0, 3).map((notification) => <p key={notification.id} className="text-xs">• {notification.message}</p>)}
                         </div>
                         <button type="button" onClick={() => markNotificationsRead("customer", "", normalizedCustomerPhoneForNotifications)} className="shrink-0 rounded-xl bg-white px-3 py-2 text-[11px] font-black text-amber-900 shadow-sm">Ok</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {customerOrderConfirmation && !showCustomerCheckout && (
+                    <div className="rounded-3xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-900 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Pedido enviado</p>
+                          <h3 className="mt-1 text-2xl font-black leading-tight">#{customerOrderConfirmation.id}</h3>
+                          <p className="mt-1 text-sm font-semibold">Total: {money(customerOrderConfirmation.total)} • {customerOrderConfirmation.payment}</p>
+                          <p className="text-sm">Tempo estimado: {formatEstimatedDeliveryTime(customerOrderConfirmation.estimatedDeliveryMinutes || nextOrderEstimatedDeliveryMinutes)}</p>
+                          <p className="mt-2 text-xs text-emerald-800">A loja recebeu seu pedido. Aguarde a aprovação e acompanhe as atualizações nesta tela.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setCustomerOrderConfirmation(null); setCustomerError(""); }}
+                          className="shrink-0 rounded-xl bg-white px-3 py-2 text-[11px] font-black text-emerald-900 shadow-sm"
+                        >
+                          Ok
+                        </button>
                       </div>
                     </div>
                   )}
@@ -4390,12 +4422,22 @@ function App() {
                                       )}
                                     </div>
                                   </div>
-                                  <div className="text-right shrink-0">
+                                  <div className="text-right shrink-0 min-w-[96px]">
                                     {getProductActivePromotion(product, promotions) && <p className="text-[11px] text-zinc-400 line-through">{money(product.price)}</p>}
                                     <p className="text-base font-black text-emerald-700">{money(getProductSalePrice(product, promotions))}</p>
-                                    <Button onClick={() => addProductToCustomerCart(product)} disabled={Number(product.stock || 0) <= 0} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-3 h-auto text-xs touch-manipulation">
-                                      {Number(product.stock || 0) <= 0 ? "Sem estoque" : productHasActiveVariants(product) ? (hasProductInCart ? "Adicionar sabores" : "Escolher") : (hasProductInCart ? "+1" : "Adicionar")}
-                                    </Button>
+                                    {Number(product.stock || 0) <= 0 ? (
+                                      <Button disabled className="mt-2 rounded-xl bg-zinc-400 px-3 py-3 h-auto text-xs touch-manipulation">Sem estoque</Button>
+                                    ) : hasProductInCart && !productHasActiveVariants(product) ? (
+                                      <div className="mt-2 inline-flex items-center rounded-2xl border border-emerald-200 bg-emerald-50 p-1 shadow-sm">
+                                        <button type="button" onClick={() => decreaseCustomerProductCartQuantity(product.id)} className="h-9 w-9 rounded-xl bg-white text-lg font-black text-zinc-950 shadow-sm touch-manipulation" aria-label={`Diminuir ${product.name}`}>−</button>
+                                        <span className="min-w-9 px-2 text-center text-sm font-black text-emerald-800">{productQuantityInCart}</span>
+                                        <button type="button" onClick={() => addProductToCustomerCart(product)} className="h-9 w-9 rounded-xl bg-zinc-950 text-lg font-black text-white shadow-sm touch-manipulation" aria-label={`Adicionar mais ${product.name}`}>+</button>
+                                      </div>
+                                    ) : (
+                                      <Button onClick={() => addProductToCustomerCart(product)} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-3 h-auto text-xs touch-manipulation">
+                                        {productHasActiveVariants(product) ? (hasProductInCart ? "Adicionar sabores" : "Escolher") : "Adicionar"}
+                                      </Button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
