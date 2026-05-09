@@ -1390,6 +1390,7 @@ function App() {
   const knownDeliveryIdsRef = useRef(new Set());
   const autoPrintedDeliveryIdsRef = useRef(new Set());
   const autoPrintInitializedRef = useRef(false);
+  const backupFileInputRef = useRef(null);
   const [orderPayments, setOrderPayments] = useState([]);
   const [cashSession, setCashSession] = useState({ isOpen: false, id: "", openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
   const [openingCashInput, setOpeningCashInput] = useState("");
@@ -3864,7 +3865,7 @@ function App() {
     const createdAt = new Date().toISOString();
     const backup = {
       app: "Barbosas Delivery",
-      version: "fase-15-backup-operacional",
+      version: "fase-16-backup-operacional",
       createdAt,
       storeSettings: sanitizeStoreSettings(storeSettings),
       products,
@@ -3892,6 +3893,77 @@ function App() {
     const safeDate = createdAt.slice(0, 19).replace(/[:T]/g, "-");
     downloadJsonFile(`barbosas-delivery-backup-${safeDate}.json`, backup);
     setLastAction("Backup operacional baixado em JSON. Guarde esse arquivo em local seguro.");
+  }
+
+  function openBackupImportDialog() {
+    backupFileInputRef.current?.click();
+  }
+
+  function resetOperationalDraftsAfterBackupRestore(restoredSettings) {
+    setCustomerCart([]);
+    setCustomerOrderConfirmation(null);
+    setShowCustomerCheckout(false);
+    setCustomerVariantPicker({ open: false, product: null, quantities: {} });
+    setDeliveryDraft({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: restoredSettings.defaultDeliveryFee, discount: 0 });
+    setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
+    setTabDraft({ customerName: "", phone: "", creditLimit: DEFAULT_TAB_CREDIT_LIMIT });
+    setEditingProductId(null);
+    setEditingClientId(null);
+    setEditingCourierId(null);
+    setEditingPromotionId(null);
+    setEditingKitId(null);
+    setClosingTabId(null);
+    setPendingCancellation({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
+  }
+
+  async function importOperationalBackup(file) {
+    if (!file) return;
+    try {
+      const rawContent = await file.text();
+      const parsedBackup = JSON.parse(rawContent);
+      if (!parsedBackup || parsedBackup.app !== "Barbosas Delivery") {
+        setLastAction("Arquivo de backup inválido. Selecione um backup gerado pelo Barbosa's Delivery.");
+        return;
+      }
+
+      const summary = parsedBackup.summary || {};
+      const confirmed = window.confirm(
+        `Restaurar este backup?\n\n` +
+        `Criado em: ${parsedBackup.createdAt || "data não informada"}\n` +
+        `Produtos: ${summary.products ?? (Array.isArray(parsedBackup.products) ? parsedBackup.products.length : 0)}\n` +
+        `Clientes: ${summary.clients ?? (Array.isArray(parsedBackup.clients) ? parsedBackup.clients.length : 0)}\n` +
+        `Pedidos: ${summary.deliveries ?? (Array.isArray(parsedBackup.deliveries) ? parsedBackup.deliveries.length : 0)}\n\n` +
+        "Isso substituirá os dados carregados na tela atual. Baixe um backup novo antes de continuar se ainda não fez."
+      );
+      if (!confirmed) return;
+
+      const restoredSettings = sanitizeStoreSettings(parsedBackup.storeSettings || initialStoreSettings);
+      setStoreSettings(restoredSettings);
+      if (Array.isArray(parsedBackup.products)) setProducts(parsedBackup.products);
+      if (Array.isArray(parsedBackup.productGroups)) setProductGroups(parsedBackup.productGroups);
+      if (Array.isArray(parsedBackup.promotions)) setPromotions(parsedBackup.promotions);
+      if (Array.isArray(parsedBackup.kits)) setKits(parsedBackup.kits);
+      if (Array.isArray(parsedBackup.clients)) setClients(parsedBackup.clients);
+      if (Array.isArray(parsedBackup.couriers)) setCouriers(parsedBackup.couriers);
+      if (Array.isArray(parsedBackup.deliveries)) setDeliveries(parsedBackup.deliveries);
+      if (Array.isArray(parsedBackup.notifications)) setNotifications(parsedBackup.notifications);
+      if (Array.isArray(parsedBackup.orderPayments)) setOrderPayments(parsedBackup.orderPayments);
+      if (parsedBackup.cashSession && typeof parsedBackup.cashSession === "object") setCashSession(parsedBackup.cashSession);
+      if (Array.isArray(parsedBackup.cashClosings)) setCashClosings(parsedBackup.cashClosings);
+      if (Array.isArray(parsedBackup.tabsAccounts)) setTabsAccounts(parsedBackup.tabsAccounts);
+      if (parsedBackup.tabCreditLimits && typeof parsedBackup.tabCreditLimits === "object") setTabCreditLimits(parsedBackup.tabCreditLimits);
+
+      resetOperationalDraftsAfterBackupRestore(restoredSettings);
+      setLastAction("Backup operacional restaurado na tela atual. Confira os dados antes de continuar usando o sistema.");
+    } catch (error) {
+      setLastAction(`Backup não restaurado: ${error.message || "arquivo inválido ou corrompido."}`);
+    }
+  }
+
+  function handleBackupFileSelected(event) {
+    const file = event.target.files?.[0];
+    importOperationalBackup(file);
+    event.target.value = "";
   }
 
   async function confirmManualDelivery(id) {
@@ -5368,10 +5440,15 @@ function App() {
                     <div className="md:col-span-2 rounded-3xl border border-amber-100 bg-amber-50 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-sm font-black text-amber-950">Backup operacional</p>
-                        <p className="mt-1 text-xs text-amber-900">Baixe um arquivo JSON com produtos, clientes, entregadores, pedidos, caixa, comandas, notificações e configurações atuais. Use antes de grandes alterações ou antes de subir uma nova versão.</p>
+                        <p className="mt-1 text-xs text-amber-900">Baixe ou restaure um arquivo JSON com produtos, clientes, entregadores, pedidos, caixa, comandas, notificações e configurações atuais. Use antes de grandes alterações ou antes de subir uma nova versão.</p>
                         <p className="mt-1 text-xs font-bold text-amber-950">Resumo atual: {products.length} produtos • {clients.length} clientes • {deliveries.length} pedidos • {couriers.length} entregadores</p>
+                        <p className="mt-1 text-[11px] font-semibold text-amber-800">Ao restaurar, os dados carregados na tela atual serão substituídos pelo arquivo selecionado.</p>
                       </div>
-                      <Button onClick={exportOperationalBackup} variant="secondary" className="rounded-2xl bg-white whitespace-nowrap">Baixar backup</Button>
+                      <div className="flex flex-col gap-2 sm:flex-row md:flex-col lg:flex-row">
+                        <Button onClick={exportOperationalBackup} variant="secondary" className="rounded-2xl bg-white whitespace-nowrap">Baixar backup</Button>
+                        <Button onClick={openBackupImportDialog} variant="secondary" className="rounded-2xl bg-white whitespace-nowrap">Restaurar backup</Button>
+                        <input ref={backupFileInputRef} type="file" accept="application/json,.json" onChange={handleBackupFileSelected} className="hidden" />
+                      </div>
                     </div>
                   </div>
                   <div className="mt-5 rounded-3xl border border-zinc-100 bg-zinc-50 p-4 flex items-center gap-3">
