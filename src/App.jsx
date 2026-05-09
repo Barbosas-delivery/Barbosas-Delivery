@@ -49,6 +49,7 @@ import {
   closeCashSessionInSupabase,
 } from "./services/supabaseCash";
 import { loadTabsAccountsFromSupabase, persistTabAccountInSupabase } from "./services/supabaseTabs";
+import { loadStoreSettingsFromSupabaseService, saveStoreSettingsToSupabaseService } from "./services/supabaseStoreSettings";
 import {
   APP_VERSION,
   DELIVERY_STATUS,
@@ -816,11 +817,53 @@ function App() {
   const [canCloseCustomerPromo, setCanCloseCustomerPromo] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [storeSettings, setStoreSettings] = useState(() => loadStoreSettingsFromLocalStorage());
+  const [storeSettingsSyncReady, setStoreSettingsSyncReady] = useState(false);
+  const [storeSettingsSyncStatus, setStoreSettingsSyncStatus] = useState("Carregando configurações...");
   const [showStoreScheduleModal, setShowStoreScheduleModal] = useState(false);
   const [currentStoreDate, setCurrentStoreDate] = useState(() => new Date());
+
   useEffect(() => {
-    saveStoreSettingsToLocalStorage(storeSettings);
-  }, [storeSettings]);
+    let cancelled = false;
+
+    async function loadRemoteStoreSettings() {
+      const { settings, error } = await loadStoreSettingsFromSupabaseService();
+      if (cancelled) return;
+
+      if (settings) {
+        const sanitizedSettings = sanitizeStoreSettings(settings);
+        setStoreSettings(sanitizedSettings);
+        saveStoreSettingsToLocalStorage(sanitizedSettings);
+        setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: sanitizedSettings.defaultDeliveryFee }));
+        setStoreSettingsSyncStatus("Configurações carregadas do Supabase.");
+      } else if (error) {
+        setStoreSettingsSyncStatus("Usando configurações deste navegador. Crie a tabela store_settings para sincronizar no Supabase.");
+      } else {
+        setStoreSettingsSyncStatus("Configurações locais prontas. Salve uma alteração para sincronizar no Supabase.");
+      }
+
+      setStoreSettingsSyncReady(true);
+    }
+
+    loadRemoteStoreSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const sanitizedSettings = sanitizeStoreSettings(storeSettings);
+    saveStoreSettingsToLocalStorage(sanitizedSettings);
+
+    if (!storeSettingsSyncReady) return undefined;
+
+    const timer = window.setTimeout(async () => {
+      const { error } = await saveStoreSettingsToSupabaseService(sanitizedSettings);
+      setStoreSettingsSyncStatus(error ? "Configurações salvas neste navegador; Supabase não sincronizou." : "Configurações sincronizadas no Supabase.");
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [storeSettings, storeSettingsSyncReady]);
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
   const [kits, setKits] = useState([]);
@@ -3801,7 +3844,7 @@ function App() {
     const defaultSettings = sanitizeStoreSettings(initialStoreSettings);
     setStoreSettings(defaultSettings);
     setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: defaultSettings.defaultDeliveryFee }));
-    setLastAction("Configurações da loja restauradas para o padrão inicial neste navegador.");
+    setLastAction("Configurações da loja restauradas para o padrão inicial e serão sincronizadas no Supabase quando possível.");
   }
 
   async function confirmManualDelivery(id) {
@@ -5224,8 +5267,9 @@ function App() {
                 <CardBox>
                   <div className="mb-4 rounded-3xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <p className="font-black">Configurações salvas neste navegador</p>
-                      <p className="text-xs">Nome da loja, taxa, pedido mínimo, horários, WhatsApp e impressão continuam após atualizar a página.</p>
+                                      <p className="font-black">Configurações da loja</p>
+                      <p className="text-xs">Nome da loja, taxa, pedido mínimo, horários, WhatsApp e impressão ficam salvos neste navegador e sincronizam no Supabase quando a tabela estiver criada.</p>
+                      <p className="mt-1 text-xs font-bold text-emerald-800">{storeSettingsSyncStatus}</p>
                     </div>
                     <Button onClick={resetStoreSettingsToDefault} variant="secondary" className="rounded-2xl bg-white">Restaurar padrão</Button>
                   </div>
