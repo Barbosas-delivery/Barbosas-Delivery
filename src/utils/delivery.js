@@ -119,14 +119,36 @@ export function buildDeliveryAddress(client) {
   return `${client.street}, ${client.number} - ${client.district}, ${client.city}/${client.state}`;
 }
 
-export function getCourierDeliveries(deliveries) {
+export function getCourierDeliveries(deliveries, courierUsername = "") {
   const deliveryList = Array.isArray(deliveries) ? deliveries : [];
-  return deliveryList.filter((delivery) =>
-    isDeliveryOrder(delivery) &&
-    delivery.status !== DELIVERY_STATUS.CANCELLED &&
-    delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED &&
-    !needsStoreApprovalBeforeCourier(delivery)
-  );
+  const normalizedCourierUsername = String(courierUsername || "").trim().toLowerCase();
+
+  return deliveryList.filter((delivery) => {
+    if (!isDeliveryOrder(delivery)) return false;
+    if (delivery.status === DELIVERY_STATUS.CANCELLED || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return false;
+    if (needsStoreApprovalBeforeCourier(delivery)) return false;
+
+    // Sem usuário específico, preserva o comportamento antigo para relatórios/testes.
+    if (!normalizedCourierUsername) return true;
+
+    const refusedByUsername = String(delivery.refusedByUsername || "").trim().toLowerCase();
+    if (refusedByUsername && refusedByUsername === normalizedCourierUsername) return false;
+
+    const assignedUsername = String(
+      delivery.pickedUpByUsername ||
+      delivery.acceptedByUsername ||
+      delivery.deliveredByUsername ||
+      ""
+    ).trim().toLowerCase();
+
+    // Pedido ainda livre para retirada aparece para todos que não recusaram.
+    if (delivery.status === DELIVERY_STATUS.WAITING_PICKUP && !assignedUsername) return true;
+
+    // Depois que alguém aceitou, aparece somente para o entregador responsável.
+    if (assignedUsername) return assignedUsername === normalizedCourierUsername;
+
+    return true;
+  });
 }
 
 export function getStatusClass(status) {

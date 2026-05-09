@@ -464,6 +464,12 @@ function buildWhatsAppUrl(phone, message) {
   return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
 }
 
+function buildMapsUrl(address) {
+  const cleanAddress = String(address || "").trim();
+  if (!cleanAddress) return "#";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanAddress)}`;
+}
+
 function getWhatsAppOrderItemsText(items = []) {
   const safeItems = Array.isArray(items) ? items : [];
   if (safeItems.length === 0) return "- Pedido sem itens detalhados";
@@ -800,6 +806,7 @@ function App() {
   const [courierPassword, setCourierPassword] = useState("");
   const [courierLoginError, setCourierLoginError] = useState("");
   const [loggedCourier, setLoggedCourier] = useState(null);
+  const [courierActionIds, setCourierActionIds] = useState({});
   const [entryMode, setEntryMode] = useState("customer");
   const [customerSubmitted, setCustomerSubmitted] = useState(false);
   const [customerError, setCustomerError] = useState("");
@@ -1581,7 +1588,7 @@ function App() {
     () => buildDeliveryTotal(deliveryDraftTotal, deliveryDraftFee, deliveryDraftDiscount),
     [deliveryDraftTotal, deliveryDraftFee, deliveryDraftDiscount]
   );
-  const loggedCourierDeliveries = useMemo(() => (loggedCourier ? getCourierDeliveries(deliveries) : []), [deliveries, loggedCourier]);
+  const loggedCourierDeliveries = useMemo(() => (loggedCourier ? getCourierDeliveries(deliveries, loggedCourier.username) : []), [deliveries, loggedCourier]);
   const waitingPickupDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_PICKUP), [loggedCourierDeliveries]);
   const courierPendingDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED), [loggedCourierDeliveries]);
   const dayReport = useMemo(() => buildDayReport(products, deliveries), [products, deliveries]);
@@ -3318,11 +3325,35 @@ function App() {
     setLastAction("Entrega lançada no Supabase, taxa adicionada e impressão enviada para o navegador.");
   }
 
+  function isCourierActionBusy(id) {
+    return Boolean(courierActionIds[String(id)]);
+  }
+
+  async function runCourierAction(id, label, action) {
+    const key = String(id);
+    if (courierActionIds[key]) {
+      setLastAction(`Aguarde: ${label} do pedido #${id} já está em andamento.`);
+      return;
+    }
+
+    setCourierActionIds((previous) => ({ ...previous, [key]: label }));
+    try {
+      await action();
+    } finally {
+      setCourierActionIds((previous) => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+    }
+  }
+
   async function markCourierPickedUp(id) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery || !isDeliveryOrder(delivery) || needsStoreApprovalBeforeCourier(delivery) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return setLastAction("Essa entrega não está disponível para retirada ou ainda precisa ser aprovada pela loja.");
     const rpcResult = await supabase.rpc("accept_delivery_order", { p_order_id: id, p_courier_username: loggedCourier?.username || "", p_courier_name: loggedCourier?.name || "" });
-    if (rpcResult.error) return setLastAction(`Não foi possível aceitar a entrega: ${rpcResult.error.message || "verifique função accept_delivery_order."}`);
+    const rpcMissing = rpcResult.error && /function|schema cache|accept_delivery_order|could not find/i.test(String(rpcResult.error.message || ""));
+    if (rpcResult.error && !rpcMissing) return setLastAction(`Não foi possível aceitar a entrega: ${rpcResult.error.message || "verifique função accept_delivery_order."}`);
     if (rpcResult.data?.success === false) return setLastAction(rpcResult.data.message || "Entrega já aceita por outro entregador.");
     const patch = { status: DELIVERY_STATUS.OUT_FOR_DELIVERY, acceptedByUsername: loggedCourier?.username || "", acceptedByName: loggedCourier?.name || "", acceptedAt: new Date().toISOString(), pickedUpByUsername: loggedCourier?.username || "", pickedUpByName: loggedCourier?.name || "", pickedUpAt: new Date().toISOString() };
     const updated = await updateDeliveryInSupabase(id, patch);
@@ -3380,8 +3411,12 @@ function App() {
     const patch = { refusedByUsername: loggedCourier?.username || "", refusedAt: new Date().toISOString() };
     const updated = await updateDeliveryInSupabase(id, patch);
     if (!updated) return;
+    setDeliveries((previousDeliveries) =>
+      previousDeliveries.map((item) => (String(item.id) === String(id) ? { ...item, ...patch } : item))
+    );
+    await resolveOrderNotifications(id, ["courier"]);
     await auditAction("refuse_delivery", "orders", id, patch, null, "courier", loggedCourier?.username || "entregador");
-    setLastAction(`Entrega #${id} recusada por ${loggedCourier?.name || "entregador"}.`);
+    setLastAction(`Entrega #${id} recusada por ${loggedCourier?.name || "entregador"}. Ela saiu do seu painel.`);
   }
 
   async function updateDeliveryStatus(id, status) {
@@ -4047,7 +4082,7 @@ function App() {
               <div className="h-11 w-11 rounded-2xl bg-white text-zinc-950 flex items-center justify-center text-xl"><Icon name="truck" /></div>
               <div>
                 <h1 className="text-lg md:text-xl font-bold">Painel do Entregador</h1>
-                <p className="text-xs text-zinc-400">{loggedCourier.name} • usuário {loggedCourier.username} • 🔔 {courierUnreadNotifications} novas</p>
+                <p className="text-xs text-zinc-400">{loggedCourier.name} • {loggedCourier.username} • 🔔 {courierUnreadNotifications} novas</p>
               </div>
             </div>
             <Button onClick={() => { setLoggedCourier(null); setCourierPassword(""); }} variant="secondary" className="rounded-2xl px-3 md:px-4"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
@@ -4071,7 +4106,7 @@ function App() {
           </div>
 
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-            <Title title="Entregas disponíveis" subtitle="Aceite o pedido, marque a retirada na loja e depois marque como entregue ao chegar no cliente." />
+            <Title title="Entregas disponíveis" subtitle="Fluxo rápido: aceitar na loja, abrir rota/WhatsApp e marcar entregue quando chegar ao cliente." />
             <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
           </div>
           {courierPendingDeliveries.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega pendente no momento.</p></CardBox>}
@@ -4087,9 +4122,13 @@ function App() {
                         <span className={`text-xs px-3 py-1 rounded-full ${getStatusClass(delivery.status)}`}>{delivery.status}</span>
                       </div>
                       <p className="text-sm text-zinc-700"><b>Cliente:</b> {delivery.client}</p>
-                      <p className="text-sm text-zinc-700"><b>Telefone:</b> {formatBrazilMobilePhone(delivery.phone)} <a href={buildWhatsAppUrl(delivery.phone, `Olá ${delivery.client}, sou o entregador da Barbosa's. Estou com seu pedido #${delivery.id}.`)} target="_blank" rel="noreferrer" className="ml-2 text-emerald-700 underline font-semibold">WhatsApp</a></p>
+                      <p className="text-sm text-zinc-700"><b>Telefone:</b> {formatBrazilMobilePhone(delivery.phone)}</p>
                       <p className="text-sm text-zinc-700"><b>Endereço:</b> {delivery.address}</p>
                       <p className="text-sm text-zinc-500"><b>Referência:</b> {delivery.reference || "-"}</p>
+                      <div className="grid grid-cols-2 gap-2 my-3">
+                        <a href={buildMapsUrl(delivery.address)} target="_blank" rel="noreferrer" className="rounded-2xl bg-blue-50 border border-blue-100 px-3 py-3 text-center text-sm font-black text-blue-700">Abrir rota</a>
+                        <a href={buildWhatsAppUrl(delivery.phone, `Olá ${delivery.client}, sou o entregador da Barbosa's. Estou com seu pedido #${delivery.id}.`)} target="_blank" rel="noreferrer" className="rounded-2xl bg-emerald-50 border border-emerald-100 px-3 py-3 text-center text-sm font-black text-emerald-700">WhatsApp</a>
+                      </div>
                       <p className="text-sm text-zinc-500"><b>Pagamento:</b> {getPaymentLabel(delivery.payment, delivery.changeFor)}</p>
                       {delivery.pickedUpByName && <p className="text-sm text-zinc-500"><b>Retirado por:</b> {delivery.pickedUpByName}</p>}
                       {delivery.deliveredByName && <p className="text-sm text-blue-700"><b>Entrega informada por:</b> {delivery.deliveredByName}</p>}
@@ -4101,11 +4140,11 @@ function App() {
                       <p className="text-xs text-zinc-500">Taxa de entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))}</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    <Button onClick={() => markCourierPickedUp(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Aceitar e retirar</Button>
-                    <Button onClick={() => refuseCourierDelivery(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Recusar</Button>
-                    <Button onClick={() => updateDeliveryStatus(delivery.id, DELIVERY_STATUS.DELIVERY_PROBLEM)} disabled={delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} variant="secondary" className="rounded-2xl py-4 text-sm">Problema</Button>
-                    <Button onClick={() => requestDeliveryApproval(delivery.id)} disabled={delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-4 text-sm">Marcar entregue</Button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                    <Button onClick={() => runCourierAction(delivery.id, "aceite", () => markCourierPickedUp(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">{isCourierActionBusy(delivery.id) ? "Aguarde..." : "Aceitar e retirar"}</Button>
+                    <Button onClick={() => runCourierAction(delivery.id, "recusa", () => refuseCourierDelivery(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Recusar</Button>
+                    <Button onClick={() => runCourierAction(delivery.id, "problema", () => updateDeliveryStatus(delivery.id, DELIVERY_STATUS.DELIVERY_PROBLEM))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} variant="secondary" className="rounded-2xl py-4 text-sm">Problema</Button>
+                    <Button onClick={() => runCourierAction(delivery.id, "entrega", () => requestDeliveryApproval(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-4 text-sm">Marcar entregue</Button>
                   </div>
                 </CardContent>
               </Card>
