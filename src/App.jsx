@@ -1432,7 +1432,6 @@ function App() {
 
     setDeliveries(result.data || []);
     setDeliveriesLoaded(true);
-    console.log("PDV Entregas sincronizado:", result.counts || {});
   }
 
   async function saveDeliveryToSupabase(delivery) {

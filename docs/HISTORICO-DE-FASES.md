@@ -4,7 +4,7 @@ Este arquivo resume as principais fases implementadas no sistema para facilitar 
 
 ## Versão atual
 
-- **Versão do app:** `6.0.0-fase-32`
+- **Versão do app:** `6.0.1-final`
 - **Base de código:** Fase 31 revisada + ajustes de rastreabilidade da Fase 32
 - **Objetivo da Fase 32:** alinhar versão do app, diagnóstico e backup operacional para evitar confusão entre pacotes antigos e versão publicada.
 
@@ -71,3 +71,11 @@ Depois teste no sistema publicado:
 8. Caixa;
 9. Backup;
 10. Diagnóstico.
+
+## Revisão final 6.0.1
+
+- Pente fino geral do pacote final.
+- Versão interna alinhada com service worker e backup.
+- Removido log de desenvolvimento.
+- Adicionado `npm run test` com testes de fumaça.
+- Lint, teste e build validados sem erros.

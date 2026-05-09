@@ -13,6 +13,7 @@ Sistema de delivery, PDV, entregas, caixa, estoque, cupons, notificações, impr
 ```bash
 npm install
 npm run lint
+npm run test
 npm run build
 ```
 ## Diagnóstico
@@ -22,4 +23,8 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.0-fase-32`
+`6.0.1-final`
+
+## Revisão final
+
+Pacote final revisado com lint, build e teste de fumaça automatizado.
