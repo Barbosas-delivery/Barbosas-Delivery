@@ -79,3 +79,12 @@ Depois teste no sistema publicado:
 - Removido log de desenvolvimento.
 - Adicionado `npm run test` com testes de fumaça.
 - Lint, teste e build validados sem erros.
+
+
+## Fase 35 — Promoções, balcão e entregador
+
+- Adicionada exclusão lógica de promoções.
+- Vendas de balcão finalizadas mostram apenas Reimprimir e Reabrir no PDV.
+- Reabertura de venda cancela pagamento antigo, devolve estoque e carrega os itens no PDV para correção.
+- Painel do entregador passa a mostrar ganhos do dia e entregas atrasadas.
+- Entregador com entrega própria atrasada não consegue aceitar novas entregas até finalizar a atrasada.

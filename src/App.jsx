@@ -651,6 +651,71 @@ function getOrderTimeValue(delivery) {
   return dates.length > 0 ? Math.max(...dates) : Number(delivery?.id || 0);
 }
 
+const DELIVERY_DELAY_ALERT_MINUTES = 15;
+
+function getDeliveryLaunchTimeValue(delivery) {
+  const dates = [delivery?.launchedAt, delivery?.createdAt, delivery?.approvedAt, delivery?.acceptedAt, delivery?.pickedUpAt]
+    .map((value) => new Date(value || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return dates.length > 0 ? Math.min(...dates) : Number(delivery?.id || 0);
+}
+
+function getDeliveryAgeMinutes(delivery, nowMs = Date.now()) {
+  const startedAt = getDeliveryLaunchTimeValue(delivery);
+  if (!startedAt) return 0;
+  return Math.max(0, Math.floor((nowMs - startedAt) / 60000));
+}
+
+function isDeliveryDelayCandidate(delivery) {
+  if (!isDeliveryOrder(delivery)) return false;
+  if ([DELIVERY_STATUS.CANCELLED, DELIVERY_STATUS.CONFIRMED_DELIVERED].includes(delivery?.status)) return false;
+  return [
+    DELIVERY_STATUS.WAITING_PICKUP,
+    DELIVERY_STATUS.OUT_FOR_DELIVERY,
+    DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
+    DELIVERY_STATUS.DELIVERY_PROBLEM,
+  ].includes(delivery?.status);
+}
+
+function isDeliveryDelayed(delivery, nowMs = Date.now()) {
+  return isDeliveryDelayCandidate(delivery) && getDeliveryAgeMinutes(delivery, nowMs) >= DELIVERY_DELAY_ALERT_MINUTES;
+}
+
+function isCourierAssignedToDelivery(delivery, username) {
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  if (!normalizedUsername) return false;
+  return [delivery?.pickedUpByUsername, delivery?.acceptedByUsername, delivery?.deliveredByUsername]
+    .some((value) => String(value || '').trim().toLowerCase() === normalizedUsername);
+}
+
+function sortDeliveriesByPriority(a, b) {
+  const now = Date.now();
+  const delayedA = isDeliveryDelayed(a, now) ? 1 : 0;
+  const delayedB = isDeliveryDelayed(b, now) ? 1 : 0;
+  if (delayedA !== delayedB) return delayedB - delayedA;
+  return getDeliveryLaunchTimeValue(a) - getDeliveryLaunchTimeValue(b);
+}
+
+function buildCourierTodaySummary(deliveries = [], courierUsername = '') {
+  const normalizedUsername = String(courierUsername || '').trim().toLowerCase();
+  const today = new Date().toISOString().slice(0, 10);
+  const completed = (deliveries || []).filter((delivery) => {
+    if (!normalizedUsername || !isDeliveryOrder(delivery)) return false;
+    if (delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.ownerApproved !== true) return false;
+    if (!isCourierAssignedToDelivery(delivery, normalizedUsername)) return false;
+    const completedDate = String(delivery.ownerApprovedAt || delivery.deliveredAt || delivery.launchedAt || '').slice(0, 10);
+    return completedDate === today;
+  });
+  return {
+    completedCount: completed.length,
+    grossDeliveryFee: completed.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0),
+    courierAmount: completed.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
+    storeAmount: completed.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
+    ownMotorcycleCount: completed.filter((delivery) => !String(delivery.motorcycleType || '').toLowerCase().includes('estabelecimento')).length,
+    storeMotorcycleCount: completed.filter((delivery) => String(delivery.motorcycleType || '').toLowerCase().includes('estabelecimento')).length,
+  };
+}
+
 function getCustomerOrderStatusInfo(delivery) {
   const status = delivery?.status;
   if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
@@ -1161,7 +1226,9 @@ function App() {
       setPromotions([]);
       return;
     }
-    setPromotions((Array.isArray(data) ? data : []).map((promotion) => ({
+    setPromotions((Array.isArray(data) ? data : [])
+      .filter((promotion) => !promotion.deleted_at)
+      .map((promotion) => ({
       id: promotion.id,
       title: promotion.title || "",
       description: promotion.description || "",
@@ -1174,6 +1241,7 @@ function App() {
       endDate: promotion.end_date || promotion.endDate || "",
       createdAt: promotion.created_at || promotion.createdAt || "",
       updatedAt: promotion.updated_at || promotion.updatedAt || "",
+      deletedAt: promotion.deleted_at || promotion.deletedAt || "",
       active: isTruthyActive(promotion.active),
     })));
   }
@@ -2014,8 +2082,11 @@ function App() {
     [deliveryDraftTotal, deliveryDraftFee, deliveryDraftDiscount]
   );
   const loggedCourierDeliveries = useMemo(() => (loggedCourier ? getCourierDeliveries(deliveries, loggedCourier.username) : []), [deliveries, loggedCourier]);
-  const waitingPickupDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_PICKUP), [loggedCourierDeliveries]);
-  const courierPendingDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED), [loggedCourierDeliveries]);
+  const courierTodaySummary = useMemo(() => buildCourierTodaySummary(deliveries, loggedCourier?.username), [deliveries, loggedCourier?.username]);
+  const courierPendingDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED).slice().sort(sortDeliveriesByPriority), [loggedCourierDeliveries]);
+  const courierDelayedDeliveries = useMemo(() => courierPendingDeliveries.filter((delivery) => isDeliveryDelayed(delivery)), [courierPendingDeliveries]);
+  const courierOwnDelayedDeliveries = useMemo(() => courierDelayedDeliveries.filter((delivery) => isCourierAssignedToDelivery(delivery, loggedCourier?.username)), [courierDelayedDeliveries, loggedCourier?.username]);
+  const courierMustFinishDelayedDelivery = courierOwnDelayedDeliveries.length > 0;
   const dayReport = useMemo(() => buildDayReport(products, deliveries), [products, deliveries]);
   const cashClosingReport = useMemo(() => buildCashClosingReport(deliveries, cashSession, orderPayments), [deliveries, cashSession, orderPayments]);
   const activeDeliveryOrdersForStore = useMemo(
@@ -2035,7 +2106,6 @@ function App() {
   const selfTests = useMemo(() => runSelfTests(), []);
   const passedTests = selfTests.filter((test) => test.passed).length;
   const ownerNotifications = useMemo(() => getAudienceNotifications(notifications, "loja"), [notifications]);
-  const courierNotifications = useMemo(() => getAudienceNotifications(notifications, "courier", loggedCourier?.username), [notifications, loggedCourier?.username]);
   const customerNotifications = useMemo(() => {
     if (!normalizedCustomerPhoneForNotifications) return [];
     return getAudienceNotifications(notifications, "customer").filter((notification) => {
@@ -2063,7 +2133,6 @@ function App() {
     return candidateOrders[0] || null;
   }, [deliveries, normalizedCustomerPhoneForNotifications, dismissedCustomerOrderIds, customerOrderConfirmation, customerNotifications]);
   const ownerUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "loja"), [notifications]);
-  const courierUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "courier", loggedCourier?.username), [notifications, loggedCourier?.username]);
   const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate, orderPayments), [deliveries, reportRange, orderPayments]);
   const productSalesReport = useMemo(() => buildProductSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
   const categorySalesReport = useMemo(() => buildCategorySalesReport(deliveries, products, reportRange.startDate, reportRange.endDate), [deliveries, products, reportRange]);
@@ -2552,6 +2621,19 @@ function App() {
     if (error) return setLastAction(`Status da promoção não salvo no Supabase: ${error.message || "verifique promotions."}`);
     setPromotions((previousPromotions) => previousPromotions.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
     setLastAction("Status da promoção atualizado no Supabase.");
+  }
+
+  async function deletePromotion(id) {
+    const promotion = promotions.find((item) => String(item.id) === String(id));
+    if (!promotion) return;
+    const confirmed = window.confirm(`Excluir a promoção "${promotion.title}"? Ela não aparecerá mais para os clientes, mas o histórico será preservado.`);
+    if (!confirmed) return;
+    const deletedAt = new Date().toISOString();
+    const { error } = await updateWithSchemaRetry("promotions", id, { active: false, deleted_at: deletedAt });
+    if (error) return setLastAction(`Promoção não excluída no Supabase: ${error.message || "verifique promotions.deleted_at."}`);
+    setPromotions((previousPromotions) => previousPromotions.filter((item) => String(item.id) !== String(id)));
+    await auditAction("delete_promotion", "promotions", id, { title: promotion.title, deletedAt }, promotion);
+    setLastAction(`Promoção ${promotion.title} excluída da tela do cliente.`);
   }
 
   function updatePromotionField(id, field, value) {
@@ -4104,6 +4186,8 @@ function App() {
   async function markCourierPickedUp(id) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery || !isDeliveryOrder(delivery) || needsStoreApprovalBeforeCourier(delivery) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return setLastAction("Essa entrega não está disponível para retirada ou ainda precisa ser aprovada pela loja.");
+    const ownDelayedDelivery = deliveries.find((item) => isDeliveryDelayed(item) && isCourierAssignedToDelivery(item, loggedCourier?.username));
+    if (ownDelayedDelivery) return setLastAction(`Finalize a entrega atrasada #${ownDelayedDelivery.id} antes de aceitar outra.`);
     const rpcResult = await supabase.rpc("accept_delivery_order", { p_order_id: id, p_courier_username: loggedCourier?.username || "", p_courier_name: loggedCourier?.name || "" });
     const rpcMissing = rpcResult.error && /function|schema cache|accept_delivery_order|could not find/i.test(String(rpcResult.error.message || ""));
     if (rpcResult.error && !rpcMissing) return setLastAction(`Não foi possível aceitar a entrega: ${rpcResult.error.message || "verifique função accept_delivery_order."}`);
@@ -4324,6 +4408,54 @@ function App() {
     } finally {
       setProcessingPaymentIds((previous) => previous.filter((key) => key !== paymentKey));
     }
+  }
+
+  async function reopenCounterSaleInPdv(id) {
+    const sale = deliveries.find((item) => String(item.id) === String(id));
+    if (!sale || !isCounterOrder(sale)) return setLastAction("Venda de balcão não encontrada.");
+    if (sale.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Essa venda já foi reaberta ou cancelada.");
+    const reason = window.prompt("Motivo para reabrir no PDV?", "Corrigir produto ou forma de pagamento") || "Corrigir produto ou forma de pagamento";
+    const confirmed = window.confirm(`Reabrir a venda #${id} no PDV? A venda atual será cancelada, o pagamento será removido do fechamento e os itens voltarão para edição.`);
+    if (!confirmed) return setLastAction("Reabertura de venda cancelada.");
+
+    const now = new Date().toISOString();
+    const patch = {
+      status: DELIVERY_STATUS.CANCELLED,
+      paymentStatus: PAYMENT_STATUS.PENDING,
+      reopenedAt: now,
+      reopenedBy: getCurrentStoreUserName() || "loja",
+      reopenReason: reason,
+      cancelledAt: now,
+      cancellationReason: `Reaberta no PDV: ${reason}`,
+      paymentConfirmedAt: "",
+      paymentConfirmedBy: "",
+    };
+
+    const updated = await updateDeliveryInSupabase(id, patch);
+    if (!updated) return setLastAction("Não consegui reabrir a venda no Supabase. Verifique as colunas reopened_at, reopened_by e reopen_reason.");
+
+    await cancelExistingOrderPayments(id, `venda reaberta no PDV: ${reason}`);
+    setOrderPayments((previous) => previous.map((payment) => String(payment.orderId) === String(id) ? { ...payment, status: "cancelled", notes: `Venda reaberta no PDV: ${reason}` } : payment));
+    setProducts((previousProducts) => {
+      const nextProducts = restoreProductStock(previousProducts, sale.items || []);
+      persistProductStocks(nextProducts);
+      return nextProducts;
+    });
+    setCounterDraft({
+      customerName: sale.client || "Cliente balcão",
+      phone: normalizePhoneInput(sale.phone || ""),
+      payment: sale.payment || "Pix",
+      changeFor: sale.changeFor || "",
+      notes: `Reaberta da venda #${id}. ${sale.notes || ""}`.trim(),
+      items: Array.isArray(sale.items) ? sale.items : [],
+      discount: toSafeMoneyNumber(sale.discount, 0),
+    });
+    setCounterProductSearch("");
+    setCounterKitSearch("");
+    setDeliveries((previousDeliveries) => previousDeliveries.map((item) => String(item.id) === String(id) ? { ...item, ...patch } : item));
+    await auditAction("reopen_counter_sale", "orders", id, patch, sale);
+    setActiveTab("counter");
+    setLastAction(`Venda #${id} reaberta no PDV. Corrija os itens ou pagamento e finalize novamente.`);
   }
 
   function requestCancelDelivery(id) {
@@ -4902,7 +5034,7 @@ function App() {
               <div className="h-11 w-11 rounded-2xl bg-white text-zinc-950 flex items-center justify-center text-xl"><Icon name="truck" /></div>
               <div>
                 <h1 className="text-lg md:text-xl font-bold">Painel do Entregador</h1>
-                <p className="text-xs text-zinc-400">{loggedCourier.name} • {loggedCourier.username} • 🔔 {courierUnreadNotifications} novas</p>
+                <p className="text-xs text-zinc-400">{loggedCourier.name} • {loggedCourier.username} • {loggedCourier.motorcycleType || "Moto própria"}</p>
               </div>
             </div>
             <Button onClick={() => { setLoggedCourier(null); setCourierPassword(""); }} variant="secondary" className="rounded-2xl px-3 md:px-4"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
@@ -4910,20 +5042,41 @@ function App() {
         </header>
 
         <main className="max-w-md md:max-w-5xl mx-auto p-3 md:p-8 space-y-5 md:space-y-6">
-          {courierNotifications.length > 0 && (
-            <NotificationPanel
-              title={`Notificações dos entregadores (${courierUnreadNotifications} novas)`}
-              notifications={courierNotifications}
-              onMarkRead={() => markNotificationsRead("courier", loggedCourier?.username)}
-            />
-          )}
+          <CardBox>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <p className="text-sm text-zinc-500">Resumo de hoje</p>
+                <h2 className="text-xl font-black">{loggedCourier.name}</h2>
+                <p className="text-xs text-zinc-500">Moto: {loggedCourier.motorcycleType || "Moto própria"}</p>
+              </div>
+              {courierMustFinishDelayedDelivery && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-bold">
+                  Entrega atrasada em aberto. Finalize a entrega atrasada antes de aceitar outra.
+                </div>
+              )}
+            </div>
+          </CardBox>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-            <Metric title="Entregas disponíveis" value={waitingPickupDeliveries.length} icon="truck" />
-            <Metric title="Pendentes" value={courierPendingDeliveries.length} icon="calendar" />
-            <Metric title="Confirmadas" value={loggedCourierDeliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED).length} icon="check" />
-            <Metric title="Alertas" value={courierUnreadNotifications} icon="bell" />
+            <Metric title="Entregas feitas hoje" value={courierTodaySummary.completedCount} icon="check" />
+            <Metric title="Taxas geradas" value={money(courierTodaySummary.grossDeliveryFee)} icon="money" />
+            <Metric title="A receber" value={money(courierTodaySummary.courierAmount)} icon="money" />
+            <Metric title="Atrasadas" value={courierDelayedDeliveries.length} icon="alert" />
           </div>
+
+          {courierDelayedDeliveries.length > 0 && (
+            <CardBox>
+              <h3 className="font-bold text-lg mb-3 text-red-700">Entregas atrasadas</h3>
+              <div className="grid gap-2">
+                {courierDelayedDeliveries.map((delivery) => (
+                  <div key={delivery.id} className="rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-800 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <span><b>Pedido #{delivery.id}</b> • {delivery.client} • {getDeliveryAgeMinutes(delivery)} min desde o lançamento</span>
+                    <span className="font-bold">Prioridade máxima</span>
+                  </div>
+                ))}
+              </div>
+            </CardBox>
+          )}
 
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
             <Title title="Entregas disponíveis" subtitle="Fluxo rápido: aceitar na loja, abrir rota/WhatsApp e marcar entregue quando chegar ao cliente." />
@@ -4940,6 +5093,7 @@ function App() {
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-bold text-lg">Pedido #{delivery.id}</span>
                         <span className={`text-xs px-3 py-1 rounded-full ${getStatusClass(delivery.status)}`}>{delivery.status}</span>
+                        {isDeliveryDelayed(delivery) && <span className="text-xs px-3 py-1 rounded-full bg-red-100 text-red-700 font-black">ATRASADA {getDeliveryAgeMinutes(delivery)} min</span>}
                       </div>
                       <p className="text-sm text-zinc-700"><b>Cliente:</b> {delivery.client}</p>
                       <p className="text-sm text-zinc-700"><b>Telefone:</b> {formatBrazilMobilePhone(delivery.phone)}</p>
@@ -4961,7 +5115,7 @@ function App() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                    <Button onClick={() => runCourierAction(delivery.id, "aceite", () => markCourierPickedUp(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">{isCourierActionBusy(delivery.id) ? "Aguarde..." : "Aceitar e retirar"}</Button>
+                    <Button onClick={() => runCourierAction(delivery.id, "aceite", () => markCourierPickedUp(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP || courierMustFinishDelayedDelivery} variant="secondary" className="rounded-2xl py-4 text-sm">{isCourierActionBusy(delivery.id) ? "Aguarde..." : courierMustFinishDelayedDelivery ? "Finalize atraso" : "Aceitar e retirar"}</Button>
                     <Button onClick={() => runCourierAction(delivery.id, "recusa", () => refuseCourierDelivery(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Recusar</Button>
                     <Button onClick={() => runCourierAction(delivery.id, "problema", () => updateDeliveryStatus(delivery.id, DELIVERY_STATUS.DELIVERY_PROBLEM))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} variant="secondary" className="rounded-2xl py-4 text-sm">Problema</Button>
                     <Button onClick={() => runCourierAction(delivery.id, "entrega", () => requestDeliveryApproval(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-4 text-sm">Marcar entregue</Button>
@@ -5989,6 +6143,7 @@ function App() {
                               <div className="flex flex-wrap gap-2">
                                 <Button onClick={() => setEditingPromotionId(promotion.id)} variant="secondary" className="rounded-2xl">Editar promoção</Button>
                                 <Button onClick={() => togglePromotionStatus(promotion.id)} variant="secondary" className="rounded-2xl">{promotion.active ? "Inativar" : "Ativar"}</Button>
+                                <Button onClick={() => deletePromotion(promotion.id)} variant="secondary" className="rounded-2xl text-red-600">Excluir promoção</Button>
                               </div>
                             </div>
                           ) : (
@@ -6040,6 +6195,7 @@ function App() {
 
                               <div className="flex flex-wrap justify-end gap-2">
                                 <Button onClick={() => togglePromotionStatus(promotion.id)} variant="secondary" className="rounded-2xl">{promotion.active ? "Inativar" : "Ativar"}</Button>
+                                <Button onClick={() => deletePromotion(promotion.id)} variant="secondary" className="rounded-2xl text-red-600">Excluir promoção</Button>
                                 <Button onClick={() => setEditingPromotionId(null)} variant="secondary" className="rounded-2xl">Cancelar</Button>
                                 <Button onClick={() => savePromotionEdits(promotion.id)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Salvar alterações</Button>
                               </div>
@@ -6102,7 +6258,7 @@ function App() {
                   <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
                 </div>
                 {activeDeliveryOrdersForStore.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega em aberto no momento.</p></CardBox>}
-                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
+                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
 
                 <Title title="Relatório de entregas aprovadas" subtitle="Entregas que já foram confirmadas pela loja e liberadas para o entregador." />
                 <CardBox>
@@ -6199,7 +6355,7 @@ function App() {
                 </div>
 
                 <Title title="Vendas de balcão" subtitle="Separado das entregas, mas somado ao fechamento de caixa." />
-                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
+                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
               </div>
             )}
 
@@ -7051,9 +7207,11 @@ function NotificationPanel({ title, notifications, onMarkRead }) {
   );
 }
 
-function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent }) {
+function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent }) {
   const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
   const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
+  const isCounterSale = isCounterOrder(delivery);
+  const isCounterSaleFinalized = isCounterSale && delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED;
   const canConfirmPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && !isWaitingOrderApproval && delivery.paymentStatus !== PAYMENT_STATUS.PAID && !isPaymentProcessing;
   const canReopenPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && delivery.paymentStatus === PAYMENT_STATUS.PAID && !isPaymentProcessing;
   return (
@@ -7096,14 +7254,21 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
           <span className="text-sm text-zinc-500">Pagamento: {getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails)}</span>
           <span className={`rounded-2xl border px-3 py-2 text-xs font-bold ${getPaymentStatusClass(delivery.paymentStatus)}`}>{delivery.paymentStatus || PAYMENT_STATUS.PENDING}</span>
           {delivery.paymentConfirmedAt && <span className="text-[11px] text-zinc-500">Recebido em {new Date(delivery.paymentConfirmedAt).toLocaleString("pt-BR")}{delivery.paymentConfirmedBy ? ` por ${delivery.paymentConfirmedBy}` : ""}</span>}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full md:w-auto">
-            <Button onClick={() => onApprove(delivery.id)} disabled={!isDeliveryOrder(delivery) || (!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>
-            <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
-            <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>
-            <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">Reabrir recebimento</Button>
-            <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">Cancelar pedido</Button>
-            <Button onClick={() => onManualConfirm(delivery.id)} disabled={!isDeliveryOrder(delivery) || isWaitingOrderApproval || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>
-          </div>
+          {isCounterSaleFinalized ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full md:w-auto">
+              <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
+              <Button onClick={() => onReopenCounterSale?.(delivery.id)} variant="secondary" className="rounded-2xl text-amber-700">Reabrir no PDV</Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full md:w-auto">
+              {isDeliveryOrder(delivery) && <Button onClick={() => onApprove(delivery.id)} disabled={(!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>}
+              <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
+              {!isCounterSale && <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>}
+              <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">{isCounterSale ? "Reabrir recebimento" : "Reabrir recebimento"}</Button>
+              <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">{isCounterSale ? "Cancelar venda" : "Cancelar pedido"}</Button>
+              {isDeliveryOrder(delivery) && <Button onClick={() => onManualConfirm(delivery.id)} disabled={isWaitingOrderApproval || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
