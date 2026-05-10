@@ -45,7 +45,7 @@ export function isPromotionInPeriod(promotion, now = new Date()) {
 export function getActivePromotions(promotions, products) {
   return promotions.filter((promotion) => {
     const product = products.find((item) => item.id === Number(promotion.productId));
-    return promotion.active && product && product.active && isPromotionInPeriod(promotion) && getPromotionPrice(product, promotion) < Number(product.price || 0);
+    return promotion.active && product && getProductAvailabilityStatus(product).available && isPromotionInPeriod(promotion) && getPromotionPrice(product, promotion) < Number(product.price || 0);
   });
 }
 
@@ -79,7 +79,7 @@ export function getActiveKits(kits, products) {
 
     return Object.entries(quantitiesByProduct).every(([productId, quantity]) => {
       const product = products.find((currentProduct) => currentProduct.id === Number(productId));
-      return product && product.active && Number(product.stock || 0) >= Number(quantity || 0);
+      return product && getProductAvailabilityStatus(product).available && Number(product.stock || 0) >= Number(quantity || 0);
     });
   });
 }
@@ -89,7 +89,7 @@ export function getCustomerVisibleKits(kits, products = []) {
     if (!kit || !kit.active || !isKitInPeriod(kit) || !Array.isArray(kit.items) || kit.items.length === 0) return false;
     return kit.items.every((item) => {
       const product = products.find((currentProduct) => Number(currentProduct.id) === Number(item.productId));
-      return product && product.active === true && Number(product.stock || 0) >= Number(item.quantity || 0);
+      return product && getProductAvailabilityStatus(product).available && Number(product.stock || 0) >= Number(item.quantity || 0);
     });
   });
 }
@@ -117,8 +117,27 @@ export function describeKitItems(kit, products) {
     .join(", ");
 }
 
-export function getActiveProducts(products) {
-  return products.filter((product) => product.active === true);
+export function isProductPaused(product, now = new Date()) {
+  if (!product) return false;
+  const pausedUntil = product.pausedUntil || product.paused_until || "";
+  if (!pausedUntil) return false;
+  const untilTime = new Date(pausedUntil).getTime();
+  if (!Number.isFinite(untilTime)) return false;
+  return untilTime > now.getTime();
+}
+
+export function getProductAvailabilityStatus(product, now = new Date()) {
+  if (!product || product.active !== true) return { available: false, label: "Inativo" };
+  if (isProductPaused(product, now)) {
+    const until = new Date(product.pausedUntil || product.paused_until);
+    const timeLabel = Number.isFinite(until.getTime()) ? until.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "em breve";
+    return { available: false, label: `Pausado até ${timeLabel}` };
+  }
+  return { available: true, label: "Ativo" };
+}
+
+export function getActiveProducts(products, now = new Date()) {
+  return products.filter((product) => getProductAvailabilityStatus(product, now).available === true);
 }
 
 export function normalizeGroupName(groupName) {
@@ -131,7 +150,7 @@ export function hasDuplicateGroup(groups, groupName) {
 }
 
 export function getVisibleProductGroups(products, groups) {
-  const activeProductGroups = products.filter((product) => product.active).map((product) => normalizeGroupName(product.category)).filter(Boolean);
+  const activeProductGroups = products.filter((product) => getProductAvailabilityStatus(product).available).map((product) => normalizeGroupName(product.category)).filter(Boolean);
   return groups.filter((group) => activeProductGroups.includes(group));
 }
 

@@ -98,3 +98,12 @@ Depois teste no sistema publicado:
 - Problema na entrega passa a exigir motivo informado pelo entregador.
 - Ações críticas registram auditoria: aprovação, aceite, entrega, pagamento, cancelamento, reabertura e alteração de status.
 - Adicionada migração `supabase/migracao-fase-36-acoes-auditoria.sql`.
+
+## Fase 37 — Loja pausada e produto pausado
+
+- Adicionado modo de pausar pedidos temporariamente por 30 minutos, 1 hora ou 2 horas.
+- Quando a loja está pausada, o cliente vê a loja como fechada temporariamente e o checkout fica bloqueado.
+- Adicionado botão para liberar pedidos online antes do fim da pausa.
+- Adicionado botão para pausar/retomar produto temporariamente sem inativar ou excluir.
+- Produtos pausados somem do cardápio do cliente, PDV, kits e promoções enquanto a pausa estiver ativa.
+- Adicionada migração `supabase/migracao-fase-37-pausas.sql`.

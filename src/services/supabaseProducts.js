@@ -25,6 +25,8 @@ export function mapProductFromDatabase(product) {
     stock: Number(product.stock || 0),
     minStock: Number(product.min_stock || 0),
     deletedAt: product.deleted_at || product.deletedAt || "",
+    pausedUntil: product.paused_until || product.pausedUntil || "",
+    pauseReason: product.pause_reason || product.pauseReason || "",
     barcode: product.barcode || "",
     expirationDate: product.expiration_date || "",
     imageUrl: product.image_url || "",
@@ -49,6 +51,8 @@ export function buildProductInsertPayload(newProduct, productId) {
     image_url: newProduct.imageUrl || "",
     has_variants: newProduct.hasVariants === true,
     variants: normalizeProductVariants(newProduct.variants),
+    paused_until: newProduct.pausedUntil || null,
+    pause_reason: newProduct.pauseReason || "",
     active: true,
   };
 }
@@ -66,6 +70,8 @@ export function buildProductPatch(product) {
     image_url: product.imageUrl || "",
     has_variants: product.hasVariants === true,
     variants: normalizeProductVariants(product.variants),
+    paused_until: product.pausedUntil || null,
+    pause_reason: product.pauseReason || "",
     active: product.active === true,
   };
 }

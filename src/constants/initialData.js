@@ -14,6 +14,8 @@ export const initialStoreSettings = {
   localPrintServiceUrl: "http://localhost:9191/print",
   localPrintFallbackToBrowser: true,
   localPrintTimeoutMs: 5000,
+  storePausedUntil: "",
+  storePauseReason: "",
   openingHours: "Segunda a quinta das 09:00 às 00:00 • Sexta e sábado das 09:00 às 03:00 • Domingo das 13:00 às 00:00",
   isOpen: true,
   schedule: [
@@ -70,6 +72,8 @@ export const initialProducts = [
     stock: 42,
     minStock: 10,
     barcode: "7890000000011",
+    pausedUntil: "",
+    pauseReason: "",
     active: true,
   },
   {
@@ -81,6 +85,8 @@ export const initialProducts = [
     stock: 8,
     minStock: 12,
     barcode: "7894900011517",
+    pausedUntil: "",
+    pauseReason: "",
     active: true,
   },
 ];

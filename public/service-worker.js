@@ -1,4 +1,4 @@
-const CACHE_NAME = "barbosas-delivery-v6-0-4-fase-36-acoes-auditoria";
+const CACHE_NAME = "barbosas-delivery-v6-0-5-fase-37-pausas";
 const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg", "/icons.svg"];
 
 self.addEventListener("install", (event) => {

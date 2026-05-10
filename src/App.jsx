@@ -125,6 +125,8 @@ import {
   hasDuplicateGroup,
   getVisibleProductGroups,
   groupProductsByCategory,
+  isProductPaused,
+  getProductAvailabilityStatus,
 } from "./utils/catalog";
 import {
   buildDayReport,
@@ -490,6 +492,23 @@ function clampLocalPrintTimeoutMs(value) {
   return Math.min(15000, Math.max(1000, timeout));
 }
 
+function sanitizePauseUntil(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return "";
+  const time = new Date(rawValue).getTime();
+  return Number.isFinite(time) ? new Date(time).toISOString() : "";
+}
+
+function getStorePauseStatus(settings = {}, date = new Date()) {
+  const pausedUntil = sanitizePauseUntil(settings.storePausedUntil || settings.store_paused_until);
+  if (!pausedUntil) return { active: false, message: "" };
+  const until = new Date(pausedUntil);
+  if (until.getTime() <= date.getTime()) return { active: false, message: "" };
+  const timeLabel = until.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const reason = String(settings.storePauseReason || settings.store_pause_reason || "alta demanda").trim() || "alta demanda";
+  return { active: true, until: pausedUntil, reason, message: `Pedidos pausados até ${timeLabel}. Motivo: ${reason}` };
+}
+
 function sanitizeStoreSettings(settings = {}) {
   const source = settings && typeof settings === "object" ? settings : {};
   const schedule = normalizeStoreSchedule(source.schedule || initialStoreSettings.schedule);
@@ -510,6 +529,8 @@ function sanitizeStoreSettings(settings = {}) {
     localPrintServiceUrl: sanitizeLocalPrintServiceUrl(source.localPrintServiceUrl || initialStoreSettings.localPrintServiceUrl),
     localPrintFallbackToBrowser: source.localPrintFallbackToBrowser !== false,
     localPrintTimeoutMs: clampLocalPrintTimeoutMs(source.localPrintTimeoutMs || initialStoreSettings.localPrintTimeoutMs),
+    storePausedUntil: sanitizePauseUntil(source.storePausedUntil || source.store_paused_until || initialStoreSettings.storePausedUntil),
+    storePauseReason: String(source.storePauseReason || source.store_pause_reason || initialStoreSettings.storePauseReason || "").trim(),
     schedule,
     openingHours: buildOpeningHoursSummary(schedule),
   };
@@ -991,7 +1012,8 @@ function runSelfTests() {
     { name: "Fechamento separa venda balcão de entrega", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).counterSold === 10 && buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).deliverySold === 20 },
     { name: "Venda balcão finalizada mostra só reimpressão, resumo e reabrir PDV", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).print === true && getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).reopenCounterSale === true && getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
     { name: "Pedido entregue não exibe ações operacionais indevidas", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).approve === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).manualFinish === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
-    { name: "Cliente vê somente produtos ativos", passed: getActiveProducts([{ active: true }, { active: false }]).length === 1 },
+    { name: "Cliente vê somente produtos ativos e não pausados", passed: getActiveProducts([{ active: true }, { active: false }, { active: true, pausedUntil: new Date(Date.now() + 60_000).toISOString() }]).length === 1 },
+    { name: "Pausa temporária da loja fecha pedidos online", passed: getStorePauseStatus({ storePausedUntil: new Date(Date.now() + 60_000).toISOString(), storePauseReason: "Teste" }).active === true },
     { name: "Grupos de produtos não podem duplicar", passed: hasDuplicateGroup(["Bebidas"], "bebidas") === true },
     { name: "Cliente vê grupos com produtos ativos", passed: getVisibleProductGroups(initialProducts, initialProductGroups).includes("Bebidas") === true },
     { name: "Carrinho do cliente soma linhas repetidas do mesmo sabor", passed: mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }]).length === 1 && mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }])[0].quantity === 3 },
@@ -1961,7 +1983,9 @@ function App() {
 
   const normalizedStoreSchedule = useMemo(() => normalizeStoreSchedule(storeSettings.schedule), [storeSettings.schedule]);
   const storeOpenStatus = useMemo(() => getStoreOpenStatus(normalizedStoreSchedule, currentStoreDate), [normalizedStoreSchedule, currentStoreDate]);
-  const effectiveStoreIsOpen = storeOpenStatus.isOpen;
+  const storePauseStatus = useMemo(() => getStorePauseStatus(storeSettings, currentStoreDate), [storeSettings, currentStoreDate]);
+  const effectiveStoreIsOpen = storeOpenStatus.isOpen && !storePauseStatus.active;
+  const effectiveStoreMessage = storePauseStatus.active ? storePauseStatus.message : storeOpenStatus.message;
   const storeOpeningHoursSummary = useMemo(() => buildOpeningHoursSummary(normalizedStoreSchedule), [normalizedStoreSchedule]);
   const todayOpeningHoursSummary = useMemo(() => getTodayOpeningHours(normalizedStoreSchedule, currentStoreDate), [normalizedStoreSchedule, currentStoreDate]);
   const currentEstimatedDeliveryMinutes = useMemo(() => buildEstimatedDeliveryMinutes(deliveries, false), [deliveries]);
@@ -2089,12 +2113,12 @@ function App() {
     productsTotal: customerCartTotal,
     minimumOrderValue: storeSettings.minimumOrderValue,
     storeIsOpen: effectiveStoreIsOpen,
-    storeMessage: storeOpenStatus.message,
+    storeMessage: effectiveStoreMessage,
     customerForm,
     payment: customerPayment,
     changeFor: customerChangeFor,
     deliveryTotal: customerDeliveryTotal,
-  }), [safeCustomerCart, products, customerCartTotal, storeSettings.minimumOrderValue, effectiveStoreIsOpen, storeOpenStatus.message, customerForm, customerPayment, customerChangeFor, customerDeliveryTotal]);
+  }), [safeCustomerCart, products, customerCartTotal, storeSettings.minimumOrderValue, effectiveStoreIsOpen, effectiveStoreMessage, customerForm, customerPayment, customerChangeFor, customerDeliveryTotal]);
   const canSubmitCustomerOrder = !customerSubmitting && !customerCheckoutIssue;
   const normalizedCustomerPhoneForNotifications = useMemo(() => onlyPhoneNumbers(customerForm.phone), [customerForm.phone]);
 
@@ -3088,6 +3112,36 @@ function App() {
     }
     setProducts((previousProducts) => previousProducts.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
     setLastAction("Status do produto atualizado no Supabase.");
+  }
+
+  async function toggleProductPause(id) {
+    const product = products.find((item) => item.id === id);
+    if (!product) return;
+
+    const isPausedNow = isProductPaused(product, currentStoreDate);
+    let patch = { paused_until: null, pause_reason: "" };
+    let nextProduct = { ...product, pausedUntil: "", pauseReason: "" };
+
+    if (!isPausedNow) {
+      const reason = window.prompt("Motivo para pausar este produto:", product.pauseReason || "Produto indisponível temporariamente");
+      if (reason === null) return;
+      const minutesText = window.prompt("Pausar por quantos minutos?", "60");
+      if (minutesText === null) return;
+      const minutes = Math.min(1440, Math.max(5, Math.floor(Number(minutesText || 60))));
+      const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+      patch = { paused_until: until, pause_reason: String(reason || "Produto indisponível temporariamente").trim() };
+      nextProduct = { ...product, pausedUntil: until, pauseReason: patch.pause_reason };
+    }
+
+    const { error } = await updateWithSchemaRetry("products", id, patch);
+    if (error) {
+      console.error("Erro ao pausar produto:", error);
+      return setLastAction(`Pausa do produto não foi salva no Supabase: ${error.message || "verifique a migração da Fase 37."}`);
+    }
+
+    setProducts((previousProducts) => previousProducts.map((item) => (item.id === id ? nextProduct : item)));
+    await auditAction(isPausedNow ? "resume_product" : "pause_product", "products", id, { name: product.name, pauseReason: nextProduct.pauseReason, pausedUntil: nextProduct.pausedUntil }, null, "store", getCurrentStoreUserName());
+    setLastAction(isPausedNow ? "Produto voltou a aparecer para cliente e PDV." : "Produto pausado temporariamente e oculto para cliente/PDV.");
   }
 
   function confirmStorePasswordForSensitiveAction(actionLabel) {
@@ -4914,6 +4968,24 @@ function App() {
     }
   }
 
+  function pauseStoreTemporarily(minutes = 30) {
+    const reason = window.prompt("Motivo para pausar pedidos:", storeSettings.storePauseReason || "Alta demanda");
+    if (reason === null) return;
+    const safeMinutes = Math.min(1440, Math.max(5, Math.floor(Number(minutes || 30))));
+    const pausedUntil = new Date(Date.now() + safeMinutes * 60 * 1000).toISOString();
+    setStoreSettings((previousSettings) => ({
+      ...previousSettings,
+      storePausedUntil: pausedUntil,
+      storePauseReason: String(reason || "Alta demanda").trim(),
+    }));
+    setLastAction(`Pedidos pausados por ${safeMinutes} minutos. O cliente verá a loja fechada temporariamente.`);
+  }
+
+  function resumeStoreOrders() {
+    setStoreSettings((previousSettings) => ({ ...previousSettings, storePausedUntil: "", storePauseReason: "" }));
+    setLastAction("Pedidos online liberados novamente.");
+  }
+
   function updateStoreScheduleDay(day, field, value) {
     setStoreSettings((previousSettings) => {
       const nextSchedule = normalizeStoreSchedule(previousSettings.schedule).map((item) => (
@@ -5350,7 +5422,7 @@ function App() {
                       <div className={`rounded-2xl border p-3 ${effectiveStoreIsOpen ? "border-emerald-100 bg-emerald-50 text-emerald-900" : "border-red-100 bg-red-50 text-red-900"}`}>
                         <p className="font-black">{effectiveStoreIsOpen ? "Estamos abertos" : "Estamos fechados no momento"}</p>
                         <p className="mt-1 font-bold">Hoje: {todayOpeningHoursSummary}</p>
-                        <p className="text-[11px] opacity-80">{storeOpenStatus.message}</p>
+                        <p className="text-[11px] opacity-80">{effectiveStoreMessage}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
@@ -5881,6 +5953,7 @@ function App() {
                     {filteredProducts.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto encontrado.</p>}
                     {filteredProducts.map((product) => {
                       const isEditing = editingProductId === product.id;
+                      const productAvailability = getProductAvailabilityStatus(product, currentStoreDate);
                       return (
                         <div key={product.id} className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 space-y-3">
                           {!isEditing ? (
@@ -5891,7 +5964,8 @@ function App() {
                                   <p className="font-bold">{product.name}</p>
                                   <p className="text-sm text-zinc-600">Grupo: {product.category} • {money(product.price)} • Código: {product.barcode}</p>
                                 <p className="text-sm text-zinc-500">Estoque: {product.stock}{product.stock <= product.minStock ? " ⚠️" : ""} • Mínimo: {product.minStock}</p>
-                                <p className={`text-sm font-semibold ${product.active ? "text-emerald-700" : "text-red-600"}`}>Status: {product.active ? "Ativo" : "Inativo"}</p>
+                                <p className={`text-sm font-semibold ${productAvailability.available ? "text-emerald-700" : "text-red-600"}`}>Status: {productAvailability.label}</p>
+                                  {product.pauseReason && isProductPaused(product, currentStoreDate) && <p className="text-xs font-bold text-amber-700">Motivo: {product.pauseReason}</p>}
                                   {product.hasVariants && <p className="text-sm text-purple-700 font-semibold">Sabores: {getActiveProductVariants(product).length}</p>}
                                 </div>
                               </div>
@@ -5902,7 +5976,8 @@ function App() {
                                 </label>
                                 {product.imageUrl && <Button onClick={() => removeExistingProductImage(product.id)} variant="secondary" className="rounded-2xl">Remover foto</Button>}
                                 <div className="flex flex-wrap gap-2"><Button onClick={() => setEditingProductId(product.id)} variant="secondary" className="rounded-2xl">Editar produto</Button><Button onClick={() => deleteProduct(product.id)} variant="secondary" className="rounded-2xl text-red-700">Excluir produto</Button></div>
-                                <Button onClick={() => toggleProductStatus(product.id)} variant="secondary" className="rounded-2xl">{product.active ? "Inativar" : "Ativar"}</Button>
+                                <Button onClick={() => toggleProductPause(product.id)} variant="secondary" className={`rounded-2xl ${isProductPaused(product, currentStoreDate) ? "text-emerald-700" : "text-amber-700"}`}>{isProductPaused(product, currentStoreDate) ? "Retomar produto" : "Pausar produto"}</Button>
+                                  <Button onClick={() => toggleProductStatus(product.id)} variant="secondary" className="rounded-2xl">{product.active ? "Inativar" : "Ativar"}</Button>
                               </div>
                             </div>
                           ) : (
@@ -6782,9 +6857,24 @@ function App() {
                         <div>
                           <p className="text-xs font-medium text-zinc-600">Funcionamento</p>
                           <p className={`mt-1 text-lg font-black ${effectiveStoreIsOpen ? "text-emerald-700" : "text-red-700"}`}>{effectiveStoreIsOpen ? "Aberto" : "Fechado"}</p>
-                          <p className="text-xs text-zinc-500">{storeOpenStatus.message}</p>
+                          <p className="text-xs text-zinc-500">{effectiveStoreMessage}</p>
                         </div>
                         <Button onClick={() => setShowStoreScheduleModal(true)} variant="secondary" className="rounded-2xl px-4">Editar</Button>
+                      </div>
+                    </div>
+                    <div className={`rounded-3xl border p-4 ${storePauseStatus.active ? "border-amber-200 bg-amber-50" : "border-zinc-200 bg-zinc-50"}`}>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs font-medium text-zinc-600">Pausar pedidos temporariamente</p>
+                          <p className={`mt-1 text-lg font-black ${storePauseStatus.active ? "text-amber-800" : "text-emerald-700"}`}>{storePauseStatus.active ? "Pedidos pausados" : "Pedidos liberados"}</p>
+                          <p className="text-xs text-zinc-500">{storePauseStatus.active ? storePauseStatus.message : "Use quando a loja estiver com alta demanda ou precisar parar pedidos por alguns minutos."}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <Button onClick={() => pauseStoreTemporarily(30)} variant="secondary" className="rounded-2xl bg-white px-3 text-xs">30 min</Button>
+                          <Button onClick={() => pauseStoreTemporarily(60)} variant="secondary" className="rounded-2xl bg-white px-3 text-xs">1 hora</Button>
+                          <Button onClick={() => pauseStoreTemporarily(120)} variant="secondary" className="rounded-2xl bg-white px-3 text-xs">2 horas</Button>
+                          <Button onClick={resumeStoreOrders} disabled={!storePauseStatus.active} variant="secondary" className="rounded-2xl bg-white px-3 text-xs text-emerald-700">Liberar</Button>
+                        </div>
                       </div>
                     </div>
                     <div className="md:col-span-2"><Input label="Mensagem padrão para WhatsApp" value={storeSettings.whatsappMessage} onChange={(value) => updateStoreSetting("whatsappMessage", value)} /></div>
@@ -7129,7 +7219,7 @@ function App() {
 
               <div className="border-t border-zinc-100 p-5">
                 <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
-                  Status atual: <b className={effectiveStoreIsOpen ? "text-emerald-700" : "text-red-700"}>{effectiveStoreIsOpen ? "Aberto" : "Fechado"}</b> • {storeOpenStatus.message}
+                  Status atual: <b className={effectiveStoreIsOpen ? "text-emerald-700" : "text-red-700"}>{effectiveStoreIsOpen ? "Aberto" : "Fechado"}</b> • {effectiveStoreMessage}
                 </div>
                 <Button onClick={() => setShowStoreScheduleModal(false)} className="mt-3 w-full rounded-2xl bg-zinc-950 text-white hover:bg-zinc-800">Salvar horários</Button>
               </div>

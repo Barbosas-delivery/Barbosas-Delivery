@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.4-fase-36-acoes-auditoria";
+export const APP_VERSION = "6.0.5-fase-37-pausas";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

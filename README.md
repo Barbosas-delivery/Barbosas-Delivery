@@ -23,7 +23,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.1-final`
+`6.0.5-fase-37-pausas`
 
 ## Revisão final
 
