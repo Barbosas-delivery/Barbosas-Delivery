@@ -717,24 +717,75 @@ function sortDeliveriesByPriority(a, b) {
   return getDeliveryLaunchTimeValue(a) - getDeliveryLaunchTimeValue(b);
 }
 
-function buildCourierTodaySummary(deliveries = [], courierUsername = '') {
-  const normalizedUsername = String(courierUsername || '').trim().toLowerCase();
-  const today = new Date().toISOString().slice(0, 10);
-  const completed = (deliveries || []).filter((delivery) => {
-    if (!normalizedUsername || !isDeliveryOrder(delivery)) return false;
-    if (delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.ownerApproved !== true) return false;
-    if (!isCourierAssignedToDelivery(delivery, normalizedUsername)) return false;
-    const completedDate = String(delivery.ownerApprovedAt || delivery.deliveredAt || delivery.launchedAt || '').slice(0, 10);
-    return completedDate === today;
-  });
+function getDeliveryCompletionTimeValue(delivery) {
+  const dates = [delivery?.ownerApprovedAt, delivery?.deliveredAt, delivery?.finalizedAt, delivery?.closedAt]
+    .map((value) => new Date(value || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return dates.length > 0 ? Math.max(...dates) : 0;
+}
+
+function getDeliveryCompletionDate(delivery) {
+  const completedAt = delivery?.ownerApprovedAt || delivery?.deliveredAt || delivery?.finalizedAt || delivery?.closedAt || delivery?.launchedAt || delivery?.createdAt || "";
+  return String(completedAt).slice(0, 10);
+}
+
+function getDeliveryCompletionMinutes(delivery) {
+  const startedAt = getDeliveryLaunchTimeValue(delivery);
+  const completedAt = getDeliveryCompletionTimeValue(delivery);
+  if (!startedAt || !completedAt || completedAt < startedAt) return 0;
+  return Math.max(0, Math.floor((completedAt - startedAt) / 60000));
+}
+
+function isDeliveryCompletedByCourier(delivery, courierUsername = "") {
+  if (!isDeliveryOrder(delivery)) return false;
+  if (delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.ownerApproved !== true) return false;
+  return isCourierAssignedToDelivery(delivery, courierUsername);
+}
+
+function isDateInInputRange(dateText, startDate = "", endDate = "") {
+  if (!dateText) return false;
+  if (startDate && dateText < startDate) return false;
+  if (endDate && dateText > endDate) return false;
+  return true;
+}
+
+function buildCourierClosingReport(deliveries = [], courierUsername = "", startDate = "", endDate = "") {
+  const normalizedUsername = String(courierUsername || "").trim().toLowerCase();
+  const completed = (deliveries || [])
+    .filter((delivery) => {
+      if (!normalizedUsername || !isDeliveryCompletedByCourier(delivery, normalizedUsername)) return false;
+      return isDateInInputRange(getDeliveryCompletionDate(delivery), startDate, endDate);
+    })
+    .slice()
+    .sort((a, b) => getDeliveryCompletionTimeValue(b) - getDeliveryCompletionTimeValue(a));
+
+  const grossDeliveryFee = completed.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0);
+  const courierAmount = completed.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0);
+  const storeAmount = completed.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0);
+  const ownMotorcycleCount = completed.filter((delivery) => !String(delivery.motorcycleType || "").toLowerCase().includes("estabelecimento")).length;
+  const storeMotorcycleCount = completed.filter((delivery) => String(delivery.motorcycleType || "").toLowerCase().includes("estabelecimento")).length;
+  const delayedCount = completed.filter((delivery) => getDeliveryCompletionMinutes(delivery) >= DELIVERY_DELAY_ALERT_MINUTES).length;
+  const totalMinutes = completed.reduce((sum, delivery) => sum + getDeliveryCompletionMinutes(delivery), 0);
+
   return {
+    courierUsername,
+    startDate,
+    endDate,
+    deliveries: completed,
     completedCount: completed.length,
-    grossDeliveryFee: completed.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0),
-    courierAmount: completed.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
-    storeAmount: completed.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0),
-    ownMotorcycleCount: completed.filter((delivery) => !String(delivery.motorcycleType || '').toLowerCase().includes('estabelecimento')).length,
-    storeMotorcycleCount: completed.filter((delivery) => String(delivery.motorcycleType || '').toLowerCase().includes('estabelecimento')).length,
+    grossDeliveryFee,
+    courierAmount,
+    storeAmount,
+    ownMotorcycleCount,
+    storeMotorcycleCount,
+    delayedCount,
+    averageMinutes: completed.length > 0 ? Math.round(totalMinutes / completed.length) : 0,
   };
+}
+
+function buildCourierTodaySummary(deliveries = [], courierUsername = '') {
+  const today = new Date().toISOString().slice(0, 10);
+  return buildCourierClosingReport(deliveries, courierUsername, today, today);
 }
 
 function getCustomerOrderStatusInfo(delivery) {
@@ -1979,6 +2030,8 @@ function App() {
   const [pendingCancellation, setPendingCancellation] = useState({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY });
   const [cashClosings, setCashClosings] = useState([]);
   const [reportRange, setReportRange] = useState({ startDate: todayInput.slice(0, 7) + "-01", endDate: todayInput });
+  const [courierClosingRange, setCourierClosingRange] = useState({ startDate: todayInput, endDate: todayInput });
+  const [selectedCourierClosingUsername, setSelectedCourierClosingUsername] = useState("");
   const isCashOpen = cashSession.isOpen === true;
 
   const normalizedStoreSchedule = useMemo(() => normalizeStoreSchedule(storeSettings.schedule), [storeSettings.schedule]);
@@ -2174,6 +2227,9 @@ function App() {
       return searchable.includes(term);
     });
   }, [couriers, courierSearch]);
+  const selectedCourierClosingEffectiveUsername = selectedCourierClosingUsername || couriers.find((courier) => courier.active !== false)?.username || couriers[0]?.username || "";
+  const selectedCourierClosing = useMemo(() => couriers.find((courier) => String(courier.username || "").trim().toLowerCase() === String(selectedCourierClosingEffectiveUsername || "").trim().toLowerCase()) || null, [couriers, selectedCourierClosingEffectiveUsername]);
+  const courierClosingReport = useMemo(() => buildCourierClosingReport(deliveries, selectedCourierClosingEffectiveUsername, courierClosingRange.startDate, courierClosingRange.endDate), [deliveries, selectedCourierClosingEffectiveUsername, courierClosingRange]);
 
   const storeDeliverySummary = useMemo(() => buildStoreDeliveryFinancialSummary(deliveries), [deliveries]);
   const customerHistoryByClientId = useMemo(() => {
@@ -3952,6 +4008,104 @@ function App() {
     downloadCsvFile(`barbosas-estoque-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
     auditAction("export_stock_csv", "products", "stock", { rows: rows.length });
     setLastAction("Estoque exportado em CSV.");
+  }
+
+  function setCourierClosingQuickRange(kind) {
+    const now = new Date();
+    const toInputDate = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+    const today = toInputDate(now);
+    if (kind === "today") {
+      setCourierClosingRange({ startDate: today, endDate: today });
+      return;
+    }
+    if (kind === "last7") {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 6);
+      setCourierClosingRange({ startDate: toInputDate(start), endDate: today });
+      return;
+    }
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    setCourierClosingRange({ startDate: toInputDate(startOfMonth), endDate: today });
+  }
+
+  function buildCourierClosingFileDate() {
+    const start = courierClosingRange.startDate || "inicio";
+    const end = courierClosingRange.endDate || "hoje";
+    const courier = selectedCourierClosingEffectiveUsername || "entregador";
+    return `${courier}-${start}_a_${end}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  }
+
+  function printCourierClosingReport() {
+    if (!selectedCourierClosingEffectiveUsername) return setLastAction("Selecione um entregador para imprimir o fechamento.");
+    const report = courierClosingReport;
+    const courierName = selectedCourierClosing?.name || selectedCourierClosingEffectiveUsername;
+    const rows = report.deliveries.map((delivery) => `
+      <tr>
+        <td>#${escapeHtml(String(delivery.id))}</td>
+        <td>${escapeHtml(getDeliveryCompletionDate(delivery) || "-")}</td>
+        <td class="right">${escapeHtml(money(normalizeDeliveryFee(delivery.deliveryFee)))}</td>
+        <td class="right">${escapeHtml(money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)))}</td>
+      </tr>
+    `).join("");
+    const body = `
+      <h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>
+      <p class="center muted">FECHAMENTO DO ENTREGADOR</p>
+      <p><b>Entregador:</b> ${escapeHtml(courierName)} (${escapeHtml(selectedCourierClosingEffectiveUsername)})</p>
+      <p><b>Período:</b> ${escapeHtml(courierClosingRange.startDate || "início")} até ${escapeHtml(courierClosingRange.endDate || "hoje")}</p>
+      <p><b>Emitido por:</b> ${escapeHtml(getCurrentStoreDisplayName())}</p>
+      <div class="line"></div>
+      <h2>Resumo</h2>
+      <table>
+        <tbody>
+          <tr><td>Entregas concluídas</td><td class="right"><b>${escapeHtml(String(report.completedCount))}</b></td></tr>
+          <tr><td>Taxas geradas</td><td class="right">${escapeHtml(money(report.grossDeliveryFee))}</td></tr>
+          <tr><td><b>A pagar ao entregador</b></td><td class="right"><b>${escapeHtml(money(report.courierAmount))}</b></td></tr>
+          <tr><td>Parte da loja</td><td class="right">${escapeHtml(money(report.storeAmount))}</td></tr>
+          <tr><td>Moto própria</td><td class="right">${escapeHtml(String(report.ownMotorcycleCount))}</td></tr>
+          <tr><td>Moto da loja</td><td class="right">${escapeHtml(String(report.storeMotorcycleCount))}</td></tr>
+          <tr><td>Atrasos</td><td class="right">${escapeHtml(String(report.delayedCount))}</td></tr>
+          <tr><td>Tempo médio</td><td class="right">${escapeHtml(String(report.averageMinutes))} min</td></tr>
+        </tbody>
+      </table>
+      <div class="line"></div>
+      <h2>Entregas</h2>
+      <table><tbody>${rows || `<tr><td colspan="4">Nenhuma entrega no período.</td></tr>`}</tbody></table>
+      <div class="line"></div>
+      <p class="center"><b>Recebi:</b> __________________</p>
+      <p class="center muted">Versão ${escapeHtml(APP_VERSION)}</p>
+    `;
+    const printed = printThermalHtml("FECHAMENTO DO ENTREGADOR", body, 1, { delivery: true });
+    if (printed) auditAction("print_courier_closing", "courier_closing", buildCourierClosingFileDate(), { courier: selectedCourierClosingEffectiveUsername, completed: report.completedCount, courierAmount: report.courierAmount });
+    setLastAction(printed ? "Fechamento do entregador enviado para impressão." : "Não foi possível abrir a impressão do fechamento do entregador.");
+  }
+
+  function exportCourierClosingCsv() {
+    if (!selectedCourierClosingEffectiveUsername) return setLastAction("Selecione um entregador para exportar o fechamento.");
+    const headers = ["Pedido", "Data conclusão", "Cliente", "Telefone", "Tipo de moto", "Taxa entrega", "Entregador", "Loja", "Tempo min", "Atrasada"];
+    const rows = courierClosingReport.deliveries.map((delivery) => {
+      const minutes = getDeliveryCompletionMinutes(delivery);
+      return [
+        delivery.id,
+        getDeliveryCompletionDate(delivery) || "",
+        delivery.client || "",
+        formatBrazilMobilePhone(delivery.phone || ""),
+        delivery.motorcycleType || "Moto própria",
+        money(normalizeDeliveryFee(delivery.deliveryFee)),
+        money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)),
+        money(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)),
+        minutes,
+        minutes >= DELIVERY_DELAY_ALERT_MINUTES ? "Sim" : "Não",
+      ];
+    });
+    rows.unshift(["RESUMO", `${courierClosingRange.startDate || "início"} até ${courierClosingRange.endDate || "hoje"}`, selectedCourierClosing?.name || selectedCourierClosingEffectiveUsername, "", "", money(courierClosingReport.grossDeliveryFee), money(courierClosingReport.courierAmount), money(courierClosingReport.storeAmount), courierClosingReport.averageMinutes, `${courierClosingReport.delayedCount} atrasos`]);
+    downloadCsvFile(`barbosas-fechamento-entregador-${buildCourierClosingFileDate()}.csv`, headers, rows);
+    auditAction("export_courier_closing_csv", "courier_closing", buildCourierClosingFileDate(), { rows: rows.length - 1, courier: selectedCourierClosingEffectiveUsername });
+    setLastAction("Fechamento do entregador exportado em CSV.");
   }
 
   async function applyManualStockAdjustment() {
@@ -6990,6 +7144,69 @@ function App() {
                   <Metric title="Valor dos entregadores" value={money(storeDeliverySummary.courierAmount)} icon="truck" />
                   <Metric title="Parte da loja" value={money(storeDeliverySummary.storeAmount)} icon="chart" />
                 </div>
+
+                <CardBox>
+                  <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="font-bold text-lg">Fechamento do entregador</h3>
+                      <p className="text-sm text-zinc-500">Confira entregas concluídas, divisão da taxa, atrasos e imprima o recibo para pagamento do motoboy.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2 w-full xl:max-w-5xl">
+                      <label className="block">
+                        <span className="text-xs font-medium text-zinc-600">Entregador</span>
+                        <select value={selectedCourierClosingEffectiveUsername} onChange={(event) => setSelectedCourierClosingUsername(event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                          {couriers.length === 0 && <option value="">Nenhum entregador</option>}
+                          {couriers.map((courier) => <option key={courier.id || courier.username} value={courier.username}>{courier.name} • {courier.username}</option>)}
+                        </select>
+                      </label>
+                      <Input label="Data inicial" type="date" value={courierClosingRange.startDate} onChange={(value) => setCourierClosingRange({ ...courierClosingRange, startDate: value })} />
+                      <Input label="Data final" type="date" value={courierClosingRange.endDate} onChange={(value) => setCourierClosingRange({ ...courierClosingRange, endDate: value })} />
+                      <div className="grid grid-cols-3 gap-2 self-end">
+                        <Button onClick={() => setCourierClosingQuickRange("today")} variant="secondary" className="rounded-xl px-3 py-2 text-xs">Hoje</Button>
+                        <Button onClick={() => setCourierClosingQuickRange("last7")} variant="secondary" className="rounded-xl px-3 py-2 text-xs">7 dias</Button>
+                        <Button onClick={() => setCourierClosingQuickRange("month")} variant="secondary" className="rounded-xl px-3 py-2 text-xs">Mês</Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <Metric title="Entregas concluídas" value={courierClosingReport.completedCount} icon="check" />
+                    <Metric title="A pagar" value={money(courierClosingReport.courierAmount)} icon="money" />
+                    <Metric title="Parte da loja" value={money(courierClosingReport.storeAmount)} icon="chart" />
+                    <Metric title="Atrasos" value={courierClosingReport.delayedCount} icon="alert" />
+                    <Metric title="Taxas geradas" value={money(courierClosingReport.grossDeliveryFee)} icon="money" />
+                    <Metric title="Tempo médio" value={`${courierClosingReport.averageMinutes} min`} icon="truck" />
+                    <Metric title="Moto própria" value={courierClosingReport.ownMotorcycleCount} icon="truck" />
+                    <Metric title="Moto da loja" value={courierClosingReport.storeMotorcycleCount} icon="truck" />
+                  </div>
+
+                  <div className="flex flex-col md:flex-row gap-2 mb-4">
+                    <Button onClick={printCourierClosingReport} disabled={!selectedCourierClosingEffectiveUsername} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Imprimir fechamento</Button>
+                    <Button onClick={exportCourierClosingCsv} disabled={!selectedCourierClosingEffectiveUsername} variant="secondary" className="rounded-2xl">CSV fechamento</Button>
+                  </div>
+
+                  <div className="rounded-3xl border border-zinc-100 overflow-hidden">
+                    <div className="grid grid-cols-[90px_1fr_110px_110px] bg-zinc-50 px-4 py-3 text-xs font-bold text-zinc-600 uppercase">
+                      <span>Pedido</span><span>Cliente</span><span className="text-right">Taxa</span><span className="text-right">A pagar</span>
+                    </div>
+                    <div className="max-h-80 overflow-auto divide-y divide-zinc-100">
+                      {courierClosingReport.deliveries.length === 0 ? <p className="p-4 text-sm text-zinc-500">Nenhuma entrega concluída para este entregador no período.</p> : courierClosingReport.deliveries.slice(0, 80).map((delivery) => {
+                        const minutes = getDeliveryCompletionMinutes(delivery);
+                        return (
+                          <div key={delivery.id} className="grid grid-cols-[90px_1fr_110px_110px] px-4 py-3 text-sm items-center gap-2">
+                            <span className="font-bold">#{delivery.id}</span>
+                            <span className="min-w-0">
+                              <b className="block truncate">{delivery.client}</b>
+                              <span className="text-xs text-zinc-500">{getDeliveryCompletionDate(delivery) || "-"} • {minutes} min {minutes >= DELIVERY_DELAY_ALERT_MINUTES ? "• atrasada" : ""}</span>
+                            </span>
+                            <span className="text-right">{money(normalizeDeliveryFee(delivery.deliveryFee))}</span>
+                            <span className="text-right font-black">{money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType))}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </CardBox>
 
                 <CardBox>
                   <h3 className="font-bold text-lg mb-4">Novo entregador</h3>

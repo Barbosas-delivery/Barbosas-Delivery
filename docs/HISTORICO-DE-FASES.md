@@ -107,3 +107,13 @@ Depois teste no sistema publicado:
 - Adicionado botão para pausar/retomar produto temporariamente sem inativar ou excluir.
 - Produtos pausados somem do cardápio do cliente, PDV, kits e promoções enquanto a pausa estiver ativa.
 - Adicionada migração `supabase/migracao-fase-37-pausas.sql`.
+
+## Fase 38 — Fechamento do entregador
+
+- Adicionada área de fechamento por entregador na aba Entregadores.
+- O fechamento permite escolher entregador e período.
+- Mostra entregas concluídas, taxas geradas, valor a pagar ao entregador, parte da loja, moto própria, moto da loja, atrasos e tempo médio.
+- Lista as entregas do período com pedido, cliente, data, tempo, taxa e valor do entregador.
+- Adicionado botão para imprimir recibo térmico do fechamento do entregador.
+- Adicionado CSV do fechamento do entregador.
+- Atualizado cache do PWA para a versão 6.0.6-fase-38-fechamento-entregador.

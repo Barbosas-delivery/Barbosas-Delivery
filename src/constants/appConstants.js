@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.5-fase-37-pausas";
+export const APP_VERSION = "6.0.6-fase-38-fechamento-entregador";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
