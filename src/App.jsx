@@ -8711,6 +8711,35 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
     criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length > 0 && { title: "Repor estoque zerado", value: criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length, description: "Produtos sem estoque disponível." },
     backupDue && { title: "Baixar backup", value: "Hoje", description: "Backup diário ainda não foi feito neste navegador." },
   ].filter(Boolean);
+  const closingChecklist = [
+    {
+      title: "Entregas ativas",
+      pending: todayActiveDeliveries.length,
+      okText: "Nenhuma entrega aberta",
+      pendingText: `${todayActiveDeliveries.length} entrega${todayActiveDeliveries.length === 1 ? "" : "s"} em andamento`,
+    },
+    {
+      title: "Pagamentos pendentes",
+      pending: todayPendingPayments.length,
+      okText: "Nenhum pagamento pendente",
+      pendingText: `${todayPendingPayments.length} pagamento${todayPendingPayments.length === 1 ? "" : "s"} para conferir`,
+    },
+    {
+      title: "Pedidos aguardando aprovação",
+      pending: waitingStoreApproval.length,
+      okText: "Nenhum pedido aguardando",
+      pendingText: `${waitingStoreApproval.length} pedido${waitingStoreApproval.length === 1 ? "" : "s"} aguardando aprovação`,
+    },
+    {
+      title: "Backup diário",
+      pending: backupDue ? 1 : 0,
+      okText: "Backup do dia conferido",
+      pendingText: "Backup diário ainda não foi baixado",
+      action: backupDue ? onDownloadBackup : null,
+      actionLabel: "Baixar backup diário",
+    },
+  ];
+  const closingPendingCount = closingChecklist.reduce((total, item) => total + (item.pending > 0 ? 1 : 0), 0);
   const priorityQueue = [...todayActiveDeliveries]
     .sort((a, b) => {
       const aDelayed = isDeliveryDelayed(a) ? 1 : 0;
@@ -8738,6 +8767,39 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
             <Metric title="A receber" value={todayPendingPayments.length} icon="alert" />
           </div>
         </div>
+        <div className="mt-4 rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+            <div>
+              <h4 className="font-black text-lg">Fechamento do dia</h4>
+              <p className="text-sm text-zinc-500">Confira pendências antes de encerrar a loja.</p>
+            </div>
+            <span className={`w-fit rounded-full px-4 py-2 text-xs font-black ${closingPendingCount > 0 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+              {closingPendingCount > 0 ? "Conferir pendências" : "Tudo certo"}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {closingChecklist.map((item) => {
+              const hasPending = item.pending > 0;
+              return (
+                <div key={item.title} className={`rounded-2xl border p-3 text-sm ${hasPending ? "border-amber-200 bg-white" : "border-emerald-100 bg-white"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-black">{item.title}</p>
+                      <p className={`mt-1 ${hasPending ? "text-amber-700" : "text-emerald-700"}`}>{hasPending ? item.pendingText : item.okText}</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-[11px] font-black ${hasPending ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+                      {hasPending ? "Conferir" : "OK"}
+                    </span>
+                  </div>
+                  {item.action && (
+                    <Button onClick={item.action} variant="secondary" className="mt-3 w-full rounded-xl bg-amber-50 text-xs">{item.actionLabel}</Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
           <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
             <div className="flex items-center justify-between gap-3 mb-3">

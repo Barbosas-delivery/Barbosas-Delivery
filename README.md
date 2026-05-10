@@ -23,7 +23,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.16-fase-48-hoje-operacional`
+`6.0.17-fase-49-fechamento-dia`
 
 ## Revisão final
 
@@ -48,3 +48,5 @@ Veja `docs/PERMISSOES-POR-ACAO.md` para os limites de desconto e ações permiti
 - [Auditoria operacional](docs/AUDITORIA-OPERACIONAL.md)
 
 - [Hoje operacional](docs/HOJE-OPERACIONAL.md)
+
+- [Fechamento do dia](docs/FECHAMENTO-DO-DIA.md)

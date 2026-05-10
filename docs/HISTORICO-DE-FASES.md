@@ -204,3 +204,13 @@ Depois teste no sistema publicado:
 - Adiciona fila rápida de entregas, com atrasadas primeiro e pedidos mais antigos em seguida.
 - Documentação em `docs/HOJE-OPERACIONAL.md`.
 - Atualiza versão para `6.0.16-fase-48-hoje-operacional`.
+
+## Fase 49 — Fechamento do dia
+
+- Adiciona o bloco **Fechamento do dia** no painel principal.
+- Confere entregas ativas, pagamentos pendentes, pedidos aguardando aprovação e backup diário.
+- Mostra status geral **Tudo certo** ou **Conferir pendências**.
+- Adiciona botão **Baixar backup diário** diretamente no checklist quando o backup estiver pendente.
+- Documentação em `docs/FECHAMENTO-DO-DIA.md`.
+- Atualiza cache do PWA para evitar celulares carregarem versão antiga.
+- Atualiza versão para `6.0.17-fase-49-fechamento-dia`.
