@@ -160,6 +160,7 @@ import {
   createNotification,
   getUnreadNotificationCount,
   getAudienceNotifications,
+  isNotificationActive,
 } from "./utils/notifications";
 import {
   normalizeStoreCredential,
@@ -1996,28 +1997,74 @@ function App() {
     }
   }
 
+  async function updateNotificationsResolvedInSupabase(buildQuery, resolvedAt) {
+    const patches = [
+      { read: true, read_at: resolvedAt, resolved_at: resolvedAt },
+      { read_at: resolvedAt, resolved_at: resolvedAt },
+      { resolved_at: resolvedAt },
+      { read_at: resolvedAt },
+    ];
+
+    for (const patch of patches) {
+      const { error } = await buildQuery(patch);
+      if (!error) return;
+    }
+  }
+
+  function isVisibleCustomerNotificationForPhone(notification, normalizedCustomerPhone) {
+    if (!normalizedCustomerPhone) return false;
+    if (normalizeNotificationAudience(notification.audience) !== "customer") return false;
+    if (!isNotificationActive(notification)) return false;
+
+    const notificationPhone = onlyPhoneNumbers(notification.customerPhone || notification.customer_phone);
+    if (notificationPhone) return notificationPhone === normalizedCustomerPhone;
+
+    const relatedDelivery = deliveries.find((delivery) => String(delivery.id) === String(notification.orderId || notification.deliveryId));
+    const relatedPhone = onlyPhoneNumbers(relatedDelivery?.phone || "");
+    return Boolean(relatedPhone && relatedPhone === normalizedCustomerPhone);
+  }
+
   async function markNotificationsRead(audience, courierUsername = "", customerPhone = "") {
     const normalizedAudience = normalizeNotificationAudience(audience);
     const normalizedCourierUsername = String(courierUsername || "").trim().toLowerCase();
     const normalizedCustomerPhone = onlyPhoneNumbers(customerPhone);
     const readAt = new Date().toISOString();
 
-    setNotifications((previousNotifications) =>
-      previousNotifications.map((notification) => {
-        const notificationAudience = normalizeNotificationAudience(notification.audience);
+    const shouldMarkNotification = (notification) => {
+      const notificationAudience = normalizeNotificationAudience(notification.audience);
+      if (notificationAudience !== normalizedAudience || !isNotificationActive(notification)) return false;
+
+      if (normalizedAudience === "courier") {
         const notificationCourierUsername = String(notification.courierUsername || notification.courier_username || "").trim().toLowerCase();
-        const notificationCustomerPhone = onlyPhoneNumbers(notification.customerPhone || notification.customer_phone);
-        const isSameAudience = notificationAudience === normalizedAudience;
-        const isSameCourier = normalizedAudience !== "courier" || !normalizedCourierUsername || !notificationCourierUsername || notificationCourierUsername === normalizedCourierUsername;
-        const isSameCustomer = normalizedAudience !== "customer" || !normalizedCustomerPhone || notificationCustomerPhone === normalizedCustomerPhone;
-        return isSameAudience && isSameCourier && isSameCustomer ? { ...notification, read: true, readAt, resolvedAt: readAt } : notification;
-      })
+        return !normalizedCourierUsername || !notificationCourierUsername || notificationCourierUsername === normalizedCourierUsername;
+      }
+
+      if (normalizedAudience === "customer") {
+        return isVisibleCustomerNotificationForPhone(notification, normalizedCustomerPhone);
+      }
+
+      return true;
+    };
+
+    const notificationIdsToMark = notifications
+      .filter(shouldMarkNotification)
+      .map((notification) => notification.id)
+      .filter((id) => id !== undefined && id !== null);
+
+    setNotifications((previousNotifications) =>
+      previousNotifications.map((notification) =>
+        shouldMarkNotification(notification) ? { ...notification, read: true, readAt, resolvedAt: readAt } : notification
+      )
     );
 
-    let query = supabase.from("notifications").update({ read: true, read_at: readAt, resolved_at: readAt }).eq("audience", normalizedAudience);
-    if (normalizedAudience === "courier" && normalizedCourierUsername) query = query.or(`courier_username.is.null,courier_username.eq.${normalizedCourierUsername}`);
-    if (normalizedAudience === "customer" && normalizedCustomerPhone) query = query.eq("customer_phone", normalizedCustomerPhone);
-    await query;
+    await updateNotificationsResolvedInSupabase((patch) => {
+      let query = supabase.from("notifications").update(patch);
+      if (normalizedAudience === "customer" && notificationIdsToMark.length > 0) return query.in("id", notificationIdsToMark);
+      query = query.eq("audience", normalizedAudience);
+      if (normalizedAudience === "courier" && normalizedCourierUsername) query = query.or(`courier_username.is.null,courier_username.eq.${normalizedCourierUsername}`);
+      if (normalizedAudience === "customer" && normalizedCustomerPhone) query = query.eq("customer_phone", normalizedCustomerPhone);
+      return query;
+    }, readAt);
   }
 
   async function resolveOrderNotifications(deliveryId, audiences = ["loja", "courier", "customer"]) {
@@ -2033,11 +2080,10 @@ function App() {
       })
     );
 
-    await supabase
-      .from("notifications")
-      .update({ read: true, read_at: resolvedAt, resolved_at: resolvedAt })
-      .eq("order_id", deliveryId)
-      .in("audience", normalizedAudiences);
+    await updateNotificationsResolvedInSupabase(
+      (patch) => supabase.from("notifications").update(patch).eq("order_id", deliveryId).in("audience", normalizedAudiences),
+      resolvedAt
+    );
   }
 
   async function handleLogin(event) {
