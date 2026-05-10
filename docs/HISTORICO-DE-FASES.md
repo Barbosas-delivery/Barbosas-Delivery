@@ -185,3 +185,12 @@ Depois teste no sistema publicado:
 - O cancelamento com `Outro motivo` exige detalhes obrigatórios.
 - Atualiza cache do PWA para evitar celulares carregarem versão antiga.
 - Atualiza versão para `6.0.14-fase-46-motivos-operacionais`.
+
+## Fase 47 — Auditoria operacional
+
+- Adicionada aba **Auditoria** no painel da loja.
+- Consulta de ações importantes registradas em `audit_logs`.
+- Filtros por texto, tipo de usuário e ação.
+- Métricas de registros carregados, ações do dia, ações sensíveis e usuários.
+- Exportação CSV dos registros filtrados.
+- Documentação em `docs/AUDITORIA-OPERACIONAL.md`.

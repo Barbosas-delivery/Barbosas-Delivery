@@ -44,3 +44,5 @@ Veja `docs/PERMISSOES-POR-ACAO.md` para os limites de desconto e ações permiti
 
 
 - [Motivos operacionais padronizados](docs/MOTIVOS-OPERACIONAIS.md)
+
+- [Auditoria operacional](docs/AUDITORIA-OPERACIONAL.md)

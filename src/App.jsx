@@ -31,7 +31,7 @@ import {
   softDeleteCourierInSupabase,
 } from "./services/supabaseCouriers";
 import { loadNotificationsFromSupabase, saveNotificationToSupabaseService } from "./services/supabaseNotifications";
-import { writeAuditLog, writeAppError } from "./services/supabaseAudit";
+import { writeAuditLog, writeAppError, loadAuditLogsFromSupabase } from "./services/supabaseAudit";
 import {
   fetchOrderPaymentsFromSupabase,
   cancelExistingOrderPaymentsInSupabase,
@@ -681,6 +681,67 @@ function formatBackupDate(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Data de backup inválida";
   return parsed.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function formatShortDateTime(value) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function getAuditActionLabel(action) {
+  const labels = {
+    approve_customer_order: "Pedido aprovado",
+    accept_delivery: "Entrega aceita",
+    request_delivery_approval: "Entrega enviada para aprovação",
+    approve_delivery_completion: "Entrega aprovada/finalizada",
+    manual_finish_delivery: "Entrega finalizada manualmente",
+    update_payment_status: "Pagamento alterado",
+    reopen_counter_sale: "Venda reaberta no PDV",
+    cancel_order: "Pedido/venda cancelado",
+    delete_promotion: "Promoção excluída",
+    pause_product: "Produto pausado",
+    resume_product: "Produto retomado",
+    manual_stock_adjustment: "Estoque ajustado",
+    pdv_stock_override: "Venda sem estoque autorizada",
+    create_store_user: "Usuário criado",
+    update_store_user: "Usuário atualizado",
+    store_login_success: "Login da loja",
+    store_login_failed: "Tentativa de login inválida",
+    store_logout: "Saída da loja",
+    print_receipt: "Comprovante impresso",
+    export_period_sales_csv: "CSV de vendas exportado",
+    export_stock_csv: "CSV de estoque exportado",
+  };
+  return labels[action] || String(action || "Ação").replace(/_/g, " ");
+}
+
+function getAuditEntityLabel(entity) {
+  const labels = {
+    orders: "Pedido/Venda",
+    products: "Produto",
+    promotions: "Promoção",
+    store_users: "Usuário",
+    cash_sessions: "Caixa",
+    courier_closing: "Fechamento entregador",
+    reports: "Relatório",
+    store_session: "Sessão da loja",
+  };
+  return labels[entity] || String(entity || "Sistema");
+}
+
+function buildAuditSummary(log) {
+  const data = log?.afterJson || {};
+  const pieces = [];
+  if (data.reason) pieces.push(`Motivo: ${data.reason}`);
+  if (data.value !== undefined) pieces.push(`Valor: ${money(Number(data.value || 0))}`);
+  if (data.status) pieces.push(`Status: ${data.status}`);
+  if (data.paymentStatus) pieces.push(`Pagamento: ${data.paymentStatus}`);
+  if (data.product) pieces.push(`Produto: ${data.product}`);
+  if (data.rows !== undefined) pieces.push(`Linhas: ${data.rows}`);
+  if (data.role) pieces.push(`Perfil: ${data.role}`);
+  return pieces.join(" • ") || "Sem detalhes adicionais.";
 }
 
 
@@ -1668,6 +1729,9 @@ function App() {
   const [search, setSearch] = useState("");
   const [ownerPinOpen, setOwnerPinOpen] = useState(false);
   const [lastAction, setLastAction] = useState("");
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditStatus, setAuditStatus] = useState("Auditoria ainda não carregada.");
+  const [auditFilters, setAuditFilters] = useState({ search: "", action: "all", userType: "all" });
 
   async function loadProducts() {
     const { products: formattedProducts, error } = await loadProductsFromSupabase();
@@ -1744,6 +1808,19 @@ function App() {
       return;
     }
     setCoupons((Array.isArray(data) ? data : []).map(normalizeCouponFromDatabase));
+  }
+
+  async function loadAuditLogs() {
+    const { logs, error } = await loadAuditLogsFromSupabase(500);
+    if (error) {
+      console.error("Erro ao carregar auditoria:", error);
+      setAuditLogs([]);
+      setAuditStatus("Auditoria não carregada. Rode a migração da Fase 36 para criar audit_logs.");
+      return;
+    }
+
+    setAuditLogs(logs);
+    setAuditStatus(`${logs.length} registro${logs.length === 1 ? "" : "s"} de auditoria carregado${logs.length === 1 ? "" : "s"}.`);
   }
 
   async function loadKits() {
@@ -2322,6 +2399,7 @@ function App() {
     loadCashData();
     loadOrderPayments();
     loadNotifications();
+    loadAuditLogs();
 
     // Mantém o PDV Entregas sincronizado com pedidos feitos em outro celular/computador.
     // Antes o sistema carregava os pedidos só uma vez ao abrir a tela; por isso
@@ -2354,6 +2432,7 @@ function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "tab_account_items" }, () => { if (isMounted) loadTabsAccounts(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, () => { if (isMounted) loadNotifications(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "order_payments" }, () => { if (isMounted) loadOrderPayments(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "audit_logs" }, () => { if (isMounted) loadAuditLogs(); })
       .subscribe();
 
     return () => {
@@ -5681,6 +5760,21 @@ function App() {
     return `${start}_a_${end}`;
   }
 
+  function exportAuditLogsCsv() {
+    const headers = ["Data", "Usuário", "Tipo", "Ação", "Entidade", "ID", "Resumo"];
+    const rows = filteredAuditLogs.map((log) => [
+      formatShortDateTime(log.createdAt),
+      log.userName || "sistema",
+      log.userType || "system",
+      getAuditActionLabel(log.action),
+      getAuditEntityLabel(log.entity),
+      log.entityId || "",
+      buildAuditSummary(log),
+    ]);
+    downloadCsvFile(`barbosas-auditoria-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+    auditAction("export_audit_logs_csv", "audit_logs", "export", { rows: rows.length });
+  }
+
   function exportOperationalBackup() {
     const createdAt = new Date().toISOString();
     const backup = {
@@ -5839,8 +5933,33 @@ function App() {
     { id: "clients", label: "Clientes", icon: "users" },
     { id: "couriers", label: "Entregadores", icon: "truck" },
     { id: "access", label: "Acessos", icon: "users" },
+    { id: "audit", label: "Auditoria", icon: "shield" },
     { id: "diagnostics", label: "Diagnóstico", icon: "tools" },
   ];
+
+  const filteredAuditLogs = useMemo(() => {
+    const searchTerm = String(auditFilters.search || "").trim().toLowerCase();
+    return (auditLogs || []).filter((log) => {
+      if (auditFilters.userType !== "all" && log.userType !== auditFilters.userType) return false;
+      if (auditFilters.action !== "all" && log.action !== auditFilters.action) return false;
+      if (!searchTerm) return true;
+      return [
+        log.userName,
+        log.userType,
+        log.action,
+        getAuditActionLabel(log.action),
+        log.entity,
+        getAuditEntityLabel(log.entity),
+        log.entityId,
+        buildAuditSummary(log),
+      ].some((value) => String(value || "").toLowerCase().includes(searchTerm));
+    });
+  }, [auditFilters, auditLogs]);
+
+  const auditActionOptions = useMemo(() => {
+    const actions = Array.from(new Set((auditLogs || []).map((log) => log.action).filter(Boolean))).sort();
+    return actions;
+  }, [auditLogs]);
 
   const visibleTabs = tabs.filter((tab) => canCurrentStoreAccess(tab.id));
 
@@ -6456,6 +6575,19 @@ function App() {
             {lastAction && <div className="bg-white border border-zinc-200 rounded-3xl px-5 py-4 flex items-center gap-3 shadow-sm"><Icon name="check" className="text-emerald-600" /><p className="text-sm text-zinc-700">{lastAction}</p></div>}
 
             {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} attentionSummary={storeAttentionSummary} lastDailyBackupAt={lastDailyBackupAt} onDownloadBackup={exportOperationalBackup} onInactivateProduct={toggleProductStatus} />}
+
+            {activeTab === "audit" && (
+              <AuditTab
+                logs={filteredAuditLogs}
+                allLogs={auditLogs}
+                status={auditStatus}
+                filters={auditFilters}
+                actionOptions={auditActionOptions}
+                onFiltersChange={setAuditFilters}
+                onRefresh={loadAuditLogs}
+                onExportCsv={exportAuditLogsCsv}
+              />
+            )}
 
             {activeTab === "diagnostics" && (
               <DiagnosticsTab
@@ -8327,6 +8459,89 @@ function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing 
   );
 }
 
+
+function AuditTab({ logs, allLogs, status, filters, actionOptions, onFiltersChange, onRefresh, onExportCsv }) {
+  const setFilter = (field, value) => onFiltersChange((previous) => ({ ...previous, [field]: value }));
+  const visibleLogs = (logs || []).slice(0, 120);
+  const todayLogs = (allLogs || []).filter((log) => isSameLocalDate(log.createdAt)).length;
+  const sensitiveActions = (allLogs || []).filter((log) => ["cancel_order", "reopen_counter_sale", "update_payment_status", "manual_stock_adjustment", "delete_promotion", "pdv_stock_override"].includes(log.action)).length;
+  const userCount = new Set((allLogs || []).map((log) => log.userName).filter(Boolean)).size;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <Title title="Auditoria operacional" subtitle="Histórico de ações importantes da loja, entregadores, caixa, estoque e pedidos." />
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button onClick={onRefresh} variant="secondary" className="rounded-2xl">Atualizar</Button>
+          <Button onClick={onExportCsv} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">CSV auditoria</Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Metric title="Registros carregados" value={(allLogs || []).length} icon="shield" />
+        <Metric title="Hoje" value={todayLogs} icon="calendar" />
+        <Metric title="Ações sensíveis" value={sensitiveActions} icon="alert" />
+        <Metric title="Usuários" value={userCount} icon="users" />
+      </div>
+
+      <CardBox>
+        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+          <div className="flex-1">
+            <Input label="Buscar na auditoria" value={filters.search} onChange={(value) => setFilter("search", value)} placeholder="Pedido, usuário, ação, motivo..." />
+          </div>
+          <label className="block min-w-[190px]">
+            <span className="text-xs font-medium text-zinc-600">Tipo de usuário</span>
+            <select value={filters.userType} onChange={(event) => setFilter("userType", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+              <option value="all">Todos</option>
+              <option value="store">Loja</option>
+              <option value="courier">Entregador</option>
+              <option value="customer">Cliente</option>
+              <option value="system">Sistema</option>
+            </select>
+          </label>
+          <label className="block min-w-[220px]">
+            <span className="text-xs font-medium text-zinc-600">Ação</span>
+            <select value={filters.action} onChange={(event) => setFilter("action", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+              <option value="all">Todas</option>
+              {actionOptions.map((action) => <option key={action} value={action}>{getAuditActionLabel(action)}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className="mt-3 text-xs text-zinc-500">{status}</p>
+      </CardBox>
+
+      <CardBox>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-bold text-lg">Histórico recente</h3>
+            <p className="text-sm text-zinc-500">Mostrando {visibleLogs.length} de {logs.length} registro{logs.length === 1 ? "" : "s"} filtrado{logs.length === 1 ? "" : "s"}.</p>
+          </div>
+        </div>
+        {visibleLogs.length === 0 ? (
+          <p className="text-sm text-zinc-500">Nenhum registro encontrado. Faça uma ação operacional ou rode a migração da auditoria se a tabela ainda não existir.</p>
+        ) : (
+          <div className="space-y-3">
+            {visibleLogs.map((log) => (
+              <div key={log.id || `${log.action}-${log.entityId}-${log.createdAt}`} className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
+                  <div>
+                    <p className="font-black text-zinc-900">{getAuditActionLabel(log.action)}</p>
+                    <p className="text-sm text-zinc-600">{getAuditEntityLabel(log.entity)} {log.entityId ? `#${log.entityId}` : ""}</p>
+                  </div>
+                  <div className="text-left md:text-right text-xs text-zinc-500">
+                    <p>{formatShortDateTime(log.createdAt)}</p>
+                    <p>{log.userName || "sistema"} • {log.userType || "system"}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-zinc-700">{buildAuditSummary(log)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardBox>
+    </div>
+  );
+}
 
 function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, products, clients, couriers, deliveries, notifications, cashSession, coupons, kits, promotions, storeUsersStatus, selfTests, passedTests }) {
   const isBrowser = typeof window !== "undefined";

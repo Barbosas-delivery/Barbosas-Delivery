@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.14-fase-46-motivos-operacionais";
+export const APP_VERSION = "6.0.15-fase-47-auditoria-operacional";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
