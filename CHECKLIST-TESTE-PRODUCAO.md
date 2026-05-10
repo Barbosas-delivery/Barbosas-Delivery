@@ -6,6 +6,21 @@ Use este checklist antes de divulgar o link para clientes ou depois de subir uma
 
 ---
 
+
+## 0. Publicação e ambiente
+
+- [ ] Rodar `npm ci`.
+- [ ] Rodar `npm run test`.
+- [ ] Rodar `npm run lint`.
+- [ ] Rodar `npm run build`.
+- [ ] Configurar `VITE_SUPABASE_URL` no provedor de hospedagem.
+- [ ] Configurar `VITE_SUPABASE_ANON_KEY` no provedor de hospedagem.
+- [ ] Conferir a aba **Diagnóstico** depois do deploy.
+- [ ] Confirmar que o item **Cliente Supabase ativo** aparece como aprovado.
+- [ ] Trocar a senha padrão do administrador antes de divulgar o link.
+
+---
+
 ## 1. Antes de começar
 
 - [ ] Rode todos os SQLs necessários no Supabase.

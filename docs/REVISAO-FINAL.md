@@ -1,24 +1,37 @@
-# Revisão final do Barbosa's Delivery
+# Revisão final
 
-Versão revisada: `6.0.1-final`.
+## Status da versão
 
-## Validações executadas
+Versão final revisada: `6.0.18-fase-50-revisao-final-producao`.
 
-- `npm install`
-- `npm run lint`
-- `npm run test`
-- `npm run build`
+## Validações obrigatórias
 
-## Áreas conferidas
+Antes de colocar o aplicativo no ar, execute:
 
-- Cliente mobile, carrinho, sabores, cupom e checkout.
-- Loja, aprovação/cancelamento/finalização de pedidos.
-- Entregador, aceite, recusa, rota, WhatsApp e conclusão de entrega.
-- Caixa, pagamentos, reabertura de recebimento e fechamento.
-- Produtos, estoque, cupons, relatórios e backup.
-- Impressão por navegador e preparação para serviço local.
-- PWA, service worker, diagnóstico e documentação.
+```bash
+npm ci
+npm run test
+npm run lint
+npm run build
+```
 
-## Observação operacional
+## Ambiente de produção
 
-Para funcionamento completo em produção, rode todos os SQLs da pasta `supabase/` no projeto correto do Supabase e confira as permissões/RLS conforme a configuração do seu banco.
+Configure no provedor de hospedagem:
+
+```bash
+VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+VITE_SUPABASE_ANON_KEY=SUA_CHAVE_ANON_PUBLICA_DO_SUPABASE
+```
+
+Sem essas variáveis, o sistema abre sem travar, mas a sincronização real com o Supabase fica desativada e a aba Diagnóstico mostra pendência.
+
+## Pontos que exigem conferência manual
+
+- SQLs aplicados no Supabase correto.
+- Políticas/RLS permitindo as operações necessárias da loja.
+- Senha padrão do administrador trocada.
+- Impressão testada no computador real da loja.
+- Pedido de teste feito em celular real.
+- WhatsApp abrindo com número e mensagem corretos.
+- PWA reinstalado no celular se uma versão antiga estiver em cache.

@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "./supabaseClient";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import { insertWithSchemaRetry, updateWithSchemaRetry } from "./services/supabaseSchema";
 import {
   loadProductsFromSupabase,
@@ -8561,6 +8561,7 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
   const pwaMode = isBrowser && (window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator?.standalone === true);
   const supabaseUrlConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL);
   const supabaseKeyConfigured = Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
+  const supabaseClientReady = isSupabaseConfigured;
   const activeProducts = (products || []).filter((product) => product.active !== false && !product.deletedAt).length;
   const lowStockProducts = (products || []).filter((product) => product.active !== false && Number(product.stock || 0) <= Number(product.minStock || 0)).length;
   const activeCouriers = (couriers || []).filter((courier) => courier.active !== false).length;
@@ -8574,6 +8575,7 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
   const checks = [
     { name: "Supabase URL configurada", ok: supabaseUrlConfigured, detail: supabaseUrlConfigured ? "VITE_SUPABASE_URL encontrada" : "Configure VITE_SUPABASE_URL no .env" },
     { name: "Supabase chave configurada", ok: supabaseKeyConfigured, detail: supabaseKeyConfigured ? "VITE_SUPABASE_ANON_KEY encontrada" : "Configure VITE_SUPABASE_ANON_KEY no .env" },
+    { name: "Cliente Supabase ativo", ok: supabaseClientReady, detail: supabaseClientReady ? "Cliente pronto para sincronizar dados" : "Cliente Supabase desativado até configurar as variáveis" },
     { name: "Navegador online", ok: online, detail: online ? "Conexão detectada" : "Sem conexão detectada pelo navegador" },
     { name: "LocalStorage disponível", ok: localStorageOk, detail: localStorageOk ? "Backup/configurações locais podem ser usados" : "O navegador bloqueou armazenamento local" },
     { name: "PWA disponível", ok: serviceWorkerSupported, detail: serviceWorkerSupported ? (pwaMode ? "Rodando como app instalado" : "Pode ser instalado/adicionado à tela inicial") : "Navegador sem suporte a Service Worker" },
@@ -8591,7 +8593,7 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
       pwaMode,
       serviceWorkerSupported,
       localStorageOk,
-      supabase: { urlConfigured: supabaseUrlConfigured, keyConfigured: supabaseKeyConfigured },
+      supabase: { urlConfigured: supabaseUrlConfigured, keyConfigured: supabaseKeyConfigured, clientReady: supabaseClientReady },
       store: {
         name: storeSettings?.storeName,
         syncStatus: storeSettingsSyncStatus,
@@ -8634,7 +8636,7 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Metric title="Versão" value={appVersion || "Atual"} icon="shield" />
-        <Metric title="Supabase" value={supabaseUrlConfigured && supabaseKeyConfigured ? "Configurado" : "Pendente"} icon="save" />
+        <Metric title="Supabase" value={supabaseClientReady ? "Configurado" : "Pendente"} icon="save" />
         <Metric title="Loja" value={operatingMode} icon="calendar" />
         <Metric title="Impressão" value={printMode} icon="tools" />
         <Metric title="Produtos ativos" value={activeProducts} icon="package" />

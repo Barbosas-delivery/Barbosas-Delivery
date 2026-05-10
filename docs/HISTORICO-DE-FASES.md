@@ -214,3 +214,13 @@ Depois teste no sistema publicado:
 - Documentação em `docs/FECHAMENTO-DO-DIA.md`.
 - Atualiza cache do PWA para evitar celulares carregarem versão antiga.
 - Atualiza versão para `6.0.17-fase-49-fechamento-dia`.
+
+## Fase 50 — Revisão final de produção
+
+- Revisão final antes de publicar o aplicativo.
+- Atualiza versão para `6.0.18-fase-50-revisao-final-producao`.
+- Atualiza cache do PWA para `barbosas-delivery-6-0-18-fase-50`.
+- Adiciona `.env.example` com variáveis obrigatórias do Supabase.
+- Protege o cliente Supabase contra travamento quando variáveis de ambiente estiverem ausentes.
+- Amplia diagnóstico para indicar cliente Supabase ativo ou desativado.
+- Documentação em `docs/FASE-50-REVISAO-FINAL-PRODUCAO.md`.

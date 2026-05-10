@@ -43,8 +43,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.17-fase-49-fechamento-dia"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-17-fase-49/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.18-fase-50-revisao-final-producao"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-18-fase-50/);
 });
 
 test("fluxos principais existem no código", () => {
@@ -90,6 +90,8 @@ test("fluxos principais existem no código", () => {
     "Fila rápida de entregas",
     "Fechamento do dia",
     "Baixar backup diário",
+    "isSupabaseConfigured",
+    "Cliente Supabase desativado",
   ];
   for (const snippet of requiredSnippets) {
     assert.ok(appSource.includes(snippet), `Trecho obrigatório ausente: ${snippet}`);
@@ -103,6 +105,8 @@ test("arquivos operacionais principais existem", () => {
     "docs/HISTORICO-DE-FASES.md",
     "docs/DIAGNOSTICO-SISTEMA.md",
     "docs/FECHAMENTO-DO-DIA.md",
+    "docs/FASE-50-REVISAO-FINAL-PRODUCAO.md",
+    ".env.example",
     "public/manifest.webmanifest",
     "public/service-worker.js",
     "supabase/migracao-fases-1-a-12.sql",
