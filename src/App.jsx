@@ -817,6 +817,93 @@ function getCustomerCheckoutIssue({ cart, products, productsTotal, minimumOrderV
   return "";
 }
 
+function isOrderFinalized(order) {
+  return [DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(order?.status);
+}
+
+function getOrderAllowedActions(order) {
+  const status = order?.status;
+  const isDelivery = isDeliveryOrder(order);
+  const isCounter = isCounterOrder(order);
+  const finalized = isOrderFinalized(order);
+  const waitingStoreApproval = status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
+  const waitingPickup = status === DELIVERY_STATUS.WAITING_PICKUP;
+  const outForDelivery = status === DELIVERY_STATUS.OUT_FOR_DELIVERY;
+  const waitingOwnerApproval = status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
+  const deliveryProblem = status === DELIVERY_STATUS.DELIVERY_PROBLEM;
+  const paymentPaid = order?.paymentStatus === PAYMENT_STATUS.PAID;
+
+  if (isCounter && status === DELIVERY_STATUS.CONFIRMED_DELIVERED) {
+    return {
+      print: true,
+      summary: true,
+      reopenCounterSale: true,
+      whatsapp: false,
+      approve: false,
+      manualFinish: false,
+      cancel: false,
+      confirmPayment: false,
+      reopenPayment: false,
+    };
+  }
+
+  if (finalized) {
+    return {
+      print: true,
+      summary: true,
+      reopenCounterSale: false,
+      whatsapp: false,
+      approve: false,
+      manualFinish: false,
+      cancel: false,
+      confirmPayment: false,
+      reopenPayment: false,
+    };
+  }
+
+  if (isDelivery) {
+    return {
+      print: true,
+      summary: true,
+      whatsapp: Boolean(order?.phone),
+      approve: waitingStoreApproval || waitingOwnerApproval,
+      manualFinish: outForDelivery || deliveryProblem,
+      cancel: waitingStoreApproval || waitingPickup || deliveryProblem,
+      confirmPayment: !waitingStoreApproval && !paymentPaid,
+      reopenPayment: paymentPaid && !waitingOwnerApproval,
+      reopenCounterSale: false,
+    };
+  }
+
+  return {
+    print: true,
+    summary: true,
+    whatsapp: false,
+    approve: false,
+    manualFinish: false,
+    cancel: status !== DELIVERY_STATUS.CANCELLED,
+    confirmPayment: !paymentPaid,
+    reopenPayment: paymentPaid,
+    reopenCounterSale: false,
+  };
+}
+
+function buildOrderSummaryText(order) {
+  const itemsText = (Array.isArray(order?.items) ? order.items : [])
+    .map((item) => `${item.quantity}x ${item.name} - ${money(Number(item.price || 0) * Number(item.quantity || 0))}`)
+    .join("\n");
+  return [
+    `${isCounterOrder(order) ? "Venda" : "Pedido"} #${order?.id || ""}`,
+    `Cliente: ${order?.client || "-"}`,
+    `Status: ${order?.status || "-"}`,
+    `Pagamento: ${order?.paymentStatus || PAYMENT_STATUS.PENDING}`,
+    `Total: ${money(order?.value || 0)}`,
+    "",
+    "Itens:",
+    itemsText || "Sem itens detalhados",
+  ].join("\n");
+}
+
 function getDateInputValue(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -902,6 +989,8 @@ function runSelfTests() {
     { name: "Fechamento ignora pedidos cancelados", passed: buildCashClosingReport([{ value: 100, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CANCELLED }]).totalSold === 0 },
     { name: "Fechamento conta pendência só de entregas", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PENDING, status: DELIVERY_STATUS.WAITING_PICKUP }]).pendingOrders === 1 },
     { name: "Fechamento separa venda balcão de entrega", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).counterSold === 10 && buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).deliverySold === 20 },
+    { name: "Venda balcão finalizada mostra só reimpressão, resumo e reabrir PDV", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).print === true && getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).reopenCounterSale === true && getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
+    { name: "Pedido entregue não exibe ações operacionais indevidas", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).approve === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).manualFinish === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
     { name: "Cliente vê somente produtos ativos", passed: getActiveProducts([{ active: true }, { active: false }]).length === 1 },
     { name: "Grupos de produtos não podem duplicar", passed: hasDuplicateGroup(["Bebidas"], "bebidas") === true },
     { name: "Cliente vê grupos com produtos ativos", passed: getVisibleProductGroups(initialProducts, initialProductGroups).includes("Bebidas") === true },
@@ -4206,6 +4295,7 @@ function App() {
     await resolveOrderNotifications(id, ["courier"]);
     addNotification("entrega_aceita", "Entrega aceita", `Pedido #${id} saiu para entrega com ${loggedCourier?.name || "entregador"}.`, "loja", id);
     addNotification("entrega_atribuida", "Entrega atribuída a você", `Você aceitou o pedido #${id}. Faça a entrega e marque como entregue ao chegar no cliente.`, "courier", id, { courierUsername: loggedCourier?.username });
+    await auditAction("accept_delivery", "orders", id, patch, delivery, "courier", loggedCourier?.username || "entregador");
     setLastAction(`Pedido #${id} saiu para entrega com ${loggedCourier?.name || "entregador"}.`);
   }
 
@@ -4236,6 +4326,7 @@ function App() {
     );
     await resolveOrderNotifications(id, ["courier"]);
     addNotification("entrega_aguardando_aprovacao", "Entrega aguardando aprovação", `Pedido #${id} foi marcado como entregue por ${loggedCourier?.name || "entregador"}.`, "loja", id);
+    await auditAction("request_delivery_approval", "orders", id, patch, deliveryToApprove, "courier", loggedCourier?.username || "entregador");
     setLastAction(`Pedido #${id} enviado para aprovação da loja.`);
   }
 
@@ -4264,7 +4355,12 @@ function App() {
     if (status === DELIVERY_STATUS.DELIVERY_PROBLEM && deliveryToUpdate.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY) return setLastAction("Problema na entrega só pode ser registrado depois da saída da loja.");
     if (loggedCourier && !canCourierControlDelivery(deliveryToUpdate, loggedCourier.username)) return setLastAction("Essa entrega está vinculada a outro entregador.");
 
-    const statusPatch = status === DELIVERY_STATUS.DELIVERY_PROBLEM ? { status, problemReason: "Problema informado pelo entregador", problemAt: new Date().toISOString() } : { status };
+    let problemReason = "";
+    if (status === DELIVERY_STATUS.DELIVERY_PROBLEM) {
+      problemReason = window.prompt("Qual foi o problema na entrega?", "Cliente não atende") || "";
+      if (!problemReason.trim()) return setLastAction("Informe o motivo do problema na entrega.");
+    }
+    const statusPatch = status === DELIVERY_STATUS.DELIVERY_PROBLEM ? { status, problemReason: problemReason.trim(), problemAt: new Date().toISOString() } : { status };
     const updated = await updateDeliveryInSupabase(id, statusPatch);
     if (!updated) return;
     setDeliveries((previousDeliveries) =>
@@ -4281,6 +4377,7 @@ function App() {
       addNotification("problema_entrega", "Problema na entrega", `Pedido #${id} foi marcado com problema por ${loggedCourier?.name || "entregador"}.`, "loja", id);
       addNotification("problema_registrado", "Problema registrado", `Problema do pedido #${id} enviado para a loja.`, "courier", id, { courierUsername: loggedCourier?.username });
     }
+    await auditAction("update_delivery_status", "orders", id, statusPatch, deliveryToUpdate, loggedCourier ? "courier" : "store", loggedCourier?.username || getCurrentStoreUserName());
     setLastAction(`Pedido #${id} atualizado para: ${status}.`);
   }
 
@@ -4319,6 +4416,7 @@ function App() {
       await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
       addNotification("pedido_aprovado", "Pedido aprovado", `Pedido #${id} aprovado pela loja. Em breve um entregador fará a retirada.`, "customer", id, { customerPhone: currentDelivery.phone });
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "courier", id);
+      await auditAction("approve_customer_order", "orders", id, dbPatch, currentDelivery);
       setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
       await loadDeliveries();
       return;
@@ -4349,6 +4447,7 @@ function App() {
       if (currentDelivery.deliveredByName) {
         addNotification("entrega_aprovada", "Entrega aprovada", `Pedido #${id} finalizado pela loja.`, "courier", id, { courierUsername: currentDelivery.deliveredByUsername || currentDelivery.pickedUpByUsername || currentDelivery.acceptedByUsername });
       }
+      await auditAction("approve_delivery_completion", "orders", id, patch, currentDelivery);
       setLastAction(`Entrega #${id} aprovada e marcada como paga.`);
       await loadDeliveries();
       return;
@@ -4372,9 +4471,11 @@ function App() {
       return setLastAction("Abra o caixa antes de confirmar recebimento deste pedido.");
     }
 
+    const reopenReason = isConfirmingPayment ? "" : window.prompt("Motivo para reabrir este recebimento?", "Pagamento corrigido pela loja");
+    if (!isConfirmingPayment && !String(reopenReason || "").trim()) return setLastAction("Informe o motivo para reabrir o recebimento.");
     const confirmMessage = isConfirmingPayment
       ? `Confirmar recebimento da ${orderLabel} #${id} no valor de ${money(delivery.value)}?`
-      : `Reabrir recebimento da ${orderLabel} #${id}? O valor deixará de entrar como pago no fechamento.`;
+      : `Reabrir recebimento da ${orderLabel} #${id}? Motivo: ${reopenReason}. O valor deixará de entrar como pago no fechamento.`;
     if (!window.confirm(confirmMessage)) return setLastAction("Alteração de pagamento cancelada.");
 
     setProcessingPaymentIds((previous) => [...previous, paymentKey]);
@@ -4385,6 +4486,9 @@ function App() {
         cashSessionId: delivery.cashSessionId || (isConfirmingPayment ? cashSession.id || "" : delivery.cashSessionId || ""),
         paymentConfirmedAt: isConfirmingPayment ? now : "",
         paymentConfirmedBy: isConfirmingPayment ? getCurrentStoreUserName() || "loja" : "",
+        reopenReason: isConfirmingPayment ? delivery.reopenReason || "" : String(reopenReason || "").trim(),
+        reopenedAt: isConfirmingPayment ? delivery.reopenedAt || "" : now,
+        reopenedBy: isConfirmingPayment ? delivery.reopenedBy || "" : getCurrentStoreUserName() || "loja",
       };
       const updated = await updateDeliveryInSupabase(id, patch);
       if (!updated) return;
@@ -4403,7 +4507,7 @@ function App() {
       }
 
       setDeliveries((previousDeliveries) => previousDeliveries.map((item) => (String(item.id) === paymentKey ? { ...item, ...patch } : item)));
-      await auditAction("update_payment_status", "orders", id, { paymentStatus, value: delivery.value, cashSessionId: patch.cashSessionId || "" });
+      await auditAction("update_payment_status", "orders", id, { paymentStatus, value: delivery.value, cashSessionId: patch.cashSessionId || "", reason: patch.reopenReason || "" }, delivery);
       setLastAction(`Pagamento da ${orderLabel} #${id} atualizado para: ${paymentStatus}.`);
     } finally {
       setProcessingPaymentIds((previous) => previous.filter((key) => key !== paymentKey));
@@ -5004,6 +5108,7 @@ function App() {
       )
     );
     await resolveOrderNotifications(id, ["customer", "loja", "courier"]);
+    await auditAction("manual_finish_delivery", "orders", id, patch, delivery);
     setLastAction(`Pedido #${id} finalizado pela loja.`);
   }
 
@@ -7211,9 +7316,12 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
   const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
   const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
   const isCounterSale = isCounterOrder(delivery);
-  const isCounterSaleFinalized = isCounterSale && delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED;
-  const canConfirmPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && !isWaitingOrderApproval && delivery.paymentStatus !== PAYMENT_STATUS.PAID && !isPaymentProcessing;
-  const canReopenPayment = delivery.status !== DELIVERY_STATUS.CANCELLED && delivery.paymentStatus === PAYMENT_STATUS.PAID && !isPaymentProcessing;
+  const actions = getOrderAllowedActions(delivery);
+  const isFinalized = isOrderFinalized(delivery);
+  const canConfirmPayment = actions.confirmPayment && !isPaymentProcessing;
+  const canReopenPayment = actions.reopenPayment && !isPaymentProcessing;
+  const showSummary = () => window.alert(buildOrderSummaryText(delivery));
+
   return (
     <Card className="rounded-3xl border-zinc-200 shadow-sm">
       <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -7223,7 +7331,7 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
           {delivery.phone && <p className="text-sm text-zinc-700 flex items-center gap-1"><Icon name="phone" /> {formatBrazilMobilePhone(delivery.phone)}</p>}
           <p className="text-sm text-zinc-700 flex items-center gap-1"><Icon name="pin" /> {delivery.address}</p>
           {delivery.reference && <p className="text-sm text-zinc-500">Referência: {delivery.reference}</p>}
-          <p className="text-sm text-zinc-500">{isCounterOrder(delivery) ? "Tipo: venda no balcão" : isWaitingOrderApproval ? "Pedido aguardando aprovação da loja antes de ir aos entregadores" : "Disponível para: todos os motoboys ativos"}</p>
+          <p className="text-sm text-zinc-500">{isCounterOrder(delivery) ? "Tipo: venda no balcão" : isWaitingOrderApproval ? "Pedido aguardando aprovação da loja antes de ir aos entregadores" : isFinalized ? "Pedido finalizado: somente consulta e impressão" : "Disponível para: todos os motoboys ativos"}</p>
           {isDeliveryOrder(delivery) ? (
             <p className="text-sm text-zinc-500">Taxa entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))} • Motoboy: {money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType))} • Loja: {money(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType))}</p>
           ) : (
@@ -7231,6 +7339,8 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
           )}
           {delivery.motorcycleType && <p className="text-sm text-zinc-500">Moto usada: {delivery.motorcycleType}</p>}
           {delivery.cancellationReason && <p className="text-sm text-red-700 font-semibold">Motivo do cancelamento: {delivery.cancellationReason}</p>}
+          {delivery.problemReason && <p className="text-sm text-amber-700 font-semibold">Problema informado: {delivery.problemReason}</p>}
+          {delivery.reopenReason && <p className="text-sm text-amber-700 font-semibold">Reabertura: {delivery.reopenReason}</p>}
           {delivery.pickedUpByName && <p className="text-sm text-zinc-500">Retirado por: {delivery.pickedUpByName}</p>}
           {isDeliveryOrder(delivery) && delivery.deliveredByName && !delivery.ownerApproved && <p className="text-sm text-blue-700 font-semibold">Aguardando aprovação: {delivery.deliveredByName}</p>}
           {isDeliveryOrder(delivery) && delivery.ownerApproved && <p className="text-sm text-emerald-700 font-semibold">Confirmado pela loja para: {delivery.deliveredByName || "entregador"}</p>}
@@ -7238,7 +7348,7 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
         </div>
         <div className="flex flex-col items-start md:items-end gap-2">
           <span className="font-bold text-xl">{money(delivery.value)}</span>
-          {delivery.phone && (
+          {actions.whatsapp && delivery.phone && (
             <div className="w-full md:w-auto rounded-2xl border border-emerald-100 bg-emerald-50 p-3 space-y-2">
               <p className="text-xs font-bold text-emerald-800">WhatsApp: {getWhatsAppStatusLabel(delivery.whatsappStatus)}</p>
               {delivery.whatsappOpenedAt && <p className="text-[11px] text-emerald-700">Aberto em {new Date(delivery.whatsappOpenedAt).toLocaleString("pt-BR")}</p>}
@@ -7254,21 +7364,17 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
           <span className="text-sm text-zinc-500">Pagamento: {getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails)}</span>
           <span className={`rounded-2xl border px-3 py-2 text-xs font-bold ${getPaymentStatusClass(delivery.paymentStatus)}`}>{delivery.paymentStatus || PAYMENT_STATUS.PENDING}</span>
           {delivery.paymentConfirmedAt && <span className="text-[11px] text-zinc-500">Recebido em {new Date(delivery.paymentConfirmedAt).toLocaleString("pt-BR")}{delivery.paymentConfirmedBy ? ` por ${delivery.paymentConfirmedBy}` : ""}</span>}
-          {isCounterSaleFinalized ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full md:w-auto">
-              <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
-              <Button onClick={() => onReopenCounterSale?.(delivery.id)} variant="secondary" className="rounded-2xl text-amber-700">Reabrir no PDV</Button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full md:w-auto">
-              {isDeliveryOrder(delivery) && <Button onClick={() => onApprove(delivery.id)} disabled={(!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>}
-              <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>
-              {!isCounterSale && <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>}
-              <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">{isCounterSale ? "Reabrir recebimento" : "Reabrir recebimento"}</Button>
-              <Button onClick={() => onCancel(delivery.id)} disabled={(delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) || delivery.status === DELIVERY_STATUS.CANCELLED} variant="secondary" className="rounded-2xl text-red-600">{isCounterSale ? "Cancelar venda" : "Cancelar pedido"}</Button>
-              {isDeliveryOrder(delivery) && <Button onClick={() => onManualConfirm(delivery.id)} disabled={isWaitingOrderApproval || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>}
-            </div>
-          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full md:w-auto">
+            {actions.print && <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>}
+            {actions.summary && <Button onClick={showSummary} variant="secondary" className="rounded-2xl">Ver resumo</Button>}
+            {actions.reopenCounterSale && <Button onClick={() => onReopenCounterSale?.(delivery.id)} variant="secondary" className="rounded-2xl text-amber-700">Reabrir no PDV</Button>}
+            {actions.approve && <Button onClick={() => onApprove(delivery.id)} disabled={(!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">{isWaitingOrderApproval ? "Aprovar pedido" : "Aprovar entrega"}</Button>}
+            {actions.confirmPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>}
+            {actions.reopenPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">Reabrir recebimento</Button>}
+            {actions.cancel && <Button onClick={() => onCancel(delivery.id)} variant="secondary" className="rounded-2xl text-red-600">{isCounterSale ? "Cancelar venda" : "Cancelar pedido"}</Button>}
+            {actions.manualFinish && <Button onClick={() => onManualConfirm(delivery.id)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>}
+          </div>
         </div>
       </CardContent>
     </Card>

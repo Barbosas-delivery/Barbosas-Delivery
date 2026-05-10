@@ -88,3 +88,13 @@ Depois teste no sistema publicado:
 - Reabertura de venda cancela pagamento antigo, devolve estoque e carrega os itens no PDV para correção.
 - Painel do entregador passa a mostrar ganhos do dia e entregas atrasadas.
 - Entregador com entrega própria atrasada não consegue aceitar novas entregas até finalizar a atrasada.
+
+## Fase 36 — Botões por status e auditoria básica
+
+- Pedidos e vendas agora mostram somente ações compatíveis com o status atual.
+- Vendas balcão finalizadas ficam restritas a Reimprimir, Ver resumo e Reabrir no PDV.
+- Pedidos entregues/cancelados deixam de exibir botões operacionais indevidos.
+- Reabertura de recebimento passa a exigir motivo.
+- Problema na entrega passa a exigir motivo informado pelo entregador.
+- Ações críticas registram auditoria: aprovação, aceite, entrega, pagamento, cancelamento, reabertura e alteração de status.
+- Adicionada migração `supabase/migracao-fase-36-acoes-auditoria.sql`.

@@ -43,8 +43,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.3-fase-35-operacional"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-v6-0-3-fase-35-operacional/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.4-fase-36-acoes-auditoria"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-v6-0-4-fase-36-acoes-auditoria/);
 });
 
 test("fluxos principais existem no código", () => {
