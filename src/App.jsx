@@ -1338,6 +1338,7 @@ function runSelfTests() {
     { name: "Desconto nunca passa do valor dos produtos", passed: normalizeDiscount(999, 49) === 49 && normalizeDiscount(-10, 49) === 0 },
     { name: "Limite de desconto respeita perfil", passed: clampDiscountByStoreRole(50, "operador") === 5 && clampDiscountByStoreRole(50, "caixa") === 10 && clampDiscountByStoreRole(50, "gerente") === 30 },
     { name: "Operador não pode cancelar nem reabrir venda", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }, "operador").reopenCounterSale === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, paymentStatus: PAYMENT_STATUS.PENDING }, "operador").cancel === false },
+    { name: "Somente gerente e administrador autorizam venda sem estoque", passed: canPerformStoreAction("gerente", STORE_ACTIONS.OVERRIDE_STOCK) === true && canPerformStoreAction("admin", STORE_ACTIONS.OVERRIDE_STOCK) === true && canPerformStoreAction("caixa", STORE_ACTIONS.OVERRIDE_STOCK) === false && canPerformStoreAction("operador", STORE_ACTIONS.OVERRIDE_STOCK) === false },
     { name: "Taxa de entrega divide 70% motoboy e 30% loja quando moto é do estabelecimento", passed: calculateCourierFee(5, "Moto do estabelecimento") === 3.5 && calculateStoreFee(5, "Moto do estabelecimento") === 1.5 },
     { name: "Moto própria não cobra 30% da loja", passed: calculateCourierFee(5, "Moto própria") === 5 && calculateStoreFee(5, "Moto própria") === 0 },
     { name: "Endereço da entrega é montado pelo cliente", passed: buildDeliveryAddress(initialClients[0]) === "Av. Brasil, 1500 - Centro, Maringá/PR" },
@@ -1895,6 +1896,33 @@ function App() {
     const rawValue = Math.max(0, Number(value || 0));
     if (rawValue > clampedValue) setLastAction(`Seu perfil permite desconto ${getManualDiscountLimitLabel()}. Peça autorização de gerente/administrador para desconto maior.`);
     return clampedValue;
+  }
+
+  function isStockValidationIssue(message) {
+    return /estoque insuficiente|sem estoque/i.test(String(message || ""));
+  }
+
+  function authorizePdvStockOverride(validation, contextLabel, items = []) {
+    if (validation.valid) return true;
+    if (!isStockValidationIssue(validation.message)) {
+      setLastAction(validation.message);
+      return false;
+    }
+
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.OVERRIDE_STOCK)) {
+      setLastAction(`${validation.message} Peça para gerente ou administrador autorizar a venda sem estoque.`);
+      return false;
+    }
+
+    const approved = window.confirm(`${validation.message}\n\nAutorizar ${contextLabel} mesmo assim? Essa ação ficará registrada na auditoria.`);
+    if (!approved) {
+      setLastAction("Venda sem estoque cancelada.");
+      return false;
+    }
+
+    auditAction("pdv_stock_override", "orders", contextLabel, { reason: validation.message, items, role: getCurrentStoreRole() });
+    setLastAction(`Venda sem estoque autorizada por ${getStoreRoleLabel(getCurrentStoreRole())}.`);
+    return true;
   }
 
   async function loadStoreUsers() {
@@ -3335,11 +3363,8 @@ function App() {
     setDeliveryDraft((previousDraft) => {
       const nextItems = [...previousDraft.items, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name, price: Number(kit.price || buildKitProductsTotal(kit.items, products)), quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems }];
       const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return previousDraft;
-      }
-      setLastAction(kit.name + " adicionado ao pedido.");
+      if (!authorizePdvStockOverride(validation, "PDV Entregas", nextItems)) return previousDraft;
+      setLastAction(validation.valid ? kit.name + " adicionado ao pedido." : kit.name + " adicionado ao pedido com autorização de estoque.");
       return { ...previousDraft, items: nextItems };
     });
   }
@@ -4018,12 +4043,9 @@ function App() {
         : [...previousDraft.items, { id: product.id, name: product.name, price: Number(product.price || 0), quantity: 1, barcode: product.barcode }];
 
       const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return previousDraft;
-      }
+      if (!authorizePdvStockOverride(validation, "PDV Entregas", nextItems)) return previousDraft;
 
-      setLastAction(product.name + " adicionado ao pedido.");
+      setLastAction(validation.valid ? product.name + " adicionado ao pedido." : product.name + " adicionado ao pedido com autorização de estoque.");
       return { ...previousDraft, items: nextItems };
     });
   }
@@ -4036,12 +4058,9 @@ function App() {
         : [...previousDraft.items, { id: product.id, name: product.name, price: Number(product.price || 0), quantity: 1, barcode: product.barcode }];
 
       const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return previousDraft;
-      }
+      if (!authorizePdvStockOverride(validation, "PDV Balcão", nextItems)) return previousDraft;
 
-      setLastAction(product.name + " adicionado ao PDV balcão.");
+      setLastAction(validation.valid ? product.name + " adicionado ao PDV balcão." : product.name + " adicionado ao PDV balcão com autorização de estoque.");
       return { ...previousDraft, items: nextItems };
     });
   }
@@ -4051,11 +4070,8 @@ function App() {
     setCounterDraft((previousDraft) => {
       const nextItems = [...previousDraft.items, { id: `kit-counter-${kit.id}-${Date.now()}`, name: kit.name, price: Number(kit.price || buildKitProductsTotal(kit.items, products)), quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems }];
       const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return previousDraft;
-      }
-      setLastAction(kit.name + " adicionado ao PDV balcão.");
+      if (!authorizePdvStockOverride(validation, "PDV Balcão", nextItems)) return previousDraft;
+      setLastAction(validation.valid ? kit.name + " adicionado ao PDV balcão." : kit.name + " adicionado ao PDV balcão com autorização de estoque.");
       return { ...previousDraft, items: nextItems };
     });
   }
@@ -4065,10 +4081,7 @@ function App() {
     setDeliveryDraft((previousDraft) => {
       const nextItems = previousDraft.items.map((item) => (item.id === productId ? { ...item, quantity: safeQuantity } : item));
       const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return previousDraft;
-      }
+      if (!authorizePdvStockOverride(validation, "PDV Entregas", nextItems)) return previousDraft;
       return { ...previousDraft, items: nextItems };
     });
   }
@@ -4082,10 +4095,7 @@ function App() {
     setCounterDraft((previousDraft) => {
       const nextItems = previousDraft.items.map((item) => (item.id === productId ? { ...item, quantity: safeQuantity } : item));
       const validation = validateOrderItems(nextItems, products);
-      if (!validation.valid) {
-        setLastAction(validation.message);
-        return previousDraft;
-      }
+      if (!authorizePdvStockOverride(validation, "PDV Balcão", nextItems)) return previousDraft;
       return { ...previousDraft, items: nextItems };
     });
   }
@@ -4711,7 +4721,10 @@ function App() {
     if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão. Libere pop-ups para finalizar e imprimir a venda.");
     if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) { preOpenedPrintWindow.close(); return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco."); }
     const validation = validateOrderItems(counterDraft.items, products);
-    if (!validation.valid) { if (typeof preOpenedPrintWindow !== "undefined" && preOpenedPrintWindow) preOpenedPrintWindow.close(); return setLastAction(validation.message); }
+    if (!authorizePdvStockOverride(validation, "PDV Balcão", counterDraft.items)) {
+      if (typeof preOpenedPrintWindow !== "undefined" && preOpenedPrintWindow) preOpenedPrintWindow.close();
+      return;
+    }
 
     const syncedItems = syncOrderItemsWithProducts(counterDraft.items, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);
@@ -4784,7 +4797,7 @@ function App() {
     if (!isCashOpen) return setLastAction("Abra o caixa antes de lançar pedidos no PDV Entregas.");
     if (!selectedDeliveryClient) return setLastAction("Selecione o cliente antes de lançar a entrega.");
     const validation = validateOrderItems(deliveryDraft.items, products);
-    if (!validation.valid) return setLastAction(validation.message);
+    if (!authorizePdvStockOverride(validation, "PDV Entregas", deliveryDraft.items)) return;
 
     const syncedItems = syncOrderItemsWithProducts(deliveryDraft.items, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);

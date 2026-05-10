@@ -167,3 +167,11 @@ Depois teste no sistema publicado:
 - Adiciona limites de desconto manual por perfil.
 - Protege cancelamento, reabertura, estoque, produtos e promoções.
 - Atualiza versão para 6.0.12-fase-44-permissoes-acoes.
+
+## Fase 45 — Estoque no PDV
+
+- Reforça validação de estoque no PDV Balcão e PDV Entregas.
+- Caixa e operador ficam bloqueados quando não há estoque suficiente.
+- Gerente e administrador podem autorizar venda sem estoque mediante confirmação.
+- Registra autorização na auditoria como `pdv_stock_override`.
+- Atualiza versão para `6.0.13-fase-45-estoque-pdv`.

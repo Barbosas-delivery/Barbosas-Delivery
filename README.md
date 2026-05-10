@@ -38,3 +38,6 @@ Pacote final revisado com lint, build e teste de fumaça automatizado.
 ## Permissões por ação
 
 Veja `docs/PERMISSOES-POR-ACAO.md` para os limites de desconto e ações permitidas por perfil.
+
+
+- [Estoque no PDV](docs/ESTOQUE-PDV.md)
