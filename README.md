@@ -30,3 +30,6 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 Pacote final revisado com lint, build e teste de fumaça automatizado.
 
 - [Taxas por bairro](docs/TAXAS-POR-BAIRRO.md)
+
+
+- [Relatórios comerciais avançados](docs/RELATORIOS-COMERCIAIS.md)

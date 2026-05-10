@@ -298,6 +298,123 @@ export function buildCategorySalesReport(deliveries, products = [], startDate = 
   return Array.from(rowsByCategory.values()).sort((a, b) => b.total - a.total);
 }
 
+
+function normalizeReportPhone(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getCustomerReportKey(order) {
+  const phone = normalizeReportPhone(order?.phone || order?.customerPhone);
+  if (phone) return `phone:${phone}`;
+  return `name:${String(order?.client || order?.customerName || "Cliente sem nome").trim().toLowerCase()}`;
+}
+
+export function buildCustomerSalesReport(deliveries, startDate = "", endDate = "") {
+  const periodDeliveries = (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
+    if (startDate || endDate) return isOrderInPeriod(delivery, startDate, endDate);
+    return true;
+  });
+  const rowsByCustomer = new Map();
+  periodDeliveries
+    .filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED)
+    .forEach((delivery) => {
+      const key = getCustomerReportKey(delivery);
+      const current = rowsByCustomer.get(key) || {
+        key,
+        name: delivery.client || delivery.customerName || "Cliente sem nome",
+        phone: normalizeReportPhone(delivery.phone || delivery.customerPhone),
+        orders: 0,
+        total: 0,
+        paid: 0,
+        pending: 0,
+        deliveryOrders: 0,
+        counterOrders: 0,
+        lastOrderAt: "",
+        lastAddress: "",
+      };
+      const orderTotal = toSafeMoneyNumber(delivery.value, 0);
+      current.orders += 1;
+      current.total += orderTotal;
+      if (delivery.paymentStatus === PAYMENT_STATUS.PAID) current.paid += orderTotal;
+      else current.pending += orderTotal;
+      if (isDeliveryOrder(delivery)) current.deliveryOrders += 1;
+      if (isCounterOrder(delivery)) current.counterOrders += 1;
+      const orderTime = getOrderDateMs(delivery);
+      const currentLastTime = current.lastOrderAt ? getOrderDateMs({ launchedAt: current.lastOrderAt }) : 0;
+      if (orderTime >= currentLastTime) {
+        current.lastOrderAt = delivery.launchedAt || delivery.createdAt || delivery.closedAt || delivery.deliveredAt || "";
+        current.lastAddress = delivery.address || delivery.deliveryAddress || delivery.neighborhood || "";
+      }
+      rowsByCustomer.set(key, current);
+    });
+
+  return Array.from(rowsByCustomer.values())
+    .map((row) => ({ ...row, averageTicket: row.orders ? row.total / row.orders : 0 }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export function buildPeakHourSalesReport(deliveries, startDate = "", endDate = "") {
+  const rowsByHour = new Map();
+  (Array.isArray(deliveries) ? deliveries : [])
+    .filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED)
+    .filter((delivery) => {
+      if (startDate || endDate) return isOrderInPeriod(delivery, startDate, endDate);
+      return true;
+    })
+    .forEach((delivery) => {
+      const time = getOrderDateMs(delivery);
+      if (!time) return;
+      const hour = new Date(time).getHours();
+      const label = `${String(hour).padStart(2, "0")}h às ${String((hour + 1) % 24).padStart(2, "0")}h`;
+      const current = rowsByHour.get(hour) || { hour, label, orders: 0, total: 0, deliveryOrders: 0, counterOrders: 0 };
+      current.orders += 1;
+      current.total += toSafeMoneyNumber(delivery.value, 0);
+      if (isDeliveryOrder(delivery)) current.deliveryOrders += 1;
+      if (isCounterOrder(delivery)) current.counterOrders += 1;
+      rowsByHour.set(hour, current);
+    });
+  return Array.from(rowsByHour.values())
+    .map((row) => ({ ...row, averageTicket: row.orders ? row.total / row.orders : 0 }))
+    .sort((a, b) => b.orders - a.orders || b.total - a.total);
+}
+
+export function buildProfitSalesReport(deliveries, products = [], startDate = "", endDate = "") {
+  const productById = new Map((Array.isArray(products) ? products : []).map((product) => [String(product.id), product]));
+  const rowsByProduct = new Map();
+  (Array.isArray(deliveries) ? deliveries : [])
+    .filter((delivery) => delivery.status !== DELIVERY_STATUS.CANCELLED)
+    .filter((delivery) => {
+      if (startDate || endDate) return isOrderInPeriod(delivery, startDate, endDate);
+      return true;
+    })
+    .forEach((delivery) => {
+      (delivery.items || []).forEach((item) => {
+        if (item.isKit) return;
+        const id = String(item.productId || item.id || item.barcode || item.name || "produto");
+        const product = productById.get(String(item.productId || item.id)) || {};
+        const quantity = toPositiveInteger(item.quantity, 1);
+        const salePrice = toSafeMoneyNumber(item.price, 0);
+        const costPrice = toSafeMoneyNumber(product.cost ?? product.costPrice ?? item.cost ?? item.costPrice, 0);
+        const current = rowsByProduct.get(id) || {
+          key: id,
+          name: item.name || product.name || "Produto",
+          quantity: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+          marginPercent: 0,
+        };
+        current.quantity += quantity;
+        current.revenue += salePrice * quantity;
+        current.cost += costPrice * quantity;
+        current.profit = current.revenue - current.cost;
+        current.marginPercent = current.revenue ? (current.profit / current.revenue) * 100 : 0;
+        rowsByProduct.set(id, current);
+      });
+    });
+  return Array.from(rowsByProduct.values()).sort((a, b) => b.profit - a.profit || b.revenue - a.revenue);
+}
+
 export function buildPrintableRowsHtml(rows, columns) {
   if (!Array.isArray(rows) || rows.length === 0) return `<tr><td colspan="${columns.length}">Sem registros no período.</td></tr>`;
   return rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(column.render ? column.render(row) : row[column.key])}</td>`).join("")}</tr>`).join("");

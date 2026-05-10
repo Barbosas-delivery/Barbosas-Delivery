@@ -141,3 +141,12 @@ Depois teste no sistema publicado:
 - Textos editáveis em Configurações da loja.
 - Variáveis: `{cliente}`, `{pedido}`, `{loja}`, `{total}`, `{taxa}`, `{status}`, `{previsao}` e `{pagamento}`.
 - Cache do PWA atualizado para evitar versão antiga no celular.
+
+
+## Fase 42 — Relatórios comerciais avançados
+
+- Adiciona clientes recorrentes no relatório por período.
+- Adiciona ranking de horários de pico.
+- Adiciona lucratividade estimada por produto com base no custo cadastrado.
+- Adiciona exportações CSV para clientes, horários e lucro.
+- Atualiza versão para 6.0.10-fase-42-relatorios-clientes.

@@ -135,6 +135,9 @@ import {
   buildPeriodSalesReport,
   buildProductSalesReport,
   buildCategorySalesReport,
+  buildCustomerSalesReport,
+  buildPeakHourSalesReport,
+  buildProfitSalesReport,
   buildPrintableRowsHtml,
   buildStoreDeliveryFinancialSummary,
 } from "./utils/reports";
@@ -2581,6 +2584,9 @@ function App() {
   const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate, orderPayments), [deliveries, reportRange, orderPayments]);
   const productSalesReport = useMemo(() => buildProductSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
   const categorySalesReport = useMemo(() => buildCategorySalesReport(deliveries, products, reportRange.startDate, reportRange.endDate), [deliveries, products, reportRange]);
+  const customerSalesReport = useMemo(() => buildCustomerSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
+  const peakHourSalesReport = useMemo(() => buildPeakHourSalesReport(deliveries, reportRange.startDate, reportRange.endDate), [deliveries, reportRange]);
+  const profitSalesReport = useMemo(() => buildProfitSalesReport(deliveries, products, reportRange.startDate, reportRange.endDate), [deliveries, products, reportRange]);
   const cancelledDeliveryOrdersForStore = useMemo(() => deliveries.filter((delivery) => isDeliveryOrder(delivery) && delivery.status === DELIVERY_STATUS.CANCELLED), [deliveries]);
   const cancelledDeliveryReportForStore = useMemo(() => ({
     count: cancelledDeliveryOrdersForStore.length,
@@ -4271,6 +4277,42 @@ function App() {
     downloadCsvFile(`barbosas-categorias-${buildReportFileDate()}.csv`, headers, rows);
     auditAction("export_category_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
     setLastAction("Relatório de categorias exportado em CSV.");
+  }
+
+  function exportCustomerSalesCsv() {
+    const headers = ["Cliente", "Telefone", "Pedidos", "Entregas", "Balcao", "Total gasto", "Ticket medio", "Pago", "Pendente", "Ultimo pedido", "Ultimo endereco"];
+    const rows = customerSalesReport.map((row) => [
+      row.name,
+      formatBrazilMobilePhone(row.phone || ""),
+      row.orders,
+      row.deliveryOrders,
+      row.counterOrders,
+      money(row.total),
+      money(row.averageTicket),
+      money(row.paid),
+      money(row.pending),
+      row.lastOrderAt ? new Date(row.lastOrderAt).toLocaleString("pt-BR") : "",
+      row.lastAddress || "",
+    ]);
+    downloadCsvFile(`barbosas-clientes-${buildReportFileDate()}.csv`, headers, rows);
+    auditAction("export_customer_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
+    setLastAction("Relatório de clientes exportado em CSV.");
+  }
+
+  function exportPeakHourSalesCsv() {
+    const headers = ["Horario", "Pedidos", "Entregas", "Balcao", "Total vendido", "Ticket medio"];
+    const rows = peakHourSalesReport.map((row) => [row.label, row.orders, row.deliveryOrders, row.counterOrders, money(row.total), money(row.averageTicket)]);
+    downloadCsvFile(`barbosas-horarios-${buildReportFileDate()}.csv`, headers, rows);
+    auditAction("export_peak_hour_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
+    setLastAction("Relatório de horários exportado em CSV.");
+  }
+
+  function exportProfitSalesCsv() {
+    const headers = ["Produto", "Quantidade", "Faturamento", "Custo estimado", "Lucro estimado", "Margem"];
+    const rows = profitSalesReport.map((row) => [row.name, row.quantity, money(row.revenue), money(row.cost), money(row.profit), `${row.marginPercent.toFixed(1).replace(".", ",")}%`]);
+    downloadCsvFile(`barbosas-lucratividade-${buildReportFileDate()}.csv`, headers, rows);
+    auditAction("export_profit_sales_csv", "reports", buildReportFileDate(), { rows: rows.length });
+    setLastAction("Relatório de lucratividade exportado em CSV.");
   }
 
   function exportStockCsv() {
@@ -7139,6 +7181,76 @@ function App() {
                             <span className="font-medium truncate">{row.category}</span>
                             <span>{row.quantity}</span>
                             <span className="text-right font-bold">{money(row.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </CardBox>
+
+                <CardBox>
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                    <div>
+                      <h3 className="font-bold text-lg">Clientes, horários de pico e lucratividade</h3>
+                      <p className="text-sm text-zinc-500">Visão comercial do período pesquisado: clientes recorrentes, horários de maior movimento e margem estimada por produto.</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <Button onClick={exportCustomerSalesCsv} variant="secondary" className="rounded-2xl">CSV clientes</Button>
+                      <Button onClick={exportPeakHourSalesCsv} variant="secondary" className="rounded-2xl">CSV horários</Button>
+                      <Button onClick={exportProfitSalesCsv} variant="secondary" className="rounded-2xl">CSV lucro</Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                    <div className="rounded-3xl border border-zinc-100 overflow-hidden">
+                      <div className="bg-zinc-50 px-4 py-3">
+                        <h4 className="font-bold">Clientes recorrentes</h4>
+                        <p className="text-xs text-zinc-500">Ordenado por total gasto no período.</p>
+                      </div>
+                      <div className="max-h-80 overflow-auto divide-y divide-zinc-100">
+                        {customerSalesReport.length === 0 ? <p className="p-4 text-sm text-zinc-500">Nenhum cliente no período.</p> : customerSalesReport.slice(0, 12).map((row) => (
+                          <div key={row.key} className="p-4 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-bold truncate">{row.name}</p>
+                                <p className="text-xs text-zinc-500">{formatBrazilMobilePhone(row.phone || "") || "Sem telefone"}</p>
+                              </div>
+                              <span className="font-bold whitespace-nowrap">{money(row.total)}</span>
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-1">{row.orders} pedido(s) • ticket {money(row.averageTicket)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-zinc-100 overflow-hidden">
+                      <div className="bg-zinc-50 px-4 py-3">
+                        <h4 className="font-bold">Horários de pico</h4>
+                        <p className="text-xs text-zinc-500">Ajuda a planejar caixa e entregadores.</p>
+                      </div>
+                      <div className="max-h-80 overflow-auto divide-y divide-zinc-100">
+                        {peakHourSalesReport.length === 0 ? <p className="p-4 text-sm text-zinc-500">Nenhum horário no período.</p> : peakHourSalesReport.slice(0, 12).map((row) => (
+                          <div key={row.hour} className="grid grid-cols-[1fr_70px_100px] px-4 py-3 text-sm items-center">
+                            <span className="font-medium">{row.label}</span>
+                            <span>{row.orders} ped.</span>
+                            <span className="text-right font-bold">{money(row.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-zinc-100 overflow-hidden">
+                      <div className="bg-zinc-50 px-4 py-3">
+                        <h4 className="font-bold">Lucratividade estimada</h4>
+                        <p className="text-xs text-zinc-500">Usa o custo cadastrado no produto. Produtos sem custo ficam com lucro superestimado.</p>
+                      </div>
+                      <div className="max-h-80 overflow-auto divide-y divide-zinc-100">
+                        {profitSalesReport.length === 0 ? <p className="p-4 text-sm text-zinc-500">Nenhum produto no período.</p> : profitSalesReport.slice(0, 12).map((row) => (
+                          <div key={row.key} className="p-4 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="font-bold truncate">{row.name}</span>
+                              <span className="font-bold whitespace-nowrap">{money(row.profit)}</span>
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-1">Fat. {money(row.revenue)} • custo {money(row.cost)} • margem {row.marginPercent.toFixed(1).replace(".", ",")}%</p>
                           </div>
                         ))}
                       </div>
