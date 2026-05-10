@@ -184,7 +184,7 @@ Depois teste no sistema publicado:
 - Amplia os motivos de cancelamento de pedidos/vendas.
 - O cancelamento com `Outro motivo` exige detalhes obrigatórios.
 - Atualiza cache do PWA para evitar celulares carregarem versão antiga.
-- Atualiza versão para `6.0.14-fase-46-motivos-operacionais`.
+- Atualiza versão para `6.0.16-fase-48-hoje-operacional`.
 
 ## Fase 47 — Auditoria operacional
 
@@ -194,3 +194,13 @@ Depois teste no sistema publicado:
 - Métricas de registros carregados, ações do dia, ações sensíveis e usuários.
 - Exportação CSV dos registros filtrados.
 - Documentação em `docs/AUDITORIA-OPERACIONAL.md`.
+
+
+## Fase 48 — Hoje operacional
+
+- Adiciona o bloco **Hoje na loja** no painel principal.
+- Mostra vendido hoje, entregas ativas, vendas balcão e pagamentos pendentes.
+- Lista próximas ações operacionais: aprovações, atrasos, pagamentos, estoque zerado e backup.
+- Adiciona fila rápida de entregas, com atrasadas primeiro e pedidos mais antigos em seguida.
+- Documentação em `docs/HOJE-OPERACIONAL.md`.
+- Atualiza versão para `6.0.16-fase-48-hoje-operacional`.

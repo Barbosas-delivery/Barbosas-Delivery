@@ -8699,10 +8699,96 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
   const criticalAttentionCount = attentionItems.filter((item) => item.severity === "critical").length;
   const highAttentionCount = attentionItems.filter((item) => item.severity === "high").length;
   const backupDue = Boolean(attentionSummary.backupDue);
+  const todayActiveDeliveries = deliveries.filter((delivery) => !isCounterOrder(delivery) && !isOrderFinalized(delivery));
+  const todayCounterSales = deliveries.filter((delivery) => isCounterOrder(delivery));
+  const todayPendingPayments = deliveries.filter((delivery) => !isOrderFinalized(delivery) && [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.RECEIVABLE, PAYMENT_STATUS.STORE_CREDIT].includes(delivery.paymentStatus));
+  const waitingStoreApproval = deliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL);
+  const delayedDeliveries = Array.isArray(attentionSummary.delayedDeliveries) ? attentionSummary.delayedDeliveries : [];
+  const todayActionItems = [
+    waitingStoreApproval.length > 0 && { title: "Aprovar pedidos", value: waitingStoreApproval.length, description: "Pedidos aguardando confirmação da loja." },
+    delayedDeliveries.length > 0 && { title: "Resolver atrasos", value: delayedDeliveries.length, description: "Entregas passaram do limite operacional." },
+    todayPendingPayments.length > 0 && { title: "Receber pagamentos", value: todayPendingPayments.length, description: "Pedidos ainda pendentes, a receber ou fiados." },
+    criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length > 0 && { title: "Repor estoque zerado", value: criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length, description: "Produtos sem estoque disponível." },
+    backupDue && { title: "Baixar backup", value: "Hoje", description: "Backup diário ainda não foi feito neste navegador." },
+  ].filter(Boolean);
+  const priorityQueue = [...todayActiveDeliveries]
+    .sort((a, b) => {
+      const aDelayed = isDeliveryDelayed(a) ? 1 : 0;
+      const bDelayed = isDeliveryDelayed(b) ? 1 : 0;
+      if (aDelayed !== bDelayed) return bDelayed - aDelayed;
+      return new Date(a.launchedAt || a.createdAt || 0).getTime() - new Date(b.launchedAt || b.createdAt || 0).getTime();
+    })
+    .slice(0, 5);
 
   return (
     <div className="space-y-6">
       <Title title="Painel geral da loja" subtitle="Visão geral da loja, entregas, estoque, clientes, entregadores, valores e notificações." />
+
+      <CardBox>
+        <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+          <div>
+            <p className="text-sm font-black text-zinc-500 uppercase tracking-wide">Hoje na loja</p>
+            <h3 className="text-2xl font-black">Resumo rápido da operação</h3>
+            <p className="text-sm text-zinc-500 mt-1">Use este bloco para abrir o sistema e saber imediatamente o que precisa de ação.</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 min-w-full xl:min-w-[620px]">
+            <Metric title="Vendido hoje" value={money(dayReport.totalDelivery)} icon="money" />
+            <Metric title="Entregas ativas" value={todayActiveDeliveries.length} icon="truck" />
+            <Metric title="Vendas balcão" value={todayCounterSales.length} icon="money" />
+            <Metric title="A receber" value={todayPendingPayments.length} icon="alert" />
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h4 className="font-black">Próximas ações</h4>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-zinc-600">{todayActionItems.length} item{todayActionItems.length === 1 ? "" : "s"}</span>
+            </div>
+            {todayActionItems.length > 0 ? (
+              <div className="grid gap-2">
+                {todayActionItems.slice(0, 5).map((item) => (
+                  <div key={item.title} className="rounded-2xl bg-white border border-zinc-100 p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-black">{item.title}</p>
+                      <span className="rounded-full bg-zinc-950 px-3 py-1 text-xs font-black text-white">{item.value}</span>
+                    </div>
+                    <p className="text-zinc-500 mt-1">{item.description}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 text-sm font-bold text-emerald-800">Nenhuma ação urgente neste momento.</p>
+            )}
+          </div>
+          <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h4 className="font-black">Fila rápida de entregas</h4>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-zinc-600">Atrasadas primeiro</span>
+            </div>
+            {priorityQueue.length > 0 ? (
+              <div className="grid gap-2">
+                {priorityQueue.map((delivery) => {
+                  const delayed = isDeliveryDelayed(delivery);
+                  return (
+                    <div key={delivery.id} className={`rounded-2xl border p-3 text-sm ${delayed ? "border-red-200 bg-red-50" : "border-zinc-100 bg-white"}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black">Pedido #{delivery.id} • {delivery.client}</p>
+                          <p className="text-zinc-500">{delivery.neighborhood || delivery.address || "Sem bairro informado"}</p>
+                          <p className="text-xs text-zinc-500 mt-1">{delivery.status} • {money(delivery.value)}</p>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-black ${delayed ? "bg-red-600 text-white" : "bg-zinc-200 text-zinc-700"}`}>{delayed ? "Atrasada" : "Em dia"}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="rounded-2xl bg-white border border-zinc-100 p-3 text-sm text-zinc-500">Nenhuma entrega ativa agora.</p>
+            )}
+          </div>
+        </div>
+      </CardBox>
 
       <CardBox>
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">

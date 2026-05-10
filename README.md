@@ -23,7 +23,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.14-fase-46-motivos-operacionais`
+`6.0.16-fase-48-hoje-operacional`
 
 ## Revisão final
 
@@ -46,3 +46,5 @@ Veja `docs/PERMISSOES-POR-ACAO.md` para os limites de desconto e ações permiti
 - [Motivos operacionais padronizados](docs/MOTIVOS-OPERACIONAIS.md)
 
 - [Auditoria operacional](docs/AUDITORIA-OPERACIONAL.md)
+
+- [Hoje operacional](docs/HOJE-OPERACIONAL.md)
