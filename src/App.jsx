@@ -55,6 +55,7 @@ import {
   DELIVERY_STATUS,
   PAYMENT_STATUS,
   CANCELLATION_REASONS,
+  DELIVERY_PROBLEM_REASONS,
   ORDER_TYPE,
   DEFAULT_TAB_CREDIT_LIMIT,
   TAB_FAST_PAYMENT_BONUS,
@@ -1180,6 +1181,30 @@ function getCustomerCheckoutIssue({ cart, products, productsTotal, minimumOrderV
 
 function isOrderFinalized(order) {
   return [DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(order?.status);
+}
+
+function normalizeDeliveryProblemReasonInput(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const numericIndex = Number(raw);
+  if (Number.isInteger(numericIndex) && numericIndex >= 1 && numericIndex <= DELIVERY_PROBLEM_REASONS.length) {
+    return DELIVERY_PROBLEM_REASONS[numericIndex - 1];
+  }
+  const matchedReason = DELIVERY_PROBLEM_REASONS.find((reason) => reason.toLowerCase() === raw.toLowerCase());
+  return matchedReason || raw;
+}
+
+function promptDeliveryProblemReason() {
+  const optionsText = DELIVERY_PROBLEM_REASONS.map((reason, index) => `${index + 1}. ${reason}`).join("\n");
+  const selected = window.prompt(`Informe o motivo do problema na entrega:\n\n${optionsText}\n\nDigite o número ou descreva o motivo.`, "1");
+  const reason = normalizeDeliveryProblemReasonInput(selected);
+  if (!reason) return "";
+  if (reason === "Outro motivo") {
+    const details = window.prompt("Descreva o problema na entrega:", "") || "";
+    const trimmedDetails = details.trim();
+    return trimmedDetails ? `Outro motivo: ${trimmedDetails}` : "";
+  }
+  return reason;
 }
 
 function getOrderAllowedActions(order, role = "admin") {
@@ -4982,7 +5007,7 @@ function App() {
 
     let problemReason = "";
     if (status === DELIVERY_STATUS.DELIVERY_PROBLEM) {
-      problemReason = window.prompt("Qual foi o problema na entrega?", "Cliente não atende") || "";
+      problemReason = promptDeliveryProblemReason();
       if (!problemReason.trim()) return setLastAction("Informe o motivo do problema na entrega.");
     }
     const statusPatch = status === DELIVERY_STATUS.DELIVERY_PROBLEM ? { status, problemReason: problemReason.trim(), problemAt: new Date().toISOString() } : { status };
@@ -5208,8 +5233,14 @@ function App() {
     if (delivery.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Esse pedido já está cancelado.");
     if (delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED && isDeliveryOrder(delivery)) return setLastAction("Pedido entregue confirmado não pode ser cancelado.");
 
-    const cancellationText = pendingCancellation.details.trim()
-      ? `${pendingCancellation.reason}: ${pendingCancellation.details.trim()}`
+    const cancellationDetails = pendingCancellation.details.trim();
+    if (pendingCancellation.reason === "Outro motivo" && !cancellationDetails) {
+      setLastAction("Informe os detalhes do cancelamento quando escolher Outro motivo.");
+      return;
+    }
+
+    const cancellationText = cancellationDetails
+      ? `${pendingCancellation.reason}: ${cancellationDetails}`
       : pendingCancellation.reason;
 
     const patch = {
@@ -8052,7 +8083,7 @@ function App() {
                   {CANCELLATION_REASONS.map((reason) => <option key={reason}>{reason}</option>)}
                 </select>
               </label>
-              <Input label="Detalhes opcionais" value={pendingCancellation.details} onChange={(value) => setPendingCancellation({ ...pendingCancellation, details: value })} placeholder="Ex: cliente pediu para cancelar pelo WhatsApp" />
+              <Input label={pendingCancellation.reason === "Outro motivo" ? "Detalhes obrigatórios" : "Detalhes opcionais"} value={pendingCancellation.details} onChange={(value) => setPendingCancellation({ ...pendingCancellation, details: value })} placeholder="Ex: cliente pediu para cancelar pelo WhatsApp" />
               <div className="flex gap-2">
                 <Button onClick={cancelDelivery} className="rounded-2xl bg-red-600 hover:bg-red-700 flex-1">Cancelar {pendingCancellation.orderType === ORDER_TYPE.COUNTER ? "venda" : "pedido"}</Button>
                 <Button onClick={() => setPendingCancellation({ open: false, deliveryId: null, reason: CANCELLATION_REASONS[0], details: "", orderType: ORDER_TYPE.DELIVERY })} variant="secondary" className="rounded-2xl flex-1">Voltar</Button>

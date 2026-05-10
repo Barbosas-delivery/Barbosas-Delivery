@@ -175,3 +175,13 @@ Depois teste no sistema publicado:
 - Gerente e administrador podem autorizar venda sem estoque mediante confirmação.
 - Registra autorização na auditoria como `pdv_stock_override`.
 - Atualiza versão para `6.0.13-fase-45-estoque-pdv`.
+
+## Fase 46 — Motivos operacionais padronizados
+
+- Adiciona motivos padronizados para problema na entrega.
+- O entregador pode escolher o motivo por número ou descrever um motivo próprio.
+- O motivo `Outro motivo` exige descrição complementar.
+- Amplia os motivos de cancelamento de pedidos/vendas.
+- O cancelamento com `Outro motivo` exige detalhes obrigatórios.
+- Atualiza cache do PWA para evitar celulares carregarem versão antiga.
+- Atualiza versão para `6.0.14-fase-46-motivos-operacionais`.

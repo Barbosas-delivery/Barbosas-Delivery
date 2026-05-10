@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.13-fase-45-estoque-pdv";
+export const APP_VERSION = "6.0.14-fase-46-motivos-operacionais";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
@@ -26,7 +26,21 @@ export const CANCELLATION_REASONS = [
   "Cliente desistiu",
   "Produto indisponível",
   "Endereço incorreto",
+  "Fora da área de entrega",
+  "Pagamento não aprovado",
   "Pedido duplicado",
+  "Problema operacional da loja",
+  "Outro motivo",
+];
+
+export const DELIVERY_PROBLEM_REASONS = [
+  "Cliente não atende",
+  "Endereço errado",
+  "Cliente ausente",
+  "Problema com pagamento",
+  "Moto com problema",
+  "Pedido avariado",
+  "Região insegura",
   "Outro motivo",
 ];
 
