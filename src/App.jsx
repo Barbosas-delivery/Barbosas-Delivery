@@ -465,6 +465,7 @@ function getTodayOpeningHours(schedule, date = new Date()) {
 
 const STORE_SETTINGS_STORAGE_KEY = "barbosas-delivery-store-settings-v1";
 const CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY = "barbosas-delivery-customer-dismissed-orders-v1";
+const DAILY_BACKUP_STORAGE_KEY = "barbosas-delivery-last-backup-at-v1";
 
 function clampPrintCopies(value, fallback = 1) {
   return Math.min(5, Math.max(1, toPositiveInteger(value, fallback)));
@@ -574,6 +575,39 @@ function saveDismissedCustomerOrderIds(ids) {
   } catch {
     // O painel do cliente continua funcionando mesmo se o navegador bloquear localStorage.
   }
+}
+
+
+function loadLastDailyBackupAt() {
+  if (typeof window === "undefined") return "";
+  try {
+    return String(window.localStorage.getItem(DAILY_BACKUP_STORAGE_KEY) || "");
+  } catch {
+    return "";
+  }
+}
+
+function saveLastDailyBackupAt(value) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(DAILY_BACKUP_STORAGE_KEY, String(value || new Date().toISOString()));
+  } catch {
+    // O lembrete de backup é apenas local; se o navegador bloquear, o sistema segue funcionando.
+  }
+}
+
+function isSameLocalDate(value, date = new Date()) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.toLocaleDateString("pt-BR") === date.toLocaleDateString("pt-BR");
+}
+
+function formatBackupDate(value) {
+  if (!value) return "Nenhum backup baixado neste navegador";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Data de backup inválida";
+  return parsed.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
 
@@ -715,6 +749,95 @@ function sortDeliveriesByPriority(a, b) {
   const delayedB = isDeliveryDelayed(b, now) ? 1 : 0;
   if (delayedA !== delayedB) return delayedB - delayedA;
   return getDeliveryLaunchTimeValue(a) - getDeliveryLaunchTimeValue(b);
+}
+
+
+function buildStoreAttentionSummary({ products = [], deliveries = [], notifications = [], lastBackupAt = "" }) {
+  const activeDeliveryOrders = deliveries.filter((delivery) => isDeliveryOrder(delivery) && ![DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(delivery.status));
+  const delayedDeliveries = activeDeliveryOrders.filter((delivery) => isDeliveryDelayed(delivery)).sort(sortDeliveriesByPriority);
+  const waitingApproval = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL || delivery.needsStoreApproval === true && delivery.storeOrderApproved === false);
+  const deliveryProblems = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.DELIVERY_PROBLEM);
+  const pendingPayments = deliveries.filter((delivery) => ![DELIVERY_STATUS.CANCELLED].includes(delivery.status) && [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.RECEIVABLE, PAYMENT_STATUS.STORE_CREDIT].includes(delivery.paymentStatus));
+  const whatsappPending = activeDeliveryOrders.filter((delivery) => delivery.phone && delivery.whatsappStatus !== "sent");
+  const lowStockProducts = products
+    .filter((product) => product.active !== false)
+    .filter((product) => Number(product.stock || 0) <= Number(product.minStock || 0))
+    .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
+  const outOfStockProducts = lowStockProducts.filter((product) => Number(product.stock || 0) <= 0);
+  const unreadStoreNotifications = notifications.filter((notification) => !notification.readAt && !notification.read_at && !notification.resolvedAt && !notification.resolved_at);
+  const backupDue = !isSameLocalDate(lastBackupAt);
+
+  const items = [
+    ...delayedDeliveries.map((delivery) => ({
+      type: "delay",
+      severity: getDeliveryAgeMinutes(delivery) >= 25 ? "critical" : "high",
+      title: `Pedido #${delivery.id} atrasado`,
+      description: `${delivery.client || "Cliente"} • ${getDeliveryAgeMinutes(delivery)} min desde o lançamento • ${delivery.status}`,
+      action: "Priorize a entrega ou fale com o entregador.",
+    })),
+    ...deliveryProblems.map((delivery) => ({
+      type: "problem",
+      severity: "critical",
+      title: `Problema na entrega #${delivery.id}`,
+      description: `${delivery.client || "Cliente"} • ${delivery.problemReason || "motivo não informado"}`,
+      action: "Resolva com o entregador/cliente antes de liberar novas etapas.",
+    })),
+    ...waitingApproval.map((delivery) => ({
+      type: "approval",
+      severity: "high",
+      title: `Pedido #${delivery.id} aguardando aprovação`,
+      description: `${delivery.client || "Cliente"} • ${money(delivery.value || 0)} • ${delivery.payment || "pagamento não informado"}`,
+      action: "Aprove ou cancele para não atrasar a fila.",
+    })),
+    ...pendingPayments.slice(0, 6).map((delivery) => ({
+      type: "payment",
+      severity: "medium",
+      title: `Recebimento pendente #${delivery.id}`,
+      description: `${delivery.client || "Cliente"} • ${delivery.paymentStatus || PAYMENT_STATUS.PENDING} • ${money(delivery.value || 0)}`,
+      action: "Confirme o pagamento quando receber.",
+    })),
+    ...whatsappPending.slice(0, 6).map((delivery) => ({
+      type: "whatsapp",
+      severity: "medium",
+      title: `WhatsApp não marcado #${delivery.id}`,
+      description: `${delivery.client || "Cliente"} • ${formatBrazilMobilePhone(delivery.phone || "")}`,
+      action: "Envie ou marque como enviado no card do pedido.",
+    })),
+    ...outOfStockProducts.slice(0, 8).map((product) => ({
+      type: "stock_out",
+      severity: "high",
+      title: `${product.name} sem estoque`,
+      description: `Estoque atual: ${product.stock || 0} • mínimo: ${product.minStock || 0}`,
+      action: "Reponha, pause ou inative o produto.",
+    })),
+    ...lowStockProducts.filter((product) => Number(product.stock || 0) > 0).slice(0, 8).map((product) => ({
+      type: "stock_low",
+      severity: "medium",
+      title: `${product.name} com estoque baixo`,
+      description: `Estoque atual: ${product.stock || 0} • mínimo: ${product.minStock || 0}`,
+      action: "Planeje reposição antes de acabar.",
+    })),
+    ...(backupDue ? [{
+      type: "backup",
+      severity: "medium",
+      title: "Backup diário pendente",
+      description: `Último backup: ${formatBackupDate(lastBackupAt)}`,
+      action: "Baixe o backup operacional de hoje.",
+    }] : []),
+  ];
+
+  return {
+    items,
+    delayedDeliveries,
+    waitingApproval,
+    deliveryProblems,
+    pendingPayments,
+    whatsappPending,
+    lowStockProducts,
+    outOfStockProducts,
+    unreadStoreNotifications,
+    backupDue,
+  };
 }
 
 function getDeliveryCompletionTimeValue(delivery) {
@@ -2009,6 +2132,7 @@ function App() {
   const autoPrintedDeliveryIdsRef = useRef(new Set());
   const autoPrintInitializedRef = useRef(false);
   const backupFileInputRef = useRef(null);
+  const [lastDailyBackupAt, setLastDailyBackupAt] = useState(loadLastDailyBackupAt);
   const [orderPayments, setOrderPayments] = useState([]);
   const [processingPaymentIds, setProcessingPaymentIds] = useState([]);
   const [cashSession, setCashSession] = useState({ isOpen: false, id: "", openedAt: "", closedAt: "", openingAmount: 0, sangrias: [] });
@@ -2275,6 +2399,7 @@ function App() {
   const selfTests = useMemo(() => runSelfTests(), []);
   const passedTests = selfTests.filter((test) => test.passed).length;
   const ownerNotifications = useMemo(() => getAudienceNotifications(notifications, "loja"), [notifications]);
+  const storeAttentionSummary = useMemo(() => buildStoreAttentionSummary({ products, deliveries, notifications: ownerNotifications, lastBackupAt: lastDailyBackupAt }), [products, deliveries, ownerNotifications, lastDailyBackupAt]);
   const customerNotifications = useMemo(() => {
     if (!normalizedCustomerPhoneForNotifications) return [];
     return getAudienceNotifications(notifications, "customer").filter((notification) => {
@@ -5228,6 +5353,8 @@ function App() {
     };
     const safeDate = createdAt.slice(0, 19).replace(/[:T]/g, "-");
     downloadJsonFile(`barbosas-delivery-backup-${safeDate}.json`, backup);
+    saveLastDailyBackupAt(createdAt);
+    setLastDailyBackupAt(createdAt);
     setLastAction("Backup operacional baixado em JSON. Guarde esse arquivo em local seguro.");
   }
 
@@ -5944,7 +6071,7 @@ function App() {
 
             {lastAction && <div className="bg-white border border-zinc-200 rounded-3xl px-5 py-4 flex items-center gap-3 shadow-sm"><Icon name="check" className="text-emerald-600" /><p className="text-sm text-zinc-700">{lastAction}</p></div>}
 
-            {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} onInactivateProduct={toggleProductStatus} />}
+            {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} attentionSummary={storeAttentionSummary} lastDailyBackupAt={lastDailyBackupAt} onDownloadBackup={exportOperationalBackup} onInactivateProduct={toggleProductStatus} />}
 
             {activeTab === "diagnostics" && (
               <DiagnosticsTab
@@ -7835,15 +7962,67 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
   );
 }
 
-function DashboardTab({ dayReport, selfTests, passedTests, products, clients, couriers, deliveries, storeDeliverySummary, notifications = [], onInactivateProduct }) {
+function DashboardTab({ dayReport, selfTests, passedTests, products, clients, couriers, deliveries, storeDeliverySummary, notifications = [], attentionSummary = {}, lastDailyBackupAt = "", onDownloadBackup, onInactivateProduct }) {
   const latestDeliveries = [...deliveries].slice(0, 5);
   const activeCouriers = couriers.filter((courier) => courier.active).length;
   const blockedCouriers = couriers.length - activeCouriers;
   const criticalProducts = products.filter((product) => Number(product.stock) <= Number(product.minStock));
+  const attentionItems = Array.isArray(attentionSummary.items) ? attentionSummary.items : [];
+  const topAttentionItems = attentionItems.slice(0, 10);
+  const criticalAttentionCount = attentionItems.filter((item) => item.severity === "critical").length;
+  const highAttentionCount = attentionItems.filter((item) => item.severity === "high").length;
+  const backupDue = Boolean(attentionSummary.backupDue);
 
   return (
     <div className="space-y-6">
       <Title title="Painel geral da loja" subtitle="Visão geral da loja, entregas, estoque, clientes, entregadores, valores e notificações." />
+
+      <CardBox>
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div>
+            <p className="text-sm font-black text-red-700 uppercase tracking-wide">Atenção da loja</p>
+            <h3 className="text-xl font-black">{attentionItems.length > 0 ? `${attentionItems.length} ponto${attentionItems.length > 1 ? "s" : ""} para conferir agora` : "Tudo certo no momento"}</h3>
+            <p className="text-sm text-zinc-500 mt-1">Pedidos atrasados, problemas de entrega, pagamentos pendentes, WhatsApp, estoque baixo e backup diário em um só lugar.</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 min-w-full lg:min-w-[520px]">
+            <Metric title="Críticos" value={criticalAttentionCount} icon="alert" />
+            <Metric title="Alta prioridade" value={highAttentionCount} icon="alert" />
+            <Metric title="Atrasados" value={attentionSummary.delayedDeliveries?.length || 0} icon="truck" />
+            <Metric title="Estoque baixo" value={attentionSummary.lowStockProducts?.length || 0} icon="package" />
+          </div>
+        </div>
+
+        {backupDue && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="font-black text-amber-900">Backup diário pendente</p>
+              <p className="text-sm text-amber-800">Último backup neste navegador: {formatBackupDate(lastDailyBackupAt)}.</p>
+            </div>
+            <Button onClick={onDownloadBackup} variant="secondary" className="rounded-2xl bg-white">Baixar backup agora</Button>
+          </div>
+        )}
+
+        {topAttentionItems.length > 0 ? (
+          <div className="mt-4 grid gap-3">
+            {topAttentionItems.map((item, index) => (
+              <div key={`${item.type}-${index}-${item.title}`} className={`rounded-2xl border p-4 ${item.severity === "critical" ? "border-red-200 bg-red-50" : item.severity === "high" ? "border-orange-200 bg-orange-50" : "border-amber-200 bg-amber-50"}`}>
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
+                  <div>
+                    <p className={`font-black ${item.severity === "critical" ? "text-red-800" : item.severity === "high" ? "text-orange-800" : "text-amber-800"}`}>{item.title}</p>
+                    <p className="text-sm text-zinc-700 mt-1">{item.description}</p>
+                    <p className="text-xs text-zinc-500 mt-1">{item.action}</p>
+                  </div>
+                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${item.severity === "critical" ? "bg-red-600 text-white" : item.severity === "high" ? "bg-orange-600 text-white" : "bg-amber-600 text-white"}`}>{item.severity === "critical" ? "Crítico" : item.severity === "high" ? "Prioridade" : "Atenção"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800 font-bold">
+            Nenhum atraso, problema, pagamento pendente crítico, estoque baixo ou backup pendente encontrado agora.
+          </div>
+        )}
+      </CardBox>
 
       {notifications.length > 0 && (
         <CardBox>

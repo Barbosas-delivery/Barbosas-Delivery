@@ -117,3 +117,11 @@ Depois teste no sistema publicado:
 - Adicionado botão para imprimir recibo térmico do fechamento do entregador.
 - Adicionado CSV do fechamento do entregador.
 - Atualizado cache do PWA para a versão 6.0.6-fase-38-fechamento-entregador.
+
+
+## Fase 39 — Atenção da loja, estoque baixo e backup diário
+
+- Adicionado painel de atenção na tela principal da loja.
+- Centraliza pedidos atrasados, problemas de entrega, aprovações pendentes, pagamentos pendentes, WhatsApp não marcado e estoque baixo.
+- Adicionado lembrete de backup diário com data do último backup neste navegador.
+- Atualizado cache do PWA para a versão 6.0.7-fase-39-atencao-loja.
