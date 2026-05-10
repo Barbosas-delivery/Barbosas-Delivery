@@ -6,6 +6,7 @@ export const initialStoreSettings = {
   defaultDeliveryFee: DELIVERY_FEE,
   minimumOrderValue: 20,
   allowUnlistedDistricts: true,
+  maxActiveDeliveriesPerCourier: 2,
   deliveryZones: [
     { id: 1, district: "Centro", fee: DELIVERY_FEE, minimumOrderValue: 20, active: true },
     { id: 2, district: "Zona 7", fee: 7, minimumOrderValue: 25, active: true },

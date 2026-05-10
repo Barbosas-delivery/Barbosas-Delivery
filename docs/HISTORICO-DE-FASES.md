@@ -150,3 +150,20 @@ Depois teste no sistema publicado:
 - Adiciona lucratividade estimada por produto com base no custo cadastrado.
 - Adiciona exportações CSV para clientes, horários e lucro.
 - Atualiza versão para 6.0.10-fase-42-relatorios-clientes.
+
+
+## Fase 43 — Fila inteligente de entregas
+
+- Adiciona limite configurável de entregas ativas por entregador.
+- Bloqueia novo aceite quando o entregador já atingiu o limite ou possui entrega atrasada própria.
+- Agrupa entregas por região no painel do entregador.
+- Mantém atrasadas no topo da prioridade operacional.
+- Atualiza versão para 6.0.11-fase-43-fila-entregas.
+
+
+## Fase 44 - Permissões por ação e limites de desconto
+
+- Reforça permissões por perfil para ações sensíveis.
+- Adiciona limites de desconto manual por perfil.
+- Protege cancelamento, reabertura, estoque, produtos e promoções.
+- Atualiza versão para 6.0.12-fase-44-permissoes-acoes.

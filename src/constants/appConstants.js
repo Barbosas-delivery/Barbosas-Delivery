@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.10-fase-42-relatorios-clientes";
+export const APP_VERSION = "6.0.12-fase-44-permissoes-acoes";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

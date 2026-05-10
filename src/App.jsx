@@ -175,6 +175,10 @@ import {
   getStoreRoleLabel,
   canManageStoreUsers,
   canAccessStoreTab,
+  STORE_ACTIONS,
+  canPerformStoreAction,
+  describeStoreRoleDiscountLimit,
+  clampDiscountByStoreRole,
   isValidLogin,
   isStoreLoginLocked,
   getStoreLockMessage,
@@ -597,6 +601,7 @@ function sanitizeStoreSettings(settings = {}) {
     localPrintServiceUrl: sanitizeLocalPrintServiceUrl(source.localPrintServiceUrl || initialStoreSettings.localPrintServiceUrl),
     localPrintFallbackToBrowser: source.localPrintFallbackToBrowser !== false,
     localPrintTimeoutMs: clampLocalPrintTimeoutMs(source.localPrintTimeoutMs || initialStoreSettings.localPrintTimeoutMs),
+    maxActiveDeliveriesPerCourier: Math.min(6, Math.max(1, Math.floor(Number(source.maxActiveDeliveriesPerCourier ?? initialStoreSettings.maxActiveDeliveriesPerCourier ?? 2)))),
     storePausedUntil: sanitizePauseUntil(source.storePausedUntil || source.store_paused_until || initialStoreSettings.storePausedUntil),
     storePauseReason: String(source.storePauseReason || source.store_pause_reason || initialStoreSettings.storePauseReason || "").trim(),
     schedule,
@@ -870,6 +875,47 @@ function sortDeliveriesByPriority(a, b) {
   return getDeliveryLaunchTimeValue(a) - getDeliveryLaunchTimeValue(b);
 }
 
+function getDeliveryDistrict(delivery) {
+  const rawDistrict = String(delivery?.district || delivery?.deliveryDistrict || delivery?.zoneDistrict || "").trim();
+  if (rawDistrict) return rawDistrict;
+  const address = String(delivery?.address || "");
+  const parts = address.split(" - " );
+  if (parts.length >= 2) return parts[1].split(",")[0].trim() || "Sem bairro";
+  return "Sem bairro";
+}
+
+function buildDeliveryRouteGroups(deliveries = []) {
+  const groups = new Map();
+  deliveries.forEach((delivery) => {
+    if (!isDeliveryOrder(delivery)) return;
+    const district = getDeliveryDistrict(delivery);
+    const current = groups.get(district) || { district, count: 0, delayedCount: 0, totalFee: 0, orderIds: [] };
+    current.count += 1;
+    current.delayedCount += isDeliveryDelayed(delivery) ? 1 : 0;
+    current.totalFee += normalizeDeliveryFee(delivery.deliveryFee);
+    current.orderIds.push(delivery.id);
+    groups.set(district, current);
+  });
+  return Array.from(groups.values()).sort((a, b) => b.delayedCount - a.delayedCount || b.count - a.count || a.district.localeCompare(b.district));
+}
+
+function getCourierAssignedActiveDeliveries(deliveries = [], courierUsername = "") {
+  return (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
+    if (!isDeliveryOrder(delivery)) return false;
+    if ([DELIVERY_STATUS.CANCELLED, DELIVERY_STATUS.CONFIRMED_DELIVERED].includes(delivery?.status)) return false;
+    return isCourierAssignedToDelivery(delivery, courierUsername);
+  });
+}
+
+function getCourierAcceptBlockReason({ deliveries = [], courierUsername = "", maxActiveDeliveries = 2 } = {}) {
+  const ownActive = getCourierAssignedActiveDeliveries(deliveries, courierUsername);
+  const ownDelayed = ownActive.filter((delivery) => isDeliveryDelayed(delivery));
+  if (ownDelayed.length > 0) return "Finalize a entrega atrasada antes de aceitar outra.";
+  const limit = Math.min(6, Math.max(1, Math.floor(Number(maxActiveDeliveries || 2))));
+  if (ownActive.length >= limit) return `Você já possui ${ownActive.length} entrega${ownActive.length === 1 ? "" : "s"} ativa${ownActive.length === 1 ? "" : "s"}. Limite atual: ${limit}.`;
+  return "";
+}
+
 
 function buildStoreAttentionSummary({ products = [], deliveries = [], notifications = [], lastBackupAt = "" }) {
   const activeDeliveryOrders = deliveries.filter((delivery) => isDeliveryOrder(delivery) && ![DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(delivery.status));
@@ -1136,7 +1182,7 @@ function isOrderFinalized(order) {
   return [DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(order?.status);
 }
 
-function getOrderAllowedActions(order) {
+function getOrderAllowedActions(order, role = "admin") {
   const status = order?.status;
   const isDelivery = isDeliveryOrder(order);
   const isCounter = isCounterOrder(order);
@@ -1147,12 +1193,18 @@ function getOrderAllowedActions(order) {
   const waitingOwnerApproval = status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
   const deliveryProblem = status === DELIVERY_STATUS.DELIVERY_PROBLEM;
   const paymentPaid = order?.paymentStatus === PAYMENT_STATUS.PAID;
+  const canApprove = canPerformStoreAction(role, STORE_ACTIONS.APPROVE_ORDER);
+  const canCancel = canPerformStoreAction(role, STORE_ACTIONS.CANCEL_ORDER);
+  const canConfirmPayment = canPerformStoreAction(role, STORE_ACTIONS.CONFIRM_PAYMENT);
+  const canReopenPayment = canPerformStoreAction(role, STORE_ACTIONS.REOPEN_PAYMENT);
+  const canReopenCounterSale = canPerformStoreAction(role, STORE_ACTIONS.REOPEN_COUNTER_SALE);
+  const canManualFinish = canPerformStoreAction(role, STORE_ACTIONS.MANUAL_FINISH_DELIVERY);
 
   if (isCounter && status === DELIVERY_STATUS.CONFIRMED_DELIVERED) {
     return {
       print: true,
       summary: true,
-      reopenCounterSale: true,
+      reopenCounterSale: canReopenCounterSale,
       whatsapp: false,
       approve: false,
       manualFinish: false,
@@ -1181,11 +1233,11 @@ function getOrderAllowedActions(order) {
       print: true,
       summary: true,
       whatsapp: Boolean(order?.phone),
-      approve: waitingStoreApproval || waitingOwnerApproval,
-      manualFinish: outForDelivery || deliveryProblem,
-      cancel: waitingStoreApproval || waitingPickup || deliveryProblem,
-      confirmPayment: !waitingStoreApproval && !paymentPaid,
-      reopenPayment: paymentPaid && !waitingOwnerApproval,
+      approve: canApprove && (waitingStoreApproval || waitingOwnerApproval),
+      manualFinish: canManualFinish && (outForDelivery || deliveryProblem),
+      cancel: canCancel && (waitingStoreApproval || waitingPickup || deliveryProblem),
+      confirmPayment: canConfirmPayment && !waitingStoreApproval && !paymentPaid,
+      reopenPayment: canReopenPayment && paymentPaid && !waitingOwnerApproval,
       reopenCounterSale: false,
     };
   }
@@ -1196,9 +1248,9 @@ function getOrderAllowedActions(order) {
     whatsapp: false,
     approve: false,
     manualFinish: false,
-    cancel: status !== DELIVERY_STATUS.CANCELLED,
-    confirmPayment: !paymentPaid,
-    reopenPayment: paymentPaid,
+    cancel: canCancel && status !== DELIVERY_STATUS.CANCELLED,
+    confirmPayment: canConfirmPayment && !paymentPaid,
+    reopenPayment: canReopenPayment && paymentPaid,
     reopenCounterSale: false,
   };
 }
@@ -1284,6 +1336,8 @@ function runSelfTests() {
     { name: "PDV usa R$5 quando taxa não for preenchida", passed: buildDeliveryTotal(49, "", 0) === 54 },
     { name: "PDV aplica desconto no total", passed: buildDeliveryTotal(49, 5, 4) === 50 },
     { name: "Desconto nunca passa do valor dos produtos", passed: normalizeDiscount(999, 49) === 49 && normalizeDiscount(-10, 49) === 0 },
+    { name: "Limite de desconto respeita perfil", passed: clampDiscountByStoreRole(50, "operador") === 5 && clampDiscountByStoreRole(50, "caixa") === 10 && clampDiscountByStoreRole(50, "gerente") === 30 },
+    { name: "Operador não pode cancelar nem reabrir venda", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }, "operador").reopenCounterSale === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, paymentStatus: PAYMENT_STATUS.PENDING }, "operador").cancel === false },
     { name: "Taxa de entrega divide 70% motoboy e 30% loja quando moto é do estabelecimento", passed: calculateCourierFee(5, "Moto do estabelecimento") === 3.5 && calculateStoreFee(5, "Moto do estabelecimento") === 1.5 },
     { name: "Moto própria não cobra 30% da loja", passed: calculateCourierFee(5, "Moto própria") === 5 && calculateStoreFee(5, "Moto própria") === 0 },
     { name: "Endereço da entrega é montado pelo cliente", passed: buildDeliveryAddress(initialClients[0]) === "Av. Brasil, 1500 - Centro, Maringá/PR" },
@@ -1317,6 +1371,8 @@ function runSelfTests() {
     { name: "Checkout do cliente bloqueia loja fechada", passed: getCustomerCheckoutIssue({ cart: [{ id: 1, price: 20, quantity: 1 }], products: [{ id: 1, active: true, stock: 10, name: "Teste" }], productsTotal: 20, minimumOrderValue: 10, storeIsOpen: false, storeMessage: "Abre às 09:00", customerForm: { name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }, payment: "Pix", changeFor: "", deliveryTotal: 25 }).includes("fechada") },
     { name: "Checkout do cliente bloqueia troco menor que total", passed: getCustomerCheckoutIssue({ cart: [{ id: 1, price: 20, quantity: 1 }], products: [{ id: 1, active: true, stock: 10, name: "Teste" }], productsTotal: 20, minimumOrderValue: 10, storeIsOpen: true, storeMessage: "Aberto", customerForm: { name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }, payment: "Dinheiro", changeFor: "10", deliveryTotal: 25 }).includes("troco") },
     { name: "Entregas sem motoboy também aparecem para todos os entregadores", passed: getCourierDeliveries(initialDeliveries).every((delivery) => delivery.courierUsername === "ALL") },
+    { name: "Limite de entregas ativas bloqueia novo aceite", passed: getCourierAcceptBlockReason({ deliveries: [{ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.OUT_FOR_DELIVERY, pickedUpByUsername: "moto01" }, { orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.OUT_FOR_DELIVERY, pickedUpByUsername: "moto01" }], courierUsername: "moto01", maxActiveDeliveries: 2 }).includes("Limite") },
+    { name: "Agrupamento por região soma entregas", passed: buildDeliveryRouteGroups([{ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, district: "Centro", deliveryFee: 7 }, { orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, address: "Rua A, 1 - Centro, Cidade/PR", deliveryFee: 5 }])[0].count === 2 },
     { name: "PDV balcão não aparece para entregadores", passed: getCourierDeliveries([...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).length === initialDeliveries.length },
     { name: "Tipo de pedido inválido não quebra validações", passed: isDeliveryOrder(null) === false && isCounterOrder(null) === false },
     { name: "Sincronizar pedido vazio não quebra", passed: Array.isArray(syncOrderItemsWithProducts(null, initialProducts)) && syncOrderItemsWithProducts(null, initialProducts).length === 0 },
@@ -1824,6 +1880,21 @@ function App() {
 
   function canCurrentStoreManageUsers() {
     return canManageStoreUsers(getCurrentStoreRole());
+  }
+
+  function canCurrentStorePerformAction(action) {
+    return canPerformStoreAction(getCurrentStoreRole(), action);
+  }
+
+  function getManualDiscountLimitLabel() {
+    return describeStoreRoleDiscountLimit(getCurrentStoreRole());
+  }
+
+  function clampManualDiscount(value) {
+    const clampedValue = clampDiscountByStoreRole(value, getCurrentStoreRole());
+    const rawValue = Math.max(0, Number(value || 0));
+    if (rawValue > clampedValue) setLastAction(`Seu perfil permite desconto ${getManualDiscountLimitLabel()}. Peça autorização de gerente/administrador para desconto maior.`);
+    return clampedValue;
   }
 
   async function loadStoreUsers() {
@@ -2532,8 +2603,9 @@ function App() {
   const courierTodaySummary = useMemo(() => buildCourierTodaySummary(deliveries, loggedCourier?.username), [deliveries, loggedCourier?.username]);
   const courierPendingDeliveries = useMemo(() => loggedCourierDeliveries.filter((delivery) => delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.status !== DELIVERY_STATUS.CANCELLED).slice().sort(sortDeliveriesByPriority), [loggedCourierDeliveries]);
   const courierDelayedDeliveries = useMemo(() => courierPendingDeliveries.filter((delivery) => isDeliveryDelayed(delivery)), [courierPendingDeliveries]);
-  const courierOwnDelayedDeliveries = useMemo(() => courierDelayedDeliveries.filter((delivery) => isCourierAssignedToDelivery(delivery, loggedCourier?.username)), [courierDelayedDeliveries, loggedCourier?.username]);
-  const courierMustFinishDelayedDelivery = courierOwnDelayedDeliveries.length > 0;
+  const courierOwnActiveDeliveries = useMemo(() => getCourierAssignedActiveDeliveries(deliveries, loggedCourier?.username), [deliveries, loggedCourier?.username]);
+  const courierAcceptBlockReason = useMemo(() => getCourierAcceptBlockReason({ deliveries, courierUsername: loggedCourier?.username, maxActiveDeliveries: storeSettings.maxActiveDeliveriesPerCourier }), [deliveries, loggedCourier?.username, storeSettings.maxActiveDeliveriesPerCourier]);
+  const courierRouteGroups = useMemo(() => buildDeliveryRouteGroups(courierPendingDeliveries), [courierPendingDeliveries]);
   const dayReport = useMemo(() => buildDayReport(products, deliveries), [products, deliveries]);
   const cashClosingReport = useMemo(() => buildCashClosingReport(deliveries, cashSession, orderPayments), [deliveries, cashSession, orderPayments]);
   const activeDeliveryOrdersForStore = useMemo(
@@ -3075,6 +3147,7 @@ function App() {
   }
 
   async function deletePromotion(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.DELETE_PROMOTION)) return setLastAction("Seu perfil não pode excluir promoções. Peça para gerente ou administrador.");
     const promotion = promotions.find((item) => String(item.id) === String(id));
     if (!promotion) return;
     const confirmed = window.confirm(`Excluir a promoção "${promotion.title}"? Ela não aparecerá mais para os clientes, mas o histórico será preservado.`);
@@ -3440,6 +3513,7 @@ function App() {
   }
 
   async function toggleProductStatus(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.DELETE_PRODUCT)) return setLastAction("Seu perfil não pode ativar/inativar produtos. Peça para gerente ou administrador.");
     const product = products.find((item) => item.id === id);
     if (!product) return;
     const nextActive = !product.active;
@@ -3453,6 +3527,7 @@ function App() {
   }
 
   async function toggleProductPause(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.PAUSE_PRODUCT)) return setLastAction("Seu perfil não pode pausar produtos. Peça para gerente ou administrador.");
     const product = products.find((item) => item.id === id);
     if (!product) return;
 
@@ -4433,6 +4508,7 @@ function App() {
   }
 
   async function applyManualStockAdjustment() {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.ADJUST_STOCK)) return setLastAction("Seu perfil não pode ajustar estoque. Peça para gerente ou administrador.");
     const product = selectedStockAdjustmentProduct;
     if (!product) return setLastAction("Selecione um produto para ajustar o estoque.");
     const currentStock = Number(product.stock || 0);
@@ -4639,7 +4715,9 @@ function App() {
 
     const syncedItems = syncOrderItemsWithProducts(counterDraft.items, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);
-    const syncedDiscount = normalizeDiscount(counterDraft.discount, syncedProductsTotal);
+    const roleLimitedDiscount = clampManualDiscount(counterDraft.discount);
+    if (Number(counterDraft.discount || 0) > roleLimitedDiscount) return setLastAction(`Desconto acima do limite do seu perfil (${getManualDiscountLimitLabel()}).`);
+    const syncedDiscount = normalizeDiscount(roleLimitedDiscount, syncedProductsTotal);
     const syncedFinalTotal = buildDiscountedProductsTotal(syncedProductsTotal, syncedDiscount);
     if (counterDraft.payment === "Dinheiro" && counterDraft.changeFor && toSafeMoneyNumber(counterDraft.changeFor, 0) < syncedFinalTotal) {
       preOpenedPrintWindow.close();
@@ -4710,7 +4788,9 @@ function App() {
 
     const syncedItems = syncOrderItemsWithProducts(deliveryDraft.items, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);
-    const syncedDiscount = normalizeDiscount(deliveryDraft.discount, syncedProductsTotal);
+    const roleLimitedDiscount = clampManualDiscount(deliveryDraft.discount);
+    if (Number(deliveryDraft.discount || 0) > roleLimitedDiscount) return setLastAction(`Desconto acima do limite do seu perfil (${getManualDiscountLimitLabel()}).`);
+    const syncedDiscount = normalizeDiscount(roleLimitedDiscount, syncedProductsTotal);
     const syncedFinalTotal = buildDeliveryTotal(syncedProductsTotal, deliveryDraftFee, syncedDiscount);
     const estimatedDeliveryMinutes = buildEstimatedDeliveryMinutes(deliveries, true);
 
@@ -4807,8 +4887,8 @@ function App() {
   async function markCourierPickedUp(id) {
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery || !isDeliveryOrder(delivery) || needsStoreApprovalBeforeCourier(delivery) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return setLastAction("Essa entrega não está disponível para retirada ou ainda precisa ser aprovada pela loja.");
-    const ownDelayedDelivery = deliveries.find((item) => isDeliveryDelayed(item) && isCourierAssignedToDelivery(item, loggedCourier?.username));
-    if (ownDelayedDelivery) return setLastAction(`Finalize a entrega atrasada #${ownDelayedDelivery.id} antes de aceitar outra.`);
+    const acceptBlockReason = getCourierAcceptBlockReason({ deliveries, courierUsername: loggedCourier?.username, maxActiveDeliveries: storeSettings.maxActiveDeliveriesPerCourier });
+    if (acceptBlockReason) return setLastAction(acceptBlockReason);
     const rpcResult = await supabase.rpc("accept_delivery_order", { p_order_id: id, p_courier_username: loggedCourier?.username || "", p_courier_name: loggedCourier?.name || "" });
     const rpcMissing = rpcResult.error && /function|schema cache|accept_delivery_order|could not find/i.test(String(rpcResult.error.message || ""));
     if (rpcResult.error && !rpcMissing) return setLastAction(`Não foi possível aceitar a entrega: ${rpcResult.error.message || "verifique função accept_delivery_order."}`);
@@ -4914,6 +4994,7 @@ function App() {
   }
 
   async function approveDelivery(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.APPROVE_ORDER)) return setLastAction("Seu perfil não pode aprovar pedidos/entregas.");
     const currentDelivery = deliveries.find((item) => item.id === id);
     if (!currentDelivery) return setLastAction("Pedido não encontrado.");
     if (currentDelivery.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Pedido cancelado não pode ser aprovado.");
@@ -4989,6 +5070,9 @@ function App() {
   }
 
   async function updatePaymentStatus(id, paymentStatus) {
+    const wantsPaid = paymentStatus === PAYMENT_STATUS.PAID;
+    if (wantsPaid && !canCurrentStorePerformAction(STORE_ACTIONS.CONFIRM_PAYMENT)) return setLastAction("Seu perfil não pode confirmar pagamento.");
+    if (!wantsPaid && !canCurrentStorePerformAction(STORE_ACTIONS.REOPEN_PAYMENT)) return setLastAction("Seu perfil não pode reabrir recebimentos.");
     const paymentKey = String(id);
     if (processingPaymentIds.includes(paymentKey)) return setLastAction("Aguarde, o pagamento já está sendo atualizado.");
     const delivery = deliveries.find((item) => String(item.id) === paymentKey);
@@ -5047,6 +5131,7 @@ function App() {
   }
 
   async function reopenCounterSaleInPdv(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.REOPEN_COUNTER_SALE)) return setLastAction("Seu perfil não pode reabrir vendas no PDV.");
     const sale = deliveries.find((item) => String(item.id) === String(id));
     if (!sale || !isCounterOrder(sale)) return setLastAction("Venda de balcão não encontrada.");
     if (sale.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Essa venda já foi reaberta ou cancelada.");
@@ -5095,6 +5180,7 @@ function App() {
   }
 
   function requestCancelDelivery(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.CANCEL_ORDER)) return setLastAction("Seu perfil não pode cancelar pedidos/vendas.");
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery) return;
     if (delivery.status === DELIVERY_STATUS.CANCELLED) return setLastAction("Esse pedido já está cancelado.");
@@ -5439,7 +5525,9 @@ function App() {
               ? String(value || "").trim()
               : field === "localPrintTimeoutMs"
                 ? clampLocalPrintTimeoutMs(value)
-                : value;
+                : field === "maxActiveDeliveriesPerCourier"
+                  ? Math.min(6, Math.max(1, Math.floor(Number(value || 2))))
+                  : value;
     setStoreSettings((previousSettings) => ({ ...previousSettings, [field]: finalValue }));
     if (field === "defaultDeliveryFee") {
       setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: finalValue }));
@@ -5661,6 +5749,7 @@ function App() {
   }
 
   async function confirmManualDelivery(id) {
+    if (!canCurrentStorePerformAction(STORE_ACTIONS.MANUAL_FINISH_DELIVERY)) return setLastAction("Seu perfil não pode finalizar entrega manualmente.");
     const delivery = deliveries.find((item) => item.id === id);
     if (!delivery) return;
     if (!isDeliveryOrder(delivery)) return setLastAction("Venda de balcão não precisa de confirmação de entrega.");
@@ -5735,9 +5824,9 @@ function App() {
                 <h2 className="text-xl font-black">{loggedCourier.name}</h2>
                 <p className="text-xs text-zinc-500">Moto: {loggedCourier.motorcycleType || "Moto própria"}</p>
               </div>
-              {courierMustFinishDelayedDelivery && (
+              {courierAcceptBlockReason && (
                 <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-bold">
-                  Entrega atrasada em aberto. Finalize a entrega atrasada antes de aceitar outra.
+                  {courierAcceptBlockReason}
                 </div>
               )}
             </div>
@@ -5745,7 +5834,7 @@ function App() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
             <Metric title="Entregas feitas hoje" value={courierTodaySummary.completedCount} icon="check" />
-            <Metric title="Taxas geradas" value={money(courierTodaySummary.grossDeliveryFee)} icon="money" />
+            <Metric title="Ativas comigo" value={`${courierOwnActiveDeliveries.length}/${storeSettings.maxActiveDeliveriesPerCourier || 2}`} icon="truck" />
             <Metric title="A receber" value={money(courierTodaySummary.courierAmount)} icon="money" />
             <Metric title="Atrasadas" value={courierDelayedDeliveries.length} icon="alert" />
           </div>
@@ -5758,6 +5847,23 @@ function App() {
                   <div key={delivery.id} className="rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-800 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                     <span><b>Pedido #{delivery.id}</b> • {delivery.client} • {getDeliveryAgeMinutes(delivery)} min desde o lançamento</span>
                     <span className="font-bold">Prioridade máxima</span>
+                  </div>
+                ))}
+              </div>
+            </CardBox>
+          )}
+
+          {courierRouteGroups.length > 0 && (
+            <CardBox>
+              <h3 className="font-bold text-lg mb-3">Entregas por região</h3>
+              <div className="grid gap-2 md:grid-cols-2">
+                {courierRouteGroups.slice(0, 8).map((group) => (
+                  <div key={group.district} className={`rounded-2xl border p-3 text-sm ${group.delayedCount > 0 ? "border-red-100 bg-red-50 text-red-800" : "border-zinc-100 bg-zinc-50 text-zinc-700"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <b>{group.district}</b>
+                      <span>{group.count} entrega{group.count === 1 ? "" : "s"}</span>
+                    </div>
+                    <p className="mt-1 text-xs font-bold">{group.delayedCount > 0 ? `${group.delayedCount} atrasada${group.delayedCount === 1 ? "" : "s"} • ` : ""}Taxas: {money(group.totalFee)}</p>
                   </div>
                 ))}
               </div>
@@ -5784,6 +5890,7 @@ function App() {
                       <p className="text-sm text-zinc-700"><b>Cliente:</b> {delivery.client}</p>
                       <p className="text-sm text-zinc-700"><b>Telefone:</b> {formatBrazilMobilePhone(delivery.phone)}</p>
                       <p className="text-sm text-zinc-700"><b>Endereço:</b> {delivery.address}</p>
+                      <p className="text-sm text-zinc-700"><b>Região:</b> {getDeliveryDistrict(delivery)}</p>
                       <p className="text-sm text-zinc-500"><b>Referência:</b> {delivery.reference || "-"}</p>
                       <div className="grid grid-cols-2 gap-2 my-3">
                         <a href={buildMapsUrl(delivery.address)} target="_blank" rel="noreferrer" className="rounded-2xl bg-blue-50 border border-blue-100 px-3 py-3 text-center text-sm font-black text-blue-700">Abrir rota</a>
@@ -5801,7 +5908,7 @@ function App() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                    <Button onClick={() => runCourierAction(delivery.id, "aceite", () => markCourierPickedUp(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP || courierMustFinishDelayedDelivery} variant="secondary" className="rounded-2xl py-4 text-sm">{isCourierActionBusy(delivery.id) ? "Aguarde..." : courierMustFinishDelayedDelivery ? "Finalize atraso" : "Aceitar e retirar"}</Button>
+                    <Button onClick={() => runCourierAction(delivery.id, "aceite", () => markCourierPickedUp(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP || Boolean(courierAcceptBlockReason)} variant="secondary" className="rounded-2xl py-4 text-sm">{isCourierActionBusy(delivery.id) ? "Aguarde..." : courierAcceptBlockReason ? "Bloqueado" : "Aceitar e retirar"}</Button>
                     <Button onClick={() => runCourierAction(delivery.id, "recusa", () => refuseCourierDelivery(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP} variant="secondary" className="rounded-2xl py-4 text-sm">Recusar</Button>
                     <Button onClick={() => runCourierAction(delivery.id, "problema", () => updateDeliveryStatus(delivery.id, DELIVERY_STATUS.DELIVERY_PROBLEM))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} variant="secondary" className="rounded-2xl py-4 text-sm">Problema</Button>
                     <Button onClick={() => runCourierAction(delivery.id, "entrega", () => requestDeliveryApproval(delivery.id))} disabled={isCourierActionBusy(delivery.id) || delivery.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY || delivery.status === DELIVERY_STATUS.CANCELLED || !canCourierControlDelivery(delivery, loggedCourier?.username)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-4 text-sm">Marcar entregue</Button>
@@ -6933,7 +7040,7 @@ function App() {
                     <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={deliveryDraft.payment} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, payment: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
                     {deliveryDraft.payment === "Dinheiro" && <div className="mb-4"><Input label="Precisa de troco para quanto?" type="number" value={deliveryDraft.changeFor} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, changeFor: value })} placeholder="Ex: 100,00" /></div>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                      <Input label="Desconto no pedido" type="number" value={deliveryDraft.discount} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, discount: Math.max(0, Number(value || 0)) })} placeholder="0,00" />
+                      <Input label={`Desconto no pedido (${getManualDiscountLimitLabel()})`} type="number" value={deliveryDraft.discount} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, discount: clampManualDiscount(value) })} placeholder="0,00" />
                       <Input label="Taxa de entrega" type="number" value={deliveryDraft.deliveryFee} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, deliveryFee: value === "" ? "" : Math.max(0, Number(value || 0)) })} placeholder="5,00" />
                     </div>
                     <div className="mb-4 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm text-zinc-600">Entregas lançadas pelo PDV são liberadas para todos os motoboys. Pedidos feitos pelo cliente precisam ser aprovados aqui antes de aparecer para eles.<br /><b>Tempo estimado para a próxima entrega:</b> {nextOrderEstimatedDeliveryLabel}</div>
@@ -6952,7 +7059,7 @@ function App() {
                   <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
                 </div>
                 {activeDeliveryOrdersForStore.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega em aberto no momento.</p></CardBox>}
-                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} onOpenStatusWhatsApp={handleOpenStatusWhatsApp} onCopyStatusWhatsApp={handleCopyStatusWhatsApp} />)}</div>
+                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} storeRole={getCurrentStoreRole()} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} onOpenStatusWhatsApp={handleOpenStatusWhatsApp} onCopyStatusWhatsApp={handleCopyStatusWhatsApp} />)}</div>
 
                 <Title title="Relatório de entregas aprovadas" subtitle="Entregas que já foram confirmadas pela loja e liberadas para o entregador." />
                 <CardBox>
@@ -7038,7 +7145,7 @@ function App() {
                     <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={counterDraft.payment} onChange={(event) => setCounterDraft({ ...counterDraft, payment: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
                     {counterDraft.payment === "Dinheiro" && <div className="mb-4 space-y-2"><Input label="Valor recebido / troco para quanto?" type="number" value={counterDraft.changeFor} onChange={(value) => setCounterDraft({ ...counterDraft, changeFor: value })} placeholder="Ex: 100,00" />{counterDraft.changeFor && <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-emerald-800"><p className="text-xs font-bold">Troco para devolver ao cliente</p><p className="text-3xl font-black">{money(calculateChangeDue(counterDraft.changeFor, counterDraftFinalTotal))}</p></div>}</div>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                      <Input label="Desconto" type="number" value={counterDraft.discount} onChange={(value) => setCounterDraft({ ...counterDraft, discount: Math.max(0, Number(value || 0)) })} placeholder="0,00" />
+                      <Input label={`Desconto (${getManualDiscountLimitLabel()})`} type="number" value={counterDraft.discount} onChange={(value) => setCounterDraft({ ...counterDraft, discount: clampManualDiscount(value) })} placeholder="0,00" />
                       <Input label="Observação" value={counterDraft.notes} onChange={(value) => setCounterDraft({ ...counterDraft, notes: value })} placeholder="Ex: retirada no balcão" />
                     </div>
 
@@ -7049,7 +7156,7 @@ function App() {
                 </div>
 
                 <Title title="Vendas de balcão" subtitle="Separado das entregas, mas somado ao fechamento de caixa." />
-                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} onOpenStatusWhatsApp={handleOpenStatusWhatsApp} onCopyStatusWhatsApp={handleCopyStatusWhatsApp} />)}</div>
+                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} storeRole={getCurrentStoreRole()} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} onOpenStatusWhatsApp={handleOpenStatusWhatsApp} onCopyStatusWhatsApp={handleCopyStatusWhatsApp} />)}</div>
               </div>
             )}
 
@@ -7381,6 +7488,7 @@ function App() {
                     <Input label="WhatsApp da loja" value={storeSettings.storePhone} onChange={(value) => updateStoreSetting("storePhone", formatBrazilMobilePhone(value))} />
                     <Input label="Taxa de entrega padrão" type="number" value={storeSettings.defaultDeliveryFee} onChange={(value) => updateStoreSetting("defaultDeliveryFee", value)} />
                     <Input label="Pedido mínimo" type="number" value={storeSettings.minimumOrderValue} onChange={(value) => updateStoreSetting("minimumOrderValue", value)} />
+                    <Input label="Limite de entregas ativas por entregador" type="number" value={storeSettings.maxActiveDeliveriesPerCourier || 2} onChange={(value) => updateStoreSetting("maxActiveDeliveriesPerCourier", value)} />
                     <div className="md:col-span-2 rounded-3xl border border-blue-100 bg-blue-50 p-4 space-y-3">
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div>
@@ -8093,11 +8201,11 @@ function NotificationPanel({ title, notifications, onMarkRead }) {
   );
 }
 
-function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent, onOpenStatusWhatsApp, onCopyStatusWhatsApp }) {
+function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent, onOpenStatusWhatsApp, onCopyStatusWhatsApp }) {
   const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
   const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
   const isCounterSale = isCounterOrder(delivery);
-  const actions = getOrderAllowedActions(delivery);
+  const actions = getOrderAllowedActions(delivery, storeRole);
   const isFinalized = isOrderFinalized(delivery);
   const canConfirmPayment = actions.confirmPayment && !isPaymentProcessing;
   const canReopenPayment = actions.reopenPayment && !isPaymentProcessing;

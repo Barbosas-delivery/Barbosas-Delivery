@@ -43,8 +43,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.10-fase-42-relatorios-clientes"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-10-fase-42/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.12-fase-44-permissoes-acoes"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-12-fase-44/);
 });
 
 test("fluxos principais existem no código", () => {
@@ -81,6 +81,9 @@ test("fluxos principais existem no código", () => {
     "exportCustomerSalesCsv",
     "exportPeakHourSalesCsv",
     "exportProfitSalesCsv",
+    "buildDeliveryRouteGroups",
+    "getCourierAcceptBlockReason",
+    "maxActiveDeliveriesPerCourier",
   ];
   for (const snippet of requiredSnippets) {
     assert.ok(appSource.includes(snippet), `Trecho obrigatório ausente: ${snippet}`);

@@ -33,6 +33,75 @@ export function canManageStoreUsers(role) {
   return isStoreAdminRole(role);
 }
 
+export const STORE_ACTIONS = {
+  APPROVE_ORDER: "approve_order",
+  CANCEL_ORDER: "cancel_order",
+  CONFIRM_PAYMENT: "confirm_payment",
+  REOPEN_PAYMENT: "reopen_payment",
+  REOPEN_COUNTER_SALE: "reopen_counter_sale",
+  MANUAL_FINISH_DELIVERY: "manual_finish_delivery",
+  ADJUST_STOCK: "adjust_stock",
+  DELETE_PROMOTION: "delete_promotion",
+  PAUSE_PRODUCT: "pause_product",
+  DELETE_PRODUCT: "delete_product",
+  EXPORT_REPORTS: "export_reports",
+};
+
+const ROLE_ACTION_PERMISSIONS = {
+  admin: Object.values(STORE_ACTIONS),
+  gerente: [
+    STORE_ACTIONS.APPROVE_ORDER,
+    STORE_ACTIONS.CANCEL_ORDER,
+    STORE_ACTIONS.CONFIRM_PAYMENT,
+    STORE_ACTIONS.REOPEN_PAYMENT,
+    STORE_ACTIONS.REOPEN_COUNTER_SALE,
+    STORE_ACTIONS.MANUAL_FINISH_DELIVERY,
+    STORE_ACTIONS.ADJUST_STOCK,
+    STORE_ACTIONS.DELETE_PROMOTION,
+    STORE_ACTIONS.PAUSE_PRODUCT,
+    STORE_ACTIONS.DELETE_PRODUCT,
+    STORE_ACTIONS.EXPORT_REPORTS,
+  ],
+  caixa: [
+    STORE_ACTIONS.CONFIRM_PAYMENT,
+    STORE_ACTIONS.REOPEN_PAYMENT,
+    STORE_ACTIONS.REOPEN_COUNTER_SALE,
+    STORE_ACTIONS.EXPORT_REPORTS,
+  ],
+  operador: [
+    STORE_ACTIONS.APPROVE_ORDER,
+    STORE_ACTIONS.CONFIRM_PAYMENT,
+  ],
+};
+
+const ROLE_DISCOUNT_LIMITS = {
+  admin: Infinity,
+  gerente: 30,
+  caixa: 10,
+  operador: 5,
+};
+
+export function canPerformStoreAction(role, action) {
+  const normalizedRole = normalizeStoreRole(role);
+  return (ROLE_ACTION_PERMISSIONS[normalizedRole] || ROLE_ACTION_PERMISSIONS.operador).includes(action);
+}
+
+export function getStoreRoleDiscountLimit(role) {
+  const normalizedRole = normalizeStoreRole(role);
+  return ROLE_DISCOUNT_LIMITS[normalizedRole] ?? ROLE_DISCOUNT_LIMITS.operador;
+}
+
+export function describeStoreRoleDiscountLimit(role) {
+  const limit = getStoreRoleDiscountLimit(role);
+  return Number.isFinite(limit) ? `até R$ ${limit.toFixed(2).replace(".", ",")}` : "sem limite";
+}
+
+export function clampDiscountByStoreRole(discount, role) {
+  const value = Math.max(0, Number(discount || 0));
+  const limit = getStoreRoleDiscountLimit(role);
+  return Number.isFinite(limit) ? Math.min(value, limit) : value;
+}
+
 export function canAccessStoreTab(role, tabId) {
   const normalizedRole = normalizeStoreRole(role);
   if (normalizedRole === "admin") return true;

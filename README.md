@@ -33,3 +33,8 @@ Pacote final revisado com lint, build e teste de fumaça automatizado.
 
 
 - [Relatórios comerciais avançados](docs/RELATORIOS-COMERCIAIS.md)
+
+
+## Permissões por ação
+
+Veja `docs/PERMISSOES-POR-ACAO.md` para os limites de desconto e ações permitidas por perfil.
