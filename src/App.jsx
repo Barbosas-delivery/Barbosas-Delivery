@@ -462,6 +462,7 @@ function getTodayOpeningHours(schedule, date = new Date()) {
 
 
 const STORE_SETTINGS_STORAGE_KEY = "barbosas-delivery-store-settings-v1";
+const CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY = "barbosas-delivery-customer-dismissed-orders-v1";
 
 function clampPrintCopies(value, fallback = 1) {
   return Math.min(5, Math.max(1, toPositiveInteger(value, fallback)));
@@ -530,6 +531,27 @@ function saveStoreSettingsToLocalStorage(settings) {
     window.localStorage.setItem(STORE_SETTINGS_STORAGE_KEY, JSON.stringify(sanitizeStoreSettings(settings)));
   } catch {
     // O navegador pode bloquear localStorage em modo privado; o app continua usando o estado atual.
+  }
+}
+
+function loadDismissedCustomerOrderIds() {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = window.localStorage.getItem(CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed.map((id) => String(id)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDismissedCustomerOrderIds(ids) {
+  if (typeof window === "undefined") return;
+  try {
+    const safeIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id)).filter(Boolean))).slice(-40);
+    window.localStorage.setItem(CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY, JSON.stringify(safeIds));
+  } catch {
+    // O painel do cliente continua funcionando mesmo se o navegador bloquear localStorage.
   }
 }
 
@@ -616,6 +638,73 @@ function buildCustomerHistory(deliveries, phone) {
     totalSpent: customerDeliveries.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
     lastOrders: customerDeliveries.slice(0, 3),
   };
+}
+
+function isCustomerOrderFinalStatus(status) {
+  return [DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(status);
+}
+
+function getOrderTimeValue(delivery) {
+  const dates = [delivery?.launchedAt, delivery?.createdAt, delivery?.approvedAt, delivery?.acceptedAt, delivery?.deliveredAt, delivery?.ownerApprovedAt, delivery?.cancelledAt]
+    .map((value) => new Date(value || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return dates.length > 0 ? Math.max(...dates) : Number(delivery?.id || 0);
+}
+
+function getCustomerOrderStatusInfo(delivery) {
+  const status = delivery?.status;
+  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
+    return { title: "Aguardando aprovação da loja", description: "Seu pedido foi enviado. A loja vai confirmar em instantes.", tone: "amber", step: 1 };
+  }
+  if (status === DELIVERY_STATUS.WAITING_PICKUP) {
+    return { title: "Pedido aprovado", description: "A loja já confirmou seu pedido. Ele será separado para entrega.", tone: "emerald", step: 2 };
+  }
+  if (status === DELIVERY_STATUS.OUT_FOR_DELIVERY) {
+    return { title: "Saiu para entrega", description: "Seu pedido saiu para entrega. Fique atento ao telefone.", tone: "blue", step: 4 };
+  }
+  if (status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL) {
+    return { title: "Entrega em confirmação", description: "O entregador informou a entrega. A loja está conferindo a finalização.", tone: "blue", step: 4 };
+  }
+  if (status === DELIVERY_STATUS.CONFIRMED_DELIVERED) {
+    return { title: "Pedido entregue", description: "Pedido entregue. Obrigado pela preferência!", tone: "emerald", step: 5, final: true };
+  }
+  if (status === DELIVERY_STATUS.DELIVERY_PROBLEM) {
+    return { title: "Atenção na entrega", description: "Houve uma ocorrência na entrega. Fale com a loja se precisar de ajuda.", tone: "red", step: 4, important: true };
+  }
+  if (status === DELIVERY_STATUS.CANCELLED) {
+    return { title: "Pedido cancelado", description: "Seu pedido foi cancelado pela loja.", tone: "red", step: 0, final: true, important: true };
+  }
+  return { title: status || "Pedido em andamento", description: "Acompanhe a atualização do seu pedido por aqui.", tone: "amber", step: 1 };
+}
+
+function getCustomerOrderTimeline(status) {
+  const info = getCustomerOrderStatusInfo({ status });
+  const steps = [
+    { key: "received", label: "Recebido" },
+    { key: "approval", label: "Aprovação" },
+    { key: "preparing", label: "Preparando" },
+    { key: "route", label: "Entrega" },
+    { key: "done", label: "Finalizado" },
+  ];
+  if (status === DELIVERY_STATUS.CANCELLED) {
+    return steps.map((step, index) => ({ ...step, done: index === 0, current: index === 0, cancelled: index > 0 }));
+  }
+  return steps.map((step, index) => ({ ...step, done: index <= info.step - 1, current: index === Math.max(0, info.step - 1) }));
+}
+
+function getLastCustomerOrderUpdate(delivery, notifications = []) {
+  const relatedNotifications = (notifications || [])
+    .filter((notification) => String(notification.orderId || notification.deliveryId) === String(delivery?.id))
+    .sort((a, b) => getOrderTimeValue({ launchedAt: b.createdAt }) - getOrderTimeValue({ launchedAt: a.createdAt }));
+  if (relatedNotifications[0]?.message) return relatedNotifications[0].message;
+  const info = getCustomerOrderStatusInfo(delivery);
+  return info.description;
+}
+
+function getCustomerOrderItemsSummary(items = []) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const itemCount = safeItems.reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0);
+  return `${itemCount} item${itemCount === 1 ? "" : "s"} • ${safeItems.length} produto${safeItems.length === 1 ? "" : "s"}`;
 }
 
 
@@ -954,6 +1043,8 @@ function App() {
   const [appliedCustomerCoupon, setAppliedCustomerCoupon] = useState(null);
   const [customerChangeFor, setCustomerChangeFor] = useState("");
   const [customerOrderConfirmation, setCustomerOrderConfirmation] = useState(null);
+  const [dismissedCustomerOrderIds, setDismissedCustomerOrderIds] = useState(() => loadDismissedCustomerOrderIds());
+  const [expandedCustomerOrderDetails, setExpandedCustomerOrderDetails] = useState(false);
   const [customerSubmitting, setCustomerSubmitting] = useState(false);
   const [selectedCustomerGroup, setSelectedCustomerGroup] = useState("Todos");
   const [showCustomerPromo, setShowCustomerPromo] = useState(false);
@@ -1007,6 +1098,11 @@ function App() {
 
     return () => window.clearTimeout(timer);
   }, [storeSettings, storeSettingsSyncReady]);
+
+  useEffect(() => {
+    saveDismissedCustomerOrderIds(dismissedCustomerOrderIds);
+  }, [dismissedCustomerOrderIds]);
+
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
   const [coupons, setCoupons] = useState([]);
@@ -1952,6 +2048,20 @@ function App() {
       return true;
     });
   }, [notifications, normalizedCustomerPhoneForNotifications, deliveries]);
+  const visibleCustomerOrder = useMemo(() => {
+    if (!normalizedCustomerPhoneForNotifications) return null;
+    const dismissedIds = new Set((dismissedCustomerOrderIds || []).map((id) => String(id)));
+    const candidateOrders = deliveries
+      .filter((delivery) => isDeliveryOrder(delivery) && onlyPhoneNumbers(delivery.phone) === normalizedCustomerPhoneForNotifications)
+      .filter((delivery) => !dismissedIds.has(String(delivery.id)))
+      .filter((delivery) => {
+        if (!isCustomerOrderFinalStatus(delivery.status)) return true;
+        if (String(customerOrderConfirmation?.id || "") === String(delivery.id)) return true;
+        return customerNotifications.some((notification) => String(notification.orderId || notification.deliveryId) === String(delivery.id));
+      })
+      .sort((a, b) => getOrderTimeValue(b) - getOrderTimeValue(a));
+    return candidateOrders[0] || null;
+  }, [deliveries, normalizedCustomerPhoneForNotifications, dismissedCustomerOrderIds, customerOrderConfirmation, customerNotifications]);
   const ownerUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "loja"), [notifications]);
   const courierUnreadNotifications = useMemo(() => getUnreadNotificationCount(notifications, "courier", loggedCourier?.username), [notifications, loggedCourier?.username]);
   const periodSalesReport = useMemo(() => buildPeriodSalesReport(deliveries, reportRange.startDate, reportRange.endDate, orderPayments), [deliveries, reportRange, orderPayments]);
@@ -2065,6 +2175,24 @@ function App() {
       if (normalizedAudience === "customer" && normalizedCustomerPhone) query = query.eq("customer_phone", normalizedCustomerPhone);
       return query;
     }, readAt);
+  }
+
+  async function handleCustomerOrderDismiss(delivery) {
+    if (!delivery) return;
+    await markNotificationsRead("customer", "", normalizedCustomerPhoneForNotifications);
+    if (isCustomerOrderFinalStatus(delivery.status)) {
+      setDismissedCustomerOrderIds((previousIds) => Array.from(new Set([...previousIds.map((id) => String(id)), String(delivery.id)])));
+      setCustomerOrderConfirmation((previousConfirmation) => (String(previousConfirmation?.id || "") === String(delivery.id) ? null : previousConfirmation));
+    }
+  }
+
+  function openCustomerCheckoutFromBar() {
+    if (visibleCustomerOrder && !isCustomerOrderFinalStatus(visibleCustomerOrder.status)) {
+      const proceed = window.confirm("Você já possui um pedido em andamento. Deseja fazer outro pedido mesmo assim?");
+      if (!proceed) return;
+    }
+    setShowCustomerNeedMoreMessage(false);
+    setShowCustomerCheckout(true);
   }
 
   async function resolveOrderNotifications(deliveryId, audiences = ["loja", "courier", "customer"]) {
@@ -4888,7 +5016,7 @@ function App() {
                   {safeCustomerCart.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => { setShowCustomerNeedMoreMessage(false); setShowCustomerCheckout(true); }}
+                      onClick={openCustomerCheckoutFromBar}
                       className="fixed left-3 right-3 bottom-3 z-40 rounded-3xl bg-emerald-600 px-4 py-3 pb-safe text-white shadow-2xl border border-emerald-400 text-left hover:bg-emerald-700 active:scale-[0.99] touch-manipulation"
                     >
                       <span className="block text-[11px] font-black uppercase tracking-wide opacity-90">Carrinho atualizado</span>
@@ -4977,35 +5105,27 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  {customerNotifications.length > 0 && (
-                    <div className="rounded-3xl bg-amber-50 border border-amber-200 p-4 text-amber-900">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-black text-sm mb-1">Atualizações do pedido</p>
-                          {customerNotifications.slice(0, 3).map((notification) => <p key={notification.id} className="text-xs">• {notification.message}</p>)}
-                        </div>
-                        <button type="button" onClick={() => markNotificationsRead("customer", "", normalizedCustomerPhoneForNotifications)} className="shrink-0 rounded-xl bg-white px-3 py-2 text-[11px] font-black text-amber-900 shadow-sm">Ok</button>
-                      </div>
-                    </div>
+                  {visibleCustomerOrder && !showCustomerCheckout && (
+                    <CustomerOrderStatusCard
+                      delivery={visibleCustomerOrder}
+                      storeSettings={storeSettings}
+                      notifications={customerNotifications}
+                      expanded={expandedCustomerOrderDetails}
+                      onToggleExpanded={() => setExpandedCustomerOrderDetails((previousExpanded) => !previousExpanded)}
+                      onDismiss={() => handleCustomerOrderDismiss(visibleCustomerOrder)}
+                    />
                   )}
 
-                  {customerOrderConfirmation && !showCustomerCheckout && (
+                  {customerOrderConfirmation && !visibleCustomerOrder && !showCustomerCheckout && (
                     <div className="rounded-3xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-900 shadow-sm">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Pedido enviado</p>
                           <h3 className="mt-1 text-2xl font-black leading-tight">#{customerOrderConfirmation.id}</h3>
                           <p className="mt-1 text-sm font-semibold">Total: {money(customerOrderConfirmation.total)} • {customerOrderConfirmation.payment}</p>
-                          <p className="text-sm">Tempo estimado: {formatEstimatedDeliveryTime(customerOrderConfirmation.estimatedDeliveryMinutes || nextOrderEstimatedDeliveryMinutes)}</p>
-                          <p className="mt-2 text-xs text-emerald-800">A loja recebeu seu pedido. Aguarde a aprovação e acompanhe as atualizações nesta tela.</p>
+                          <p className="text-sm">Previsão: cerca de {formatEstimatedDeliveryTime(customerOrderConfirmation.estimatedDeliveryMinutes || nextOrderEstimatedDeliveryMinutes)}</p>
+                          <p className="mt-2 text-xs text-emerald-800">A loja recebeu seu pedido. Aguarde a aprovação e acompanhe o status nesta tela.</p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => { setCustomerOrderConfirmation(null); setCustomerError(""); }}
-                          className="shrink-0 rounded-xl bg-white px-3 py-2 text-[11px] font-black text-emerald-900 shadow-sm"
-                        >
-                          Ok
-                        </button>
                       </div>
                     </div>
                   )}
@@ -5183,7 +5303,7 @@ function App() {
                           </Button>
                           <Button
                             type="button"
-                            onClick={() => { setShowCustomerNeedMoreMessage(false); setShowCustomerCheckout(true); }}
+                            onClick={openCustomerCheckoutFromBar}
                             className="rounded-2xl py-4 bg-emerald-600 text-white hover:bg-emerald-700"
                           >
                             Somente isso
@@ -6783,6 +6903,118 @@ function App() {
     </div>
   );
 
+
+function CustomerOrderStatusCard({ delivery, storeSettings, notifications = [], expanded, onToggleExpanded, onDismiss }) {
+  const statusInfo = getCustomerOrderStatusInfo(delivery);
+  const timeline = getCustomerOrderTimeline(delivery?.status);
+  const toneClasses = {
+    amber: "border-amber-200 bg-amber-50 text-amber-950",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    blue: "border-blue-200 bg-blue-50 text-blue-950",
+    red: "border-red-200 bg-red-50 text-red-950",
+  };
+  const badgeClasses = {
+    amber: "bg-amber-100 text-amber-800",
+    emerald: "bg-emerald-100 text-emerald-800",
+    blue: "bg-blue-100 text-blue-800",
+    red: "bg-red-100 text-red-800",
+  };
+  const items = Array.isArray(delivery?.items) ? delivery.items : [];
+  const productsTotal = Number(delivery?.productsTotal ?? buildOrderTotal(items));
+  const deliveryFee = normalizeDeliveryFee(delivery?.deliveryFee);
+  const discount = Number(delivery?.discount || delivery?.couponDiscount || 0);
+  const total = Number(delivery?.value || buildDeliveryTotal(productsTotal, deliveryFee, discount));
+  const estimated = Number(delivery?.estimatedDeliveryMinutes || 0);
+  const lastUpdate = getLastCustomerOrderUpdate(delivery, notifications);
+  const canDismiss = statusInfo.final || statusInfo.important;
+  const whatsappUrl = buildWhatsAppUrl(storeSettings?.storePhone, `Olá, gostaria de saber sobre meu pedido #${delivery?.id}.`);
+
+  return (
+    <div className={`rounded-[2rem] border p-4 shadow-sm ${toneClasses[statusInfo.tone] || toneClasses.amber}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-black uppercase tracking-wide opacity-70">Pedido em andamento</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h3 className="text-2xl font-black leading-tight">#{delivery?.id}</h3>
+            <span className={`rounded-full px-3 py-1 text-[11px] font-black ${badgeClasses[statusInfo.tone] || badgeClasses.amber}`}>{statusInfo.title}</span>
+          </div>
+          <p className="mt-2 text-sm font-semibold">{statusInfo.description}</p>
+        </div>
+        {canDismiss && (
+          <button type="button" onClick={onDismiss} className="shrink-0 rounded-xl bg-white/90 px-3 py-2 text-[11px] font-black shadow-sm">
+            Entendi
+          </button>
+        )}
+      </div>
+
+      <div className="mt-4 grid grid-cols-5 gap-1">
+        {timeline.map((step) => (
+          <div key={step.key} className="text-center">
+            <div className={`mx-auto h-2 rounded-full ${step.cancelled ? "bg-red-200" : step.done || step.current ? "bg-current" : "bg-white/80"}`} />
+            <p className={`mt-1 text-[10px] font-black leading-tight ${step.current ? "opacity-100" : "opacity-60"}`}>{step.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-2xl bg-white/80 p-3">
+          <p className="font-black opacity-60">Total</p>
+          <p className="mt-1 text-base font-black">{money(total)}</p>
+        </div>
+        <div className="rounded-2xl bg-white/80 p-3">
+          <p className="font-black opacity-60">Previsão</p>
+          <p className="mt-1 text-base font-black">{estimated > 0 ? `cerca de ${formatEstimatedDeliveryTime(estimated)}` : "em breve"}</p>
+        </div>
+        <div className="rounded-2xl bg-white/80 p-3">
+          <p className="font-black opacity-60">Pagamento</p>
+          <p className="mt-1 font-black">{getPaymentLabel(delivery?.payment, delivery?.changeFor, delivery?.mixedPaymentDetails)}</p>
+        </div>
+        <div className="rounded-2xl bg-white/80 p-3">
+          <p className="font-black opacity-60">Itens</p>
+          <p className="mt-1 font-black">{getCustomerOrderItemsSummary(items)}</p>
+        </div>
+      </div>
+
+      {lastUpdate && <p className="mt-3 rounded-2xl bg-white/70 p-3 text-xs font-semibold">Última atualização: {lastUpdate}</p>}
+
+      {expanded && (
+        <div className="mt-3 rounded-2xl bg-white/80 p-3 text-sm text-zinc-900">
+          <p className="mb-2 text-xs font-black uppercase tracking-wide text-zinc-500">Itens do pedido</p>
+          {items.length === 0 ? (
+            <p className="text-xs text-zinc-500">Pedido sem itens detalhados.</p>
+          ) : items.map((item, index) => (
+            <div key={item.cartKey || `${item.id}-${index}`} className="flex items-start justify-between gap-3 border-b border-zinc-100 py-2 last:border-0">
+              <div className="min-w-0">
+                <p className="font-black leading-tight">{toPositiveInteger(item.quantity, 1)}x {item.name || item.productName || "Produto"}</p>
+                {item.variantName && <p className="text-xs font-bold text-purple-700">Sabor: {item.variantName}</p>}
+              </div>
+              <p className="shrink-0 font-black">{money(toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1))}</p>
+            </div>
+          ))}
+          <div className="mt-3 space-y-1 border-t border-zinc-100 pt-3 text-xs">
+            <p className="flex justify-between"><span>Produtos</span><strong>{money(productsTotal)}</strong></p>
+            {discount > 0 && <p className="flex justify-between text-emerald-700"><span>Desconto</span><strong>-{money(discount)}</strong></p>}
+            <p className="flex justify-between"><span>Entrega</span><strong>{money(deliveryFee)}</strong></p>
+            <p className="flex justify-between text-base"><span className="font-black">Total</span><strong>{money(total)}</strong></p>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button type="button" onClick={onToggleExpanded} className="rounded-2xl bg-white px-3 py-3 text-xs font-black shadow-sm">
+          {expanded ? "Ocultar itens" : "Ver detalhes"}
+        </button>
+        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="rounded-2xl bg-zinc-950 px-3 py-3 text-center text-xs font-black text-white shadow-sm">
+          Falar com a loja
+        </a>
+      </div>
+
+      {!statusInfo.final && (
+        <p className="mt-3 text-[11px] font-semibold opacity-75">Para adicionar mais itens, faça um novo pedido ou fale com a loja.</p>
+      )}
+    </div>
+  );
+}
 
 function NotificationPanel({ title, notifications, onMarkRead }) {
   const unreadCount = (notifications || []).filter((notification) => !notification.read).length;
