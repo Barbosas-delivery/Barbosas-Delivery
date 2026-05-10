@@ -11,6 +11,13 @@ export const initialStoreSettings = {
     { id: 2, district: "Zona 7", fee: 7, minimumOrderValue: 25, active: true },
   ],
   whatsappMessage: "Olá, seu pedido da Barbosa's está em andamento.",
+  statusWhatsappMessages: {
+    approved: "Olá, {cliente}! Seu pedido #{pedido} foi aprovado pela {loja}.\n\nPrevisão: {previsao}.\nTotal: {total}.\n\nObrigado pela preferência!",
+    outForDelivery: "Olá, {cliente}! Seu pedido #{pedido} saiu para entrega.\n\nO entregador já está a caminho. Total: {total}.\n\nObrigado pela preferência!",
+    delivered: "Olá, {cliente}! Seu pedido #{pedido} foi entregue.\n\nA {loja} agradece pela preferência!",
+    cancelled: "Olá, {cliente}. Seu pedido #{pedido} foi cancelado pela {loja}.\n\nSe precisar, responda esta mensagem para falar com a loja.",
+    paymentReminder: "Olá, {cliente}! Passando para lembrar sobre o pagamento do pedido #{pedido}.\n\nValor: {total}. Forma informada: {pagamento}.",
+  },
   autoPrintCustomerOrders: true,
   customerOrderPrintCopies: 2,
   manualReprintCopies: 1,

@@ -585,6 +585,7 @@ function sanitizeStoreSettings(settings = {}) {
     allowUnlistedDistricts: source.allowUnlistedDistricts !== false,
     deliveryZones: normalizeDeliveryZones(source.deliveryZones || initialStoreSettings.deliveryZones),
     whatsappMessage: String(source.whatsappMessage || initialStoreSettings.whatsappMessage),
+    statusWhatsappMessages: normalizeStatusWhatsAppMessages(source.statusWhatsappMessages || initialStoreSettings.statusWhatsappMessages),
     autoPrintCustomerOrders: source.autoPrintCustomerOrders !== false,
     customerOrderPrintCopies: clampPrintCopies(source.customerOrderPrintCopies, initialStoreSettings.customerOrderPrintCopies || 2),
     manualReprintCopies: clampPrintCopies(source.manualReprintCopies, initialStoreSettings.manualReprintCopies || 1),
@@ -740,6 +741,58 @@ function buildCustomerWhatsAppMessage(delivery, storeSettings = initialStoreSett
     "",
     "Obrigado pela preferência!",
   ].filter((line) => line !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function getWhatsAppTemplateVariables(delivery, storeSettings = initialStoreSettings) {
+  const storeName = storeSettings.storeName || "Barbosas Delivery";
+  const deliveryFee = isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee);
+  const total = Number(delivery.value || 0);
+  const estimated = Number(delivery.estimatedDeliveryMinutes || 0);
+  return {
+    loja: storeName,
+    cliente: delivery?.client || "cliente",
+    pedido: String(delivery?.id || ""),
+    total: money(total),
+    taxa: money(deliveryFee),
+    status: delivery?.status || "",
+    previsao: estimated > 0 ? formatEstimatedDeliveryTime(estimated) : "em breve",
+    pagamento: getPaymentLabel(delivery?.payment, delivery?.changeFor, delivery?.mixedPaymentDetails),
+  };
+}
+
+function fillWhatsAppTemplate(template, delivery, storeSettings = initialStoreSettings) {
+  const variables = getWhatsAppTemplateVariables(delivery, storeSettings);
+  return String(template || "")
+    .replace(/\{(loja|cliente|pedido|total|taxa|status|previsao|pagamento)\}/g, (_, key) => variables[key] || "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function getDefaultStatusWhatsAppMessages() {
+  return {
+    approved: "Olá, {cliente}! Seu pedido #{pedido} foi aprovado pela {loja}.\n\nPrevisão: {previsao}.\nTotal: {total}.\n\nObrigado pela preferência!",
+    outForDelivery: "Olá, {cliente}! Seu pedido #{pedido} saiu para entrega.\n\nO entregador já está a caminho. Total: {total}.\n\nObrigado pela preferência!",
+    delivered: "Olá, {cliente}! Seu pedido #{pedido} foi entregue.\n\nA {loja} agradece pela preferência!",
+    cancelled: "Olá, {cliente}. Seu pedido #{pedido} foi cancelado pela {loja}.\n\nSe precisar, responda esta mensagem para falar com a loja.",
+    paymentReminder: "Olá, {cliente}! Passando para lembrar sobre o pagamento do pedido #{pedido}.\n\nValor: {total}. Forma informada: {pagamento}.",
+  };
+}
+
+function normalizeStatusWhatsAppMessages(messages = {}) {
+  const defaults = getDefaultStatusWhatsAppMessages();
+  return {
+    approved: String(messages.approved || defaults.approved),
+    outForDelivery: String(messages.outForDelivery || defaults.outForDelivery),
+    delivered: String(messages.delivered || defaults.delivered),
+    cancelled: String(messages.cancelled || defaults.cancelled),
+    paymentReminder: String(messages.paymentReminder || defaults.paymentReminder),
+  };
+}
+
+function buildStatusWhatsAppMessage(delivery, statusKey, storeSettings = initialStoreSettings) {
+  const templates = normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages);
+  const template = templates[statusKey] || templates.approved;
+  return fillWhatsAppTemplate(template, delivery, storeSettings);
 }
 
 function getWhatsAppStatusLabel(status) {
@@ -1209,6 +1262,7 @@ function runSelfTests() {
     },
     { name: "Telefone é formatado com DDD, 9 e traço", passed: formatBrazilMobilePhone("43988736791") === "(43) 98873-6791" },
     { name: "WhatsApp não duplica código do Brasil", passed: buildWhatsAppUrl("5543988736791", "teste").startsWith("https://wa.me/5543") },
+    { name: "Mensagem de status substitui variáveis", passed: buildStatusWhatsAppMessage({ id: 123, client: "João", value: 52, payment: "Pix", estimatedDeliveryMinutes: 21 }, "approved", { storeName: "Loja Teste", statusWhatsappMessages: { approved: "Pedido {pedido} de {cliente} na {loja}: {total}" } }).includes("Pedido 123 de João na Loja Teste: R$ 52,00") },
     { name: "Pedido soma itens corretamente", passed: buildOrderTotal([{ price: 17, quantity: 2 }, { price: 5, quantity: 3 }]) === 49 },
     { name: "Pagamento em dinheiro mostra troco", passed: hasCurrencyValue(getPaymentLabel("Dinheiro", 100), 100) },
     { name: "Histórico do cliente soma compras pelo telefone", passed: buildCustomerHistory([{ phone: "(43) 99999-0000", value: 20, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }], "43999990000").totalSpent === 20 },
@@ -2045,6 +2099,32 @@ function App() {
     } catch {
       window.prompt("Copie a mensagem abaixo:", message);
       setLastAction(`Mensagem do WhatsApp do pedido #${delivery.id} aberta para copiar.`);
+    }
+  }
+
+  async function handleOpenStatusWhatsApp(delivery, statusKey) {
+    if (!delivery?.phone) {
+      setLastAction("Este pedido não tem telefone válido para abrir o WhatsApp.");
+      return;
+    }
+    const message = buildStatusWhatsAppMessage(delivery, statusKey, storeSettings);
+    const url = buildWhatsAppUrl(delivery.phone, message);
+    if (url === "#") {
+      setLastAction("Telefone inválido para WhatsApp. Confira o cadastro do cliente.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setLastAction(`Mensagem de status do pedido #${delivery.id} aberta no WhatsApp.`);
+  }
+
+  async function handleCopyStatusWhatsApp(delivery, statusKey) {
+    const message = buildStatusWhatsAppMessage(delivery, statusKey, storeSettings);
+    try {
+      await navigator.clipboard.writeText(message);
+      setLastAction(`Mensagem de status do pedido #${delivery.id} copiada.`);
+    } catch {
+      window.prompt("Copie a mensagem abaixo:", message);
+      setLastAction(`Mensagem de status do pedido #${delivery.id} aberta para copiar.`);
     }
   }
 
@@ -6830,7 +6910,7 @@ function App() {
                   <Button onClick={loadDeliveries} variant="secondary" className="rounded-2xl">Atualizar entregas</Button>
                 </div>
                 {activeDeliveryOrdersForStore.length === 0 && <CardBox><p className="text-sm text-zinc-500">Nenhuma entrega em aberto no momento.</p></CardBox>}
-                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
+                <div className="grid gap-4">{activeDeliveryOrdersForStore.map((delivery) => <OwnerDeliveryCard key={delivery.id} delivery={delivery} isPaymentProcessing={processingPaymentIds.includes(String(delivery.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} onOpenStatusWhatsApp={handleOpenStatusWhatsApp} onCopyStatusWhatsApp={handleCopyStatusWhatsApp} />)}</div>
 
                 <Title title="Relatório de entregas aprovadas" subtitle="Entregas que já foram confirmadas pela loja e liberadas para o entregador." />
                 <CardBox>
@@ -6927,7 +7007,7 @@ function App() {
                 </div>
 
                 <Title title="Vendas de balcão" subtitle="Separado das entregas, mas somado ao fechamento de caixa." />
-                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} />)}</div>
+                <div className="grid gap-4">{deliveries.filter((delivery) => isCounterOrder(delivery)).map((sale) => <OwnerDeliveryCard key={sale.id} delivery={sale} isPaymentProcessing={processingPaymentIds.includes(String(sale.id))} onPrint={printDeliveryReceipt} onApprove={approveDelivery} onManualConfirm={confirmManualDelivery} onCancel={requestCancelDelivery} onPaymentStatusChange={updatePaymentStatus} onReopenCounterSale={reopenCounterSaleInPdv} onOpenWhatsApp={handleOpenCustomerWhatsApp} onCopyWhatsApp={handleCopyCustomerWhatsAppMessage} onMarkWhatsAppSent={handleMarkCustomerWhatsAppSent} onOpenStatusWhatsApp={handleOpenStatusWhatsApp} onCopyStatusWhatsApp={handleCopyStatusWhatsApp} />)}</div>
               </div>
             )}
 
@@ -7300,7 +7380,20 @@ function App() {
                         </div>
                       </div>
                     </div>
-                    <div className="md:col-span-2"><Input label="Mensagem padrão para WhatsApp" value={storeSettings.whatsappMessage} onChange={(value) => updateStoreSetting("whatsappMessage", value)} /></div>
+                    <div className="md:col-span-2 rounded-3xl border border-emerald-100 bg-emerald-50 p-4 space-y-3">
+                      <div>
+                        <p className="text-xs font-medium text-emerald-800">Mensagens de WhatsApp</p>
+                        <p className="mt-1 text-xs text-emerald-700">{"Use variáveis como {cliente}, {pedido}, {loja}, {total}, {previsao} e {pagamento}. O sistema abre o WhatsApp com a mensagem pronta para a loja enviar."}</p>
+                      </div>
+                      <Input label="Mensagem padrão de confirmação" value={storeSettings.whatsappMessage} onChange={(value) => updateStoreSetting("whatsappMessage", value)} />
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <Input label="Pedido aprovado" value={normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages).approved} onChange={(value) => updateStoreSetting("statusWhatsappMessages", { ...normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages), approved: value })} />
+                        <Input label="Saiu para entrega" value={normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages).outForDelivery} onChange={(value) => updateStoreSetting("statusWhatsappMessages", { ...normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages), outForDelivery: value })} />
+                        <Input label="Pedido entregue" value={normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages).delivered} onChange={(value) => updateStoreSetting("statusWhatsappMessages", { ...normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages), delivered: value })} />
+                        <Input label="Pedido cancelado" value={normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages).cancelled} onChange={(value) => updateStoreSetting("statusWhatsappMessages", { ...normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages), cancelled: value })} />
+                        <Input label="Lembrete de pagamento" value={normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages).paymentReminder} onChange={(value) => updateStoreSetting("statusWhatsappMessages", { ...normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages), paymentReminder: value })} />
+                      </div>
+                    </div>
                     <div className="md:col-span-2 rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
                       <p className="text-xs font-bold text-zinc-600">Horários cadastrados</p>
                       <p className="mt-1 text-sm text-zinc-700">{storeOpeningHoursSummary}</p>
@@ -7888,7 +7981,7 @@ function NotificationPanel({ title, notifications, onMarkRead }) {
   );
 }
 
-function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent }) {
+function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent, onOpenStatusWhatsApp, onCopyStatusWhatsApp }) {
   const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
   const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
   const isCounterSale = isCounterOrder(delivery);
@@ -7934,6 +8027,19 @@ function OwnerDeliveryCard({ delivery, isPaymentProcessing = false, onPrint, onA
                 <Button onClick={() => onCopyWhatsApp(delivery)} variant="secondary" className="rounded-2xl text-xs">Copiar mensagem</Button>
                 <Button onClick={() => onMarkWhatsAppSent(delivery)} disabled={delivery.whatsappStatus === "sent"} variant="secondary" className="rounded-2xl text-xs">Marcar enviado</Button>
               </div>
+              {isDeliveryOrder(delivery) && (
+                <div className="border-t border-emerald-100 pt-2">
+                  <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-800">Mensagens rápidas por status</p>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Aprovado</Button>
+                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "outForDelivery")} variant="secondary" className="rounded-2xl bg-white text-xs">Saiu para entrega</Button>
+                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "delivered")} variant="secondary" className="rounded-2xl bg-white text-xs">Entregue</Button>
+                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "cancelled")} variant="secondary" className="rounded-2xl bg-white text-xs">Cancelado</Button>
+                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "paymentReminder")} variant="secondary" className="rounded-2xl bg-white text-xs">Cobrar pagamento</Button>
+                    <Button onClick={() => onCopyStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Copiar aprovado</Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <span className="text-xs text-zinc-500">Produtos: {money(delivery.productsTotal ?? Number(delivery.value || 0) - (isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee)))} • Desconto: -{money(delivery.discount || 0)} • Entrega: {money(isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee))}</span>

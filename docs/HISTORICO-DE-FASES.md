@@ -134,3 +134,10 @@ Depois teste no sistema publicado:
 - A loja pode bloquear bairros não cadastrados ou permitir taxa padrão.
 - O PDV Entregas passa a sugerir a taxa pelo bairro do cliente selecionado.
 - Adicionada migração `supabase/migracao-fase-40-taxas-bairro.sql` para preservar bairro/região no pedido.
+
+## Fase 41 — WhatsApp por status
+
+- Mensagens rápidas para pedido aprovado, saiu para entrega, entregue, cancelado e lembrete de pagamento.
+- Textos editáveis em Configurações da loja.
+- Variáveis: `{cliente}`, `{pedido}`, `{loja}`, `{total}`, `{taxa}`, `{status}`, `{previsao}` e `{pagamento}`.
+- Cache do PWA atualizado para evitar versão antiga no celular.

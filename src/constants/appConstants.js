@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.8-fase-40-taxas-bairro";
+export const APP_VERSION = "6.0.9-fase-41-whatsapp-status";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
