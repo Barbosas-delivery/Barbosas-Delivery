@@ -5,6 +5,11 @@ export const initialStoreSettings = {
   storePhone: "(43) 98873-6791",
   defaultDeliveryFee: DELIVERY_FEE,
   minimumOrderValue: 20,
+  allowUnlistedDistricts: true,
+  deliveryZones: [
+    { id: 1, district: "Centro", fee: DELIVERY_FEE, minimumOrderValue: 20, active: true },
+    { id: 2, district: "Zona 7", fee: 7, minimumOrderValue: 25, active: true },
+  ],
   whatsappMessage: "Olá, seu pedido da Barbosa's está em andamento.",
   autoPrintCustomerOrders: true,
   customerOrderPrintCopies: 2,

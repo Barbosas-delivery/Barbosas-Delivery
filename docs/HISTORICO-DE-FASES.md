@@ -125,3 +125,12 @@ Depois teste no sistema publicado:
 - Centraliza pedidos atrasados, problemas de entrega, aprovações pendentes, pagamentos pendentes, WhatsApp não marcado e estoque baixo.
 - Adicionado lembrete de backup diário com data do último backup neste navegador.
 - Atualizado cache do PWA para a versão 6.0.7-fase-39-atencao-loja.
+
+## Fase 40 — Taxas por bairro
+
+- Adicionada configuração de taxa de entrega por bairro.
+- O cliente vê a taxa calculada pelo bairro informado.
+- O pedido mínimo pode ser diferente por bairro.
+- A loja pode bloquear bairros não cadastrados ou permitir taxa padrão.
+- O PDV Entregas passa a sugerir a taxa pelo bairro do cliente selecionado.
+- Adicionada migração `supabase/migracao-fase-40-taxas-bairro.sql` para preservar bairro/região no pedido.

@@ -43,8 +43,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.7-fase-39-atencao-loja"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-7-fase-39/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.8-fase-40-taxas-bairro"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-8-fase-40/);
 });
 
 test("fluxos principais existem no código", () => {
@@ -72,6 +72,9 @@ test("fluxos principais existem no código", () => {
     "buildCourierClosingReport",
     "printCourierClosingReport",
     "exportCourierClosingCsv",
+    "normalizeDeliveryZones",
+    "getCustomerDeliveryFee",
+    "getDeliveryZoneIssue",
   ];
   for (const snippet of requiredSnippets) {
     assert.ok(appSource.includes(snippet), `Trecho obrigatório ausente: ${snippet}`);
@@ -89,6 +92,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fases-1-a-12.sql",
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
+    "supabase/migracao-fase-40-taxas-bairro.sql",
   ];
   for (const file of requiredFiles) {
     assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), true, `Arquivo ausente: ${file}`);

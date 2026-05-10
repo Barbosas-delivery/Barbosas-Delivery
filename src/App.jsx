@@ -510,6 +510,67 @@ function getStorePauseStatus(settings = {}, date = new Date()) {
   return { active: true, until: pausedUntil, reason, message: `Pedidos pausados até ${timeLabel}. Motivo: ${reason}` };
 }
 
+function normalizeDistrictName(value = "") {
+  return String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizeDeliveryZone(zone = {}, index = 0) {
+  const district = String(zone.district || zone.name || "").trim();
+  return {
+    id: zone.id || Date.now() + index,
+    district,
+    fee: normalizeDeliveryFee(zone.fee ?? zone.deliveryFee ?? initialStoreSettings.defaultDeliveryFee),
+    minimumOrderValue: toNonNegativeNumber(zone.minimumOrderValue ?? zone.minimum_order_value ?? 0, 0),
+    active: zone.active !== false && Boolean(district),
+  };
+}
+
+function normalizeDeliveryZones(zones = []) {
+  const normalized = (Array.isArray(zones) ? zones : [])
+    .map((zone, index) => normalizeDeliveryZone(zone, index))
+    .filter((zone) => zone.district);
+  const seen = new Set();
+  return normalized.filter((zone) => {
+    const key = normalizeDistrictName(zone.district);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function findDeliveryZoneByDistrict(zones = [], district = "") {
+  const normalizedDistrict = normalizeDistrictName(district);
+  if (!normalizedDistrict) return null;
+  return normalizeDeliveryZones(zones).find((zone) => zone.active !== false && normalizeDistrictName(zone.district) === normalizedDistrict) || null;
+}
+
+function getCustomerDeliveryFee(settings = {}, district = "") {
+  const zone = findDeliveryZoneByDistrict(settings.deliveryZones, district);
+  return zone ? normalizeDeliveryFee(zone.fee) : normalizeDeliveryFee(settings.defaultDeliveryFee);
+}
+
+function getCustomerMinimumOrderValue(settings = {}, district = "") {
+  const zone = findDeliveryZoneByDistrict(settings.deliveryZones, district);
+  const zoneMinimum = Number(zone?.minimumOrderValue || 0);
+  return zoneMinimum > 0 ? zoneMinimum : toNonNegativeNumber(settings.minimumOrderValue, initialStoreSettings.minimumOrderValue);
+}
+
+function getDeliveryZoneIssue(settings = {}, district = "") {
+  const safeDistrict = String(district || "").trim();
+  if (!safeDistrict) return "";
+  if (settings.allowUnlistedDistricts !== false) return "";
+  return findDeliveryZoneByDistrict(settings.deliveryZones, safeDistrict) ? "" : `Ainda não atendemos o bairro ${safeDistrict}. Fale com a loja pelo WhatsApp para confirmar.`;
+}
+
+function makeEmptyDeliveryZone() {
+  return { id: Date.now(), district: "Novo bairro", fee: initialStoreSettings.defaultDeliveryFee, minimumOrderValue: 0, active: true };
+}
+
 function sanitizeStoreSettings(settings = {}) {
   const source = settings && typeof settings === "object" ? settings : {};
   const schedule = normalizeStoreSchedule(source.schedule || initialStoreSettings.schedule);
@@ -521,6 +582,8 @@ function sanitizeStoreSettings(settings = {}) {
     storePhone: formatBrazilMobilePhone(source.storePhone || initialStoreSettings.storePhone),
     defaultDeliveryFee: normalizeDeliveryFee(source.defaultDeliveryFee ?? initialStoreSettings.defaultDeliveryFee),
     minimumOrderValue: toNonNegativeNumber(source.minimumOrderValue ?? initialStoreSettings.minimumOrderValue, initialStoreSettings.minimumOrderValue),
+    allowUnlistedDistricts: source.allowUnlistedDistricts !== false,
+    deliveryZones: normalizeDeliveryZones(source.deliveryZones || initialStoreSettings.deliveryZones),
     whatsappMessage: String(source.whatsappMessage || initialStoreSettings.whatsappMessage),
     autoPrintCustomerOrders: source.autoPrintCustomerOrders !== false,
     customerOrderPrintCopies: clampPrintCopies(source.customerOrderPrintCopies, initialStoreSettings.customerOrderPrintCopies || 2),
@@ -1000,7 +1063,8 @@ function mergeCustomerCartItems(cart) {
   return merged;
 }
 
-function getCustomerCheckoutIssue({ cart, products, productsTotal, minimumOrderValue, storeIsOpen, storeMessage, customerForm, payment, changeFor, deliveryTotal }) {
+function getCustomerCheckoutIssue({ cart, products, productsTotal, minimumOrderValue, storeIsOpen, storeMessage, customerForm, payment, changeFor, deliveryTotal, deliveryZoneIssue = "" }) {
+  if (deliveryZoneIssue) return deliveryZoneIssue;
   if (!storeIsOpen) return `A loja está fechada no momento. ${storeMessage || "Tente novamente dentro do horário de atendimento."}`;
   if (!isCustomerFormComplete(customerForm)) return "Confira seus dados de entrega antes de finalizar.";
   if (customerForm?.phone && !isValidBrazilMobilePhone(customerForm.phone)) return "Telefone inválido. Corrija o número antes de finalizar.";
@@ -1188,6 +1252,8 @@ function runSelfTests() {
     { name: "Pedido entregue não exibe ações operacionais indevidas", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).approve === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).manualFinish === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
     { name: "Cliente vê somente produtos ativos e não pausados", passed: getActiveProducts([{ active: true }, { active: false }, { active: true, pausedUntil: new Date(Date.now() + 60_000).toISOString() }]).length === 1 },
     { name: "Pausa temporária da loja fecha pedidos online", passed: getStorePauseStatus({ storePausedUntil: new Date(Date.now() + 60_000).toISOString(), storePauseReason: "Teste" }).active === true },
+    { name: "Taxa por bairro substitui taxa padrão", passed: getCustomerDeliveryFee({ defaultDeliveryFee: 5, deliveryZones: [{ district: "Centro", fee: 8, active: true }] }, "centro") === 8 },
+    { name: "Bairro não cadastrado pode ser bloqueado", passed: getDeliveryZoneIssue({ allowUnlistedDistricts: false, deliveryZones: [{ district: "Centro", fee: 5, active: true }] }, "Zona 7").includes("não atendemos") },
     { name: "Grupos de produtos não podem duplicar", passed: hasDuplicateGroup(["Bebidas"], "bebidas") === true },
     { name: "Cliente vê grupos com produtos ativos", passed: getVisibleProductGroups(initialProducts, initialProductGroups).includes("Bebidas") === true },
     { name: "Carrinho do cliente soma linhas repetidas do mesmo sabor", passed: mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }]).length === 1 && mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }])[0].quantity === 3 },
@@ -2283,19 +2349,24 @@ function App() {
   const customerCartItemCount = useMemo(() => safeCustomerCart.reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0), [safeCustomerCart]);
   const activeCoupons = useMemo(() => coupons.filter((coupon) => coupon.active && isCouponInPeriod(coupon)), [coupons]);
   const appliedCustomerCouponDiscount = useMemo(() => getCouponDiscount(appliedCustomerCoupon, customerCartTotal), [appliedCustomerCoupon, customerCartTotal]);
-  const customerDeliveryTotal = useMemo(() => buildDeliveryTotal(customerCartTotal, storeSettings.defaultDeliveryFee, appliedCustomerCouponDiscount), [customerCartTotal, storeSettings.defaultDeliveryFee, appliedCustomerCouponDiscount]);
+  const customerDeliveryZone = useMemo(() => findDeliveryZoneByDistrict(storeSettings.deliveryZones, customerForm.district), [storeSettings.deliveryZones, customerForm.district]);
+  const customerDeliveryFee = useMemo(() => getCustomerDeliveryFee(storeSettings, customerForm.district), [storeSettings, customerForm.district]);
+  const customerMinimumOrderValue = useMemo(() => getCustomerMinimumOrderValue(storeSettings, customerForm.district), [storeSettings, customerForm.district]);
+  const customerDeliveryZoneIssue = useMemo(() => getDeliveryZoneIssue(storeSettings, customerForm.district), [storeSettings, customerForm.district]);
+  const customerDeliveryTotal = useMemo(() => buildDeliveryTotal(customerCartTotal, customerDeliveryFee, appliedCustomerCouponDiscount), [customerCartTotal, customerDeliveryFee, appliedCustomerCouponDiscount]);
   const customerCheckoutIssue = useMemo(() => getCustomerCheckoutIssue({
     cart: safeCustomerCart,
     products,
     productsTotal: customerCartTotal,
-    minimumOrderValue: storeSettings.minimumOrderValue,
+    minimumOrderValue: customerMinimumOrderValue,
     storeIsOpen: effectiveStoreIsOpen,
     storeMessage: effectiveStoreMessage,
     customerForm,
     payment: customerPayment,
     changeFor: customerChangeFor,
     deliveryTotal: customerDeliveryTotal,
-  }), [safeCustomerCart, products, customerCartTotal, storeSettings.minimumOrderValue, effectiveStoreIsOpen, effectiveStoreMessage, customerForm, customerPayment, customerChangeFor, customerDeliveryTotal]);
+    deliveryZoneIssue: customerDeliveryZoneIssue,
+  }), [safeCustomerCart, products, customerCartTotal, customerMinimumOrderValue, effectiveStoreIsOpen, effectiveStoreMessage, customerForm, customerPayment, customerChangeFor, customerDeliveryTotal, customerDeliveryZoneIssue]);
   const canSubmitCustomerOrder = !customerSubmitting && !customerCheckoutIssue;
   const normalizedCustomerPhoneForNotifications = useMemo(() => onlyPhoneNumbers(customerForm.phone), [customerForm.phone]);
 
@@ -3676,11 +3747,15 @@ function App() {
 
       const syncedItems = syncOrderItemsWithProducts(cartForSubmit, products);
       const syncedProductsTotal = buildOrderTotal(syncedItems);
-      if (!isOrderAboveMinimum(syncedProductsTotal, storeSettings.minimumOrderValue)) {
-        return setCustomerError(`Pedido mínimo de ${money(storeSettings.minimumOrderValue)} em produtos. Adicione mais itens para finalizar.`);
+      const deliveryZoneIssue = getDeliveryZoneIssue(storeSettings, customerForm.district);
+      if (deliveryZoneIssue) return setCustomerError(deliveryZoneIssue);
+
+      const minimumOrderValue = getCustomerMinimumOrderValue(storeSettings, customerForm.district);
+      if (!isOrderAboveMinimum(syncedProductsTotal, minimumOrderValue)) {
+        return setCustomerError(`Pedido mínimo de ${money(minimumOrderValue)} em produtos para este bairro. Adicione mais itens para finalizar.`);
       }
 
-      const deliveryFee = normalizeDeliveryFee(storeSettings.defaultDeliveryFee);
+      const deliveryFee = getCustomerDeliveryFee(storeSettings, customerForm.district);
       const finalCouponValidation = appliedCustomerCoupon ? validateCouponForCart(appliedCustomerCoupon, syncedProductsTotal) : { valid: true };
       if (!finalCouponValidation.valid) {
         setAppliedCustomerCoupon(null);
@@ -3728,6 +3803,8 @@ function App() {
         storeOrderApproved: false,
         approvedAt: "",
         reference: customerForm.reference,
+        deliveryDistrict: String(customerForm.district || "").trim(),
+        deliveryZone: customerDeliveryZone?.district || "",
         courierUsername: "ALL",
         courierName: "Todos os motoboys",
         notes: "Pedido enviado pelo cliente",
@@ -5247,6 +5324,35 @@ function App() {
     }
   }
 
+
+  function addDeliveryZoneToSettings() {
+    setStoreSettings((previousSettings) => ({
+      ...previousSettings,
+      deliveryZones: [...normalizeDeliveryZones(previousSettings.deliveryZones), makeEmptyDeliveryZone()],
+    }));
+  }
+
+  function updateDeliveryZoneSetting(zoneId, field, value) {
+    setStoreSettings((previousSettings) => {
+      const zones = normalizeDeliveryZones(previousSettings.deliveryZones);
+      const nextZones = zones.map((zone) => {
+        if (String(zone.id) !== String(zoneId)) return zone;
+        const nextValue = field === "fee" ? normalizeDeliveryFee(value) : field === "minimumOrderValue" ? toNonNegativeNumber(value, 0) : field === "active" ? value === true : value;
+        return normalizeDeliveryZone({ ...zone, [field]: nextValue });
+      });
+      return { ...previousSettings, deliveryZones: nextZones };
+    });
+  }
+
+  function removeDeliveryZoneFromSettings(zoneId) {
+    const confirmed = window.confirm("Remover esta taxa por bairro? O bairro voltará a usar a taxa padrão ou poderá ser bloqueado se a loja não atender bairros não cadastrados.");
+    if (!confirmed) return;
+    setStoreSettings((previousSettings) => ({
+      ...previousSettings,
+      deliveryZones: normalizeDeliveryZones(previousSettings.deliveryZones).filter((zone) => String(zone.id) !== String(zoneId)),
+    }));
+  }
+
   function pauseStoreTemporarily(minutes = 30) {
     const reason = window.prompt("Motivo para pausar pedidos:", storeSettings.storePauseReason || "Alta demanda");
     if (reason === null) return;
@@ -5633,7 +5739,7 @@ function App() {
                     >
                       <span className="block text-[11px] font-black uppercase tracking-wide opacity-90">Carrinho atualizado</span>
                       <span className="block text-lg font-black">{customerCartItemCount} item{customerCartItemCount > 1 ? "s" : ""} • Total {money(customerDeliveryTotal)}</span>
-                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)}{appliedCustomerCouponDiscount > 0 ? ` • Cupom: -${money(appliedCustomerCouponDiscount)}` : ""} • Entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))} • tocar para conferir pedido</span>
+                      <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)}{appliedCustomerCouponDiscount > 0 ? ` • Cupom: -${money(appliedCustomerCouponDiscount)}` : ""} • Entrega: {money(customerDeliveryFee)} • tocar para conferir pedido</span>
                     </button>
                   )}
 
@@ -5700,6 +5806,11 @@ function App() {
                         <p className="mt-1 font-bold text-zinc-900 break-words">{customerForm.street}, {customerForm.number}</p>
                         <p className="text-zinc-600 break-words">{customerForm.district} • {customerForm.city}/{customerForm.state}</p>
                       </div>
+                      <div className={`rounded-2xl border p-3 ${customerDeliveryZoneIssue ? "border-red-100 bg-red-50 text-red-900" : "border-emerald-100 bg-emerald-50 text-emerald-900"}`}>
+                        <p className="font-black">Taxa do bairro</p>
+                        <p className="mt-1 text-sm font-black">{money(customerDeliveryFee)}{customerDeliveryZone ? ` • ${customerDeliveryZone.district}` : " • taxa padrão"}</p>
+                        <p className="text-[11px] opacity-80">{customerDeliveryZoneIssue || `Pedido mínimo para entrega: ${money(customerMinimumOrderValue)}`}</p>
+                      </div>
                       <div className={`rounded-2xl border p-3 ${effectiveStoreIsOpen ? "border-emerald-100 bg-emerald-50 text-emerald-900" : "border-red-100 bg-red-50 text-red-900"}`}>
                         <p className="font-black">{effectiveStoreIsOpen ? "Estamos abertos" : "Estamos fechados no momento"}</p>
                         <p className="mt-1 font-bold">Hoje: {todayOpeningHoursSummary}</p>
@@ -5709,7 +5820,7 @@ function App() {
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded-2xl bg-zinc-50 p-3">
                         <p className="font-black text-zinc-500">Pedido mínimo</p>
-                        <p className="mt-1 text-sm font-black text-zinc-900">{money(storeSettings.minimumOrderValue)}</p>
+                        <p className="mt-1 text-sm font-black text-zinc-900">{money(customerMinimumOrderValue)}</p>
                       </div>
                       <div className="rounded-2xl bg-zinc-50 p-3">
                         <p className="font-black text-zinc-500">Entrega estimada</p>
@@ -5996,9 +6107,9 @@ function App() {
 
                     <div className="border-t border-zinc-100 pt-3">
                       <p className="text-sm text-zinc-500">Produtos: {money(customerCartTotal)}</p>
-                      <p className={`text-sm font-semibold ${isOrderAboveMinimum(customerCartTotal, storeSettings.minimumOrderValue) ? "text-emerald-600" : "text-red-600"}`}>Pedido mínimo: {money(storeSettings.minimumOrderValue)}</p>
+                      <p className={`text-sm font-semibold ${isOrderAboveMinimum(customerCartTotal, customerMinimumOrderValue) ? "text-emerald-600" : "text-red-600"}`}>Pedido mínimo: {money(customerMinimumOrderValue)}</p>
                       {appliedCustomerCouponDiscount > 0 && <p className="text-sm font-semibold text-emerald-700">Cupom {appliedCustomerCoupon?.code}: -{money(appliedCustomerCouponDiscount)}</p>}
-                      <p className="text-sm text-zinc-500">Taxa de entrega: {money(normalizeDeliveryFee(storeSettings.defaultDeliveryFee))}</p>
+                      <p className="text-sm text-zinc-500">Taxa de entrega: {money(customerDeliveryFee)}</p>
                       <p className="text-2xl font-black">Total: {money(customerDeliveryTotal)}</p>
                     </div>
 
@@ -6695,7 +6806,7 @@ function App() {
                   </CardBox>
                   <CardBox>
                     <h3 className="font-bold text-lg mb-4">2. Montar entrega</h3>
-                    <label className="block mb-3"><span className="text-xs font-medium text-zinc-600">Cliente</span><select value={deliveryDraft.clientId} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, clientId: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option value="">Selecione um cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name} - {formatBrazilMobilePhone(client.phone)}</option>)}</select></label>
+                    <label className="block mb-3"><span className="text-xs font-medium text-zinc-600">Cliente</span><select value={deliveryDraft.clientId} onChange={(event) => { const clientId = event.target.value; const client = clients.find((item) => String(item.id) === String(clientId)); setDeliveryDraft({ ...deliveryDraft, clientId, deliveryFee: client ? getCustomerDeliveryFee(storeSettings, client.district) : deliveryDraft.deliveryFee }); }} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option value="">Selecione um cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name} - {formatBrazilMobilePhone(client.phone)}{client.district ? ` • ${client.district}` : ""}</option>)}</select></label>
                     {selectedDeliveryClient && <div className="mb-4 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm"><p><b>Telefone:</b> {formatBrazilMobilePhone(selectedDeliveryClient.phone)}</p><p><b>Endereço:</b> {buildDeliveryAddress(selectedDeliveryClient)}</p><p><b>Referência:</b> {selectedDeliveryClient.reference || "-"}</p></div>}
                     <label className="block mb-4"><span className="text-xs font-medium text-zinc-600">Pagamento</span><select value={deliveryDraft.payment} onChange={(event) => setDeliveryDraft({ ...deliveryDraft, payment: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"><option>Pix</option><option>Dinheiro</option><option>Cartão débito</option><option>Cartão crédito</option></select></label>
                     {deliveryDraft.payment === "Dinheiro" && <div className="mb-4"><Input label="Precisa de troco para quanto?" type="number" value={deliveryDraft.changeFor} onChange={(value) => setDeliveryDraft({ ...deliveryDraft, changeFor: value })} placeholder="Ex: 100,00" /></div>}
@@ -7078,6 +7189,37 @@ function App() {
                     <Input label="WhatsApp da loja" value={storeSettings.storePhone} onChange={(value) => updateStoreSetting("storePhone", formatBrazilMobilePhone(value))} />
                     <Input label="Taxa de entrega padrão" type="number" value={storeSettings.defaultDeliveryFee} onChange={(value) => updateStoreSetting("defaultDeliveryFee", value)} />
                     <Input label="Pedido mínimo" type="number" value={storeSettings.minimumOrderValue} onChange={(value) => updateStoreSetting("minimumOrderValue", value)} />
+                    <div className="md:col-span-2 rounded-3xl border border-blue-100 bg-blue-50 p-4 space-y-3">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-sm font-black text-blue-950">Taxas por bairro</p>
+                          <p className="mt-1 text-xs text-blue-900">Cadastre bairros com taxa e pedido mínimo próprios. Se o bairro do cliente bater com a lista, o checkout usa automaticamente essa taxa.</p>
+                        </div>
+                        <Button onClick={addDeliveryZoneToSettings} variant="secondary" className="rounded-2xl bg-white whitespace-nowrap">Adicionar bairro</Button>
+                      </div>
+                      <label className="flex min-h-[48px] items-center gap-2 rounded-2xl border border-blue-100 bg-white px-3 text-sm font-bold text-blue-950">
+                        <input
+                          type="checkbox"
+                          checked={storeSettings.allowUnlistedDistricts !== false}
+                          onChange={(event) => updateStoreSetting("allowUnlistedDistricts", event.target.checked)}
+                        />
+                        Atender bairros não cadastrados usando a taxa padrão
+                      </label>
+                      <div className="grid gap-2">
+                        {normalizeDeliveryZones(storeSettings.deliveryZones).length === 0 && <p className="rounded-2xl bg-white p-3 text-xs font-bold text-blue-900">Nenhum bairro cadastrado. O sistema usa a taxa padrão.</p>}
+                        {normalizeDeliveryZones(storeSettings.deliveryZones).map((zone) => (
+                          <div key={zone.id} className="grid grid-cols-1 gap-2 rounded-2xl border border-blue-100 bg-white p-3 md:grid-cols-[1.4fr_0.8fr_0.8fr_auto] md:items-end">
+                            <Input label="Bairro" value={zone.district} onChange={(value) => updateDeliveryZoneSetting(zone.id, "district", value)} />
+                            <Input label="Taxa" type="number" value={zone.fee} onChange={(value) => updateDeliveryZoneSetting(zone.id, "fee", value)} />
+                            <Input label="Pedido mínimo" type="number" value={zone.minimumOrderValue} onChange={(value) => updateDeliveryZoneSetting(zone.id, "minimumOrderValue", value)} />
+                            <div className="flex gap-2 md:pb-0">
+                              <Button onClick={() => updateDeliveryZoneSetting(zone.id, "active", !zone.active)} variant="secondary" className={`rounded-2xl px-3 text-xs ${zone.active ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-500"}`}>{zone.active ? "Ativo" : "Inativo"}</Button>
+                              <Button onClick={() => removeDeliveryZoneFromSettings(zone.id)} variant="secondary" className="rounded-2xl bg-red-50 px-3 text-xs text-red-600">Remover</Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                     <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
                       <p className="text-xs font-medium text-zinc-600">Tempo estimado automático</p>
                       <p className="mt-1 text-2xl font-black text-zinc-900">{nextOrderEstimatedDeliveryLabel}</p>
