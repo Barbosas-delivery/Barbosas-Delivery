@@ -1,0 +1,161 @@
+import assert from "node:assert/strict";
+import { readFileSync, existsSync } from "node:fs";
+import { money, formatCep, isValidCep, formatBrazilMobilePhone, isValidBrazilMobilePhone, onlyPhoneNumbers, escapeHtml, buildReceiptItemsHtml } from "../src/utils/formatters.js";
+import { toPositiveInteger, toSafeMoneyNumber, calculateChangeDue } from "../src/utils/numbers.js";
+
+const appSource = [
+  "../src/App.jsx",
+  "../src/utils/appRuntime.js",
+  "../src/components/OperationalPanels.jsx",
+  "../src/components/ui.jsx",
+].map((file) => readFileSync(new URL(file, import.meta.url), "utf8")).join("\n");
+const constantsSource = readFileSync(new URL("../src/constants/appConstants.js", import.meta.url), "utf8");
+const serviceWorkerSource = readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8");
+const mainSource = readFileSync(new URL("../src/main.jsx", import.meta.url), "utf8");
+const supabaseClientSource = readFileSync(new URL("../src/supabaseClient.js", import.meta.url), "utf8");
+
+function test(name, fn) {
+  try {
+    fn();
+    console.log(`✓ ${name}`);
+  } catch (error) {
+    console.error(`✗ ${name}`);
+    throw error;
+  }
+}
+
+test("formatação monetária em pt-BR", () => {
+  assert.equal(money(12.5), "R$ 12,50");
+});
+
+test("CEP e telefone do cliente", () => {
+  assert.equal(formatCep("87000000"), "87000-000");
+  assert.equal(isValidCep("87000-000"), true);
+  assert.equal(formatBrazilMobilePhone("43988736791"), "(43) 98873-6791");
+  assert.equal(isValidBrazilMobilePhone("(43) 98873-6791"), true);
+  assert.equal(onlyPhoneNumbers("(43) 98873-6791"), "43988736791");
+});
+
+test("números e troco", () => {
+  assert.equal(toPositiveInteger("2.9"), 2);
+  assert.equal(toSafeMoneyNumber("15,50"), 15.5);
+  assert.equal(calculateChangeDue("60", "52"), 8);
+  assert.equal(calculateChangeDue("50", "52"), 0);
+});
+
+test("HTML de impressão escapa texto e calcula subtotal", () => {
+  const html = buildReceiptItemsHtml([{ name: "Copão <Maracujá>", price: 10, quantity: 2 }]);
+  assert.match(html, /Copão &lt;Maracujá&gt;/);
+  assert.match(html, /R\$\s*20,00/);
+});
+
+test("versão final consistente", () => {
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.30-fase-50-app-dividido-auditoria-final"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-30-fase-50-app-dividido-auditoria-final-sem-cache/);
+  assert.match(serviceWorkerSource, /cache: "no-store"/);
+  assert.doesNotMatch(serviceWorkerSource, /cache\.addAll|caches\.match|cache\.put/);
+  assert.ok(appSource.includes("restoreProductInSupabase"), "recadastro de produto excluído precisa reativar por ID, não atualizar todos por código de barras");
+  assert.ok(appSource.includes("makeUniqueNumericId()"), "IDs críticos não devem depender só de Date.now() em produção");
+  assert.ok(appSource.includes("buildStockDeltasFromItems"), "persistência de estoque deve calcular deltas dos produtos alterados");
+  assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
+  assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
+  const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-30.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
+  assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
+  assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
+  assert.match(stockMigrationSource, /insufficient_stock/i, "função de estoque precisa recusar baixa sem saldo suficiente");
+  assert.doesNotMatch(stockMigrationSource, /greatest\(0/i, "função de estoque não pode zerar saldo insuficiente e fingir sucesso");
+  assert.ok(appSource.includes("estoque_balcao_bloqueado") || appSource.includes("estoque_nao_sincronizado"), "falha de estoque precisa gerar notificação operacional");
+  assert.ok(appSource.includes("rollbackStockAfterSaveFailure"), "se pedido falhar depois da reserva, estoque precisa tentar voltar automaticamente");
+  assert.doesNotMatch(appSource, /const productId = Date\.now\(\)|id: Date\.now\(\),\n\s+cashSessionId|id: Date\.now\(\),\n\s+code,/, "produtos, pedidos e cupons não podem usar Date.now() puro como ID");
+  assert.ok(appSource.includes("Grupo de produtos criado e salvo no Supabase"), "categorias precisam salvar imediatamente no Supabase");
+  assert.ok(appSource.includes("Estoque não sincronizado no Supabase"), "falha de estoque no Supabase precisa gerar alerta operacional");
+  assert.ok(appSource.includes("productGroups: normalizeProductGroups"), "categorias precisam ser parte das configurações sincronizadas");
+  assert.doesNotMatch(appSource, /barbosas-delivery-store-settings-v1|loadStoreSettingsFromLocalStorage/);
+  assert.ok(appSource.includes("loadProducts({ silent: true })"), "catálogo deve ter atualização periódica sem depender de realtime/cache");
+  assert.ok(appSource.includes("catalogRefreshInterval"), "cliente aberto precisa atualizar catálogo mesmo sem realtime habilitado");
+  assert.ok(appSource.includes("async function saveKitEdits"), "edição de kit precisa ser assíncrona para salvar no Supabase");
+  assert.ok(appSource.includes('supabase.from("kit_items").delete().eq("kit_id", id)'), "edição de kit precisa substituir itens no Supabase, não só no estado da tela");
+  assert.ok(appSource.includes("Kit atualizado e sincronizado no Supabase."), "edição de kit precisa confirmar sincronização real");
+  assert.doesNotMatch(appSource, /restoreProductByBarcodeInSupabase|updateWithFilterSchemaRetry\("products"/, "não pode reativar produto por filtro amplo de código de barras");
+  assert.ok(supabaseClientSource.includes("channel()"), "cliente Supabase desativado precisa ter channel() para não quebrar sem env");
+  assert.ok(supabaseClientSource.includes("removeChannel()"), "cliente Supabase desativado precisa ter removeChannel() para cleanup seguro");
+  assert.ok(readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8").includes("isTruthyActive(product.active)"), "produtos com active nulo/ausente no Supabase devem continuar visíveis, não sumir do cliente");
+  assert.ok(readFileSync(new URL("../src/utils/catalog.js", import.meta.url), "utf8").includes("isTruthyActive(product.active)"), "catálogo do cliente precisa tratar active ausente como ativo para tabelas antigas");
+});
+
+test("fluxos principais existem no código", () => {
+  const requiredSnippets = [
+    "submitCustomerOrder",
+    "addProductToCustomerCart",
+    "addSelectedVariantsToCustomerCart",
+    "validateCouponForCart",
+    "approveDelivery",
+    "markCourierPickedUp",
+    "updatePaymentStatus",
+    "printThermalHtml",
+    "buildCustomerWhatsAppMessage",
+    "markNotificationsRead",
+    "resolveOrderNotifications",
+    "store_settings",
+    "product_stock_movements",
+    "store_users",
+    "deletePromotion",
+    "reopenCounterSaleInPdv",
+    "isDeliveryDelayed",
+    "buildCourierTodaySummary",
+    "pauseStoreTemporarily",
+    "toggleProductPause",
+    "buildCourierClosingReport",
+    "printCourierClosingReport",
+    "exportCourierClosingCsv",
+    "normalizeDeliveryZones",
+    "getCustomerDeliveryFee",
+    "getDeliveryZoneIssue",
+    "buildCustomerSalesReport",
+    "buildPeakHourSalesReport",
+    "buildProfitSalesReport",
+    "exportCustomerSalesCsv",
+    "exportPeakHourSalesCsv",
+    "exportProfitSalesCsv",
+    "buildDeliveryRouteGroups",
+    "getCourierAcceptBlockReason",
+    "maxActiveDeliveriesPerCourier",
+    "DELIVERY_PROBLEM_REASONS",
+    "promptDeliveryProblemReason",
+    "Hoje na loja",
+    "Fila rápida de entregas",
+    "Fechamento do dia",
+    "Baixar backup diário",
+    "isSupabaseConfigured",
+    "Cliente Supabase desativado",
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.ok(appSource.includes(snippet), `Trecho obrigatório ausente: ${snippet}`);
+  }
+});
+
+test("arquivos operacionais principais existem", () => {
+  const requiredFiles = [
+    "MANUAL-DO-SISTEMA.md",
+    "CHECKLIST-TESTE-PRODUCAO.md",
+    "docs/HISTORICO-DE-FASES.md",
+    "docs/DIAGNOSTICO-SISTEMA.md",
+    "docs/FECHAMENTO-DO-DIA.md",
+    "docs/FASE-50-REVISAO-FINAL-PRODUCAO.md",
+    ".env.example",
+    "public/manifest.webmanifest",
+    "public/service-worker.js",
+    "supabase/migracao-fases-1-a-12.sql",
+    "supabase/migracao-fase-24-acessos-loja.sql",
+    "supabase/migracao-fase-37-pausas.sql",
+    "supabase/migracao-fase-40-taxas-bairro.sql",
+    "supabase/migracao-final-producao-6-0-30.sql",
+  ];
+  for (const file of requiredFiles) {
+    assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), true, `Arquivo ausente: ${file}`);
+  }
+});
+
+console.log("\nTodos os testes de fumaça passaram.");

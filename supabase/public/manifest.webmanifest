@@ -1,0 +1,42 @@
+{
+  "name": "Barbosa's Delivery",
+  "short_name": "Barbosa's",
+  "description": "Sistema Barbosa's Delivery para pedidos, entregas, caixa e atendimento mobile.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "portrait-primary",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["business", "food", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Abrir sistema",
+      "short_name": "Sistema",
+      "description": "Abrir o painel do Barbosa's Delivery",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}
