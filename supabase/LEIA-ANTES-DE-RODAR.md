@@ -26,10 +26,14 @@ O script usa `IF NOT EXISTS`, então pode ser rodado mais de uma vez sem recriar
 
 ## Migração final de produção
 
-Para a versão 6.0.35, rode também o arquivo:
+Para a versão 6.0.36, rode também o arquivo:
 
 ```sql
-supabase/migracao-final-producao-6-0-35.sql
+supabase/migracao-final-producao-6-0-36.sql
 ```
 
-Ele reforça as tabelas principais e cria/atualiza a função `apply_product_stock_deltas`, usada para movimentação atômica de estoque em vendas, pedidos, comandas, cancelamentos e ajustes manuais.
+Ele reforça as tabelas principais e cria/atualiza as funções:
+
+- `apply_product_stock_deltas`, usada para movimentação atômica de estoque em vendas, pedidos, comandas, cancelamentos e ajustes manuais;
+- `replace_kit_items`, usada para substituir itens de kit com segurança;
+- `replace_tab_account_items`, usada para substituir itens de comanda/fiado com segurança.

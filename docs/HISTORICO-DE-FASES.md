@@ -332,3 +332,10 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 - Migração final reforçada para bancos antigos que já tinham tabelas sem todas as colunas atuais.
 - Edição de kits agora usa a função SQL `replace_kit_items` para evitar substituição parcial de itens.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-35.sql`.
+
+## Revisão 6.0.36 — comandas transacionais
+
+- Persistência dos itens de comanda/fiado passou a usar a função SQL `replace_tab_account_items`.
+- Removido o fluxo perigoso de apagar itens de comanda e inserir novamente pelo front-end em duas etapas.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-36.sql`.
+- Teste de fumaça reforçado para impedir retorno do padrão `delete` + `insert` em `tab_account_items`.

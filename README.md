@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.35-fase-50-revisao-schema-e-kits`
+`6.0.36-fase-50-comandas-transacionais`
 
 ## Revisão final
 
@@ -105,11 +105,11 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-32.sql`.
 
 
-## Revisão 6.0.35 — revisão total do script final
+## Revisão 6.0.36 — revisão total do script final
 
 - Corrigida a função `apply_product_stock_deltas` para operar em modo tudo-ou-nada: se um item do pedido falhar por falta de estoque, nenhum produto do pedido tem estoque baixado.
 - Corrigida edição de produto para não sobrescrever estoque antigo junto com nome/preço/categoria. Quando o estoque muda na edição, o app consulta o saldo atual no Supabase e aplica apenas o delta atômico.
-- Adicionada migração obrigatória `supabase/migracao-final-producao-6-0-35.sql`.
+- Adicionada migração obrigatória `supabase/migracao-final-producao-6-0-36.sql`.
 - Reforçados testes de fumaça para bloquear retorno de baixa parcial e gravação direta de estoque em edição.
 
 ## Revisão 6.0.32 — revisão completa do script
@@ -119,8 +119,14 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 - Ajuste manual de estoque passou a usar a função atômica `apply_product_stock_deltas`, removendo gravação direta do saldo final em `products.stock`.
 - Teste de fumaça reforçado para impedir retorno desses problemas.
 
-## Revisão 6.0.35 — schema completo e kits transacionais
+## Revisão 6.0.36 — schema completo e kits transacionais
 
 - Migração final reforça colunas de tabelas antigas, não apenas cria tabelas novas.
 - Edição de kits usa `replace_kit_items` para evitar itens apagados sem reposição em falha de INSERT.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-35.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-36.sql`.
+
+## Revisão 6.0.36 — comandas transacionais
+
+- Itens de comanda/fiado agora são substituídos pela função SQL `replace_tab_account_items`.
+- Isso evita perder itens caso a atualização da comanda falhe entre apagar os itens antigos e gravar os novos.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-36.sql`.

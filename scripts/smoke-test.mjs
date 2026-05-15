@@ -50,8 +50,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.35-fase-50-revisao-schema-e-kits"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-35-fase-50-revisao-schema-e-kits-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.36-fase-50-comandas-transacionais"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-36-fase-50-comandas-transacionais-sem-cache/);
   assert.match(serviceWorkerSource, /cache: "no-store"/);
   assert.doesNotMatch(serviceWorkerSource, /cache\.addAll|caches\.match|cache\.put/);
   assert.ok(appSource.includes("restoreProductInSupabase"), "recadastro de produto excluído precisa reativar por ID, não atualizar todos por código de barras");
@@ -60,7 +60,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-35.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-36.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -89,6 +89,9 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes('supabase.rpc("replace_kit_items"'), "edição de kit precisa substituir itens por função SQL transacional, não só no estado da tela");
   assert.ok(appSource.includes("Kit atualizado e sincronizado no Supabase."), "edição de kit precisa confirmar sincronização real");
   assert.match(stockMigrationSource, /create or replace function replace_kit_items/i, "migração final precisa criar função transacional para substituir itens de kit");
+  assert.match(stockMigrationSource, /create or replace function replace_tab_account_items/i, "migração final precisa criar função transacional para substituir itens de comanda");
+  assert.ok(readFileSync(new URL("../src/services/supabaseTabs.js", import.meta.url), "utf8").includes('supabase.rpc("replace_tab_account_items"'), "itens de comanda precisam ser substituídos via função SQL transacional");
+  assert.doesNotMatch(readFileSync(new URL("../src/services/supabaseTabs.js", import.meta.url), "utf8"), /from\("tab_account_items"\)\.delete\(\)[\s\S]*insertWithSchemaRetry\("tab_account_items"/, "comandas não podem apagar e inserir itens pelo front-end em duas etapas");
   assert.match(stockMigrationSource, /alter table orders add column if not exists payment_status/i, "migração final precisa reforçar colunas de orders em bancos antigos");
   assert.match(stockMigrationSource, /alter table order_items add column if not exists is_kit/i, "migração final precisa reforçar colunas de order_items em bancos antigos");
   assert.doesNotMatch(appSource, /restoreProductByBarcodeInSupabase|updateWithFilterSchemaRetry\("products"/, "não pode reativar produto por filtro amplo de código de barras");
@@ -164,7 +167,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-35.sql",
+    "supabase/migracao-final-producao-6-0-36.sql",
   ];
   for (const file of requiredFiles) {
     assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), true, `Arquivo ausente: ${file}`);

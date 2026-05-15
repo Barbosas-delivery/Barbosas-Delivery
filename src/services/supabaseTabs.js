@@ -108,17 +108,17 @@ export async function persistTabAccountInSupabase(tab, status = "open", options 
     if (updateError) return { error: updateError };
   }
 
-  const { error: deleteItemsError } = await supabase.from("tab_account_items").delete().eq("tab_account_id", tab.id);
-  if (deleteItemsError && !String(deleteItemsError.message || "").toLowerCase().includes("permission")) {
-    console.warn("Itens antigos da comanda não removidos:", deleteItemsError);
-  }
-
   const itemsPayload = buildTabItemsPayload(tab);
-  if (itemsPayload.length) {
-    const { error: insertItemsError } = await insertWithSchemaRetry("tab_account_items", itemsPayload, false);
-    if (insertItemsError) {
-      return { error: { ...insertItemsError, message: insertItemsError.message || "Comanda salva, mas itens não foram salvos em tab_account_items." } };
-    }
+  const { data: replaceItemsResult, error: replaceItemsError } = await supabase.rpc("replace_tab_account_items", {
+    p_tab_account_id: tab.id,
+    p_items: itemsPayload,
+  });
+
+  if (replaceItemsError || replaceItemsResult?.success === false) {
+    const reason = replaceItemsError?.message || replaceItemsResult?.error || "verifique a função replace_tab_account_items";
+    return {
+      error: new Error(`Comanda salva parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-36.sql.`),
+    };
   }
 
   return { error: null };

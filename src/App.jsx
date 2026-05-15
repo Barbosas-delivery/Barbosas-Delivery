@@ -2284,7 +2284,7 @@ function App() {
     if (replaceItemsError || replaceItemsResult?.success === false) {
       const reason = replaceItemsError?.message || replaceItemsResult?.error || "verifique a função replace_kit_items";
       console.error("Erro ao substituir itens do kit de forma transacional:", replaceItemsError || replaceItemsResult);
-      return setLastAction(`Kit salvo parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-35.sql.`);
+      return setLastAction(`Kit salvo parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-36.sql.`);
     }
 
     setKits((previousKits) => previousKits.map((item) => (item.id === id ? { ...kit, items: normalizedItems } : item)));
