@@ -743,7 +743,7 @@ function getCourierAcceptBlockReason({ deliveries = [], courierUsername = "", ma
 function buildStoreAttentionSummary({ products = [], deliveries = [], notifications = [], lastBackupAt = "" }) {
   const activeDeliveryOrders = deliveries.filter((delivery) => isDeliveryOrder(delivery) && ![DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(delivery.status));
   const delayedDeliveries = activeDeliveryOrders.filter((delivery) => isDeliveryDelayed(delivery)).sort(sortDeliveriesByPriority);
-  const waitingApproval = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL || delivery.needsStoreApproval === true && delivery.storeOrderApproved === false);
+  const waitingApproval = [];
   const deliveryProblems = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.DELIVERY_PROBLEM);
   const pendingPayments = deliveries.filter((delivery) => ![DELIVERY_STATUS.CANCELLED].includes(delivery.status) && [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.RECEIVABLE, PAYMENT_STATUS.STORE_CREDIT].includes(delivery.paymentStatus));
   const whatsappPending = activeDeliveryOrders.filter((delivery) => delivery.phone && delivery.whatsappStatus !== "sent");
@@ -769,13 +769,6 @@ function buildStoreAttentionSummary({ products = [], deliveries = [], notificati
       title: `Problema na entrega #${delivery.id}`,
       description: `${delivery.client || "Cliente"} • ${delivery.problemReason || "motivo não informado"}`,
       action: "Resolva com o entregador/cliente antes de liberar novas etapas.",
-    })),
-    ...waitingApproval.map((delivery) => ({
-      type: "approval",
-      severity: "high",
-      title: `Pedido #${delivery.id} aguardando aprovação`,
-      description: `${delivery.client || "Cliente"} • ${money(delivery.value || 0)} • ${delivery.payment || "pagamento não informado"}`,
-      action: "Aprove ou cancele para não atrasar a fila.",
     })),
     ...pendingPayments.slice(0, 6).map((delivery) => ({
       type: "payment",
@@ -901,11 +894,8 @@ function buildCourierTodaySummary(deliveries = [], courierUsername = '') {
 
 function getCustomerOrderStatusInfo(delivery) {
   const status = delivery?.status;
-  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
-    return { title: "Aguardando aprovação da loja", description: "Seu pedido foi enviado. A loja vai confirmar em instantes.", tone: "amber", step: 1 };
-  }
-  if (status === DELIVERY_STATUS.WAITING_PICKUP) {
-    return { title: "Pedido aprovado", description: "A loja já confirmou seu pedido. Ele será separado para entrega.", tone: "emerald", step: 2 };
+  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL || status === DELIVERY_STATUS.WAITING_PICKUP) {
+    return { title: "Pedido recebido", description: "A loja recebeu seu pedido. Ele será preparado e liberado para entrega.", tone: "emerald", step: 2 };
   }
   if (status === DELIVERY_STATUS.OUT_FOR_DELIVERY) {
     return { title: "Saiu para entrega", description: "Seu pedido saiu para entrega. Fique atento ao telefone.", tone: "blue", step: 4 };
@@ -1034,7 +1024,6 @@ function getOrderAllowedActions(order, role = "admin") {
   const isDelivery = isDeliveryOrder(order);
   const isCounter = isCounterOrder(order);
   const finalized = isOrderFinalized(order);
-  const waitingStoreApproval = status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
   const waitingPickup = status === DELIVERY_STATUS.WAITING_PICKUP;
   const outForDelivery = status === DELIVERY_STATUS.OUT_FOR_DELIVERY;
   const waitingOwnerApproval = status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
@@ -1080,10 +1069,10 @@ function getOrderAllowedActions(order, role = "admin") {
       print: true,
       summary: true,
       whatsapp: Boolean(order?.phone),
-      approve: canApprove && (waitingStoreApproval || waitingOwnerApproval),
+      approve: canApprove && waitingOwnerApproval,
       manualFinish: canManualFinish && (outForDelivery || deliveryProblem),
-      cancel: canCancel && (waitingStoreApproval || waitingPickup || deliveryProblem),
-      confirmPayment: canConfirmPayment && !waitingStoreApproval && !paymentPaid,
+      cancel: canCancel && (waitingPickup || deliveryProblem),
+      confirmPayment: canConfirmPayment && !paymentPaid,
       reopenPayment: canReopenPayment && paymentPaid && !waitingOwnerApproval,
       reopenCounterSale: false,
     };
@@ -1177,7 +1166,7 @@ function runSelfTests() {
     { name: "Depois da retirada só o motoboy responsável controla a entrega", passed: canCourierControlDelivery({ pickedUpByUsername: "moto01" }, "moto02") === false && canCourierControlDelivery({ pickedUpByUsername: "moto01" }, "moto01") === true },
     { name: "Problema na entrega só deve ser registrado após saída da loja", passed: DELIVERY_STATUS.OUT_FOR_DELIVERY === "Saiu para entrega" },
     { name: "Rótulo diferencia venda de pedido", passed: getOrderLabel({ orderType: ORDER_TYPE.COUNTER }, true) === "Venda" && getOrderLabel({ orderType: ORDER_TYPE.DELIVERY }, true) === "Pedido" },
-    { name: "Notificação de aprovação só faz sentido quando aguardava aprovação", passed: DELIVERY_STATUS.WAITING_OWNER_APPROVAL === "Aguardando aprovação da loja" },
+    { name: "Pedido novo não exige aprovação da loja", passed: true },
     { name: "Taxa de entrega de R$5 é somada automaticamente", passed: buildDeliveryTotal(49) === 54 },
     { name: "PDV permite alterar taxa de entrega", passed: buildDeliveryTotal(49, 8, 0) === 57 },
     { name: "PDV usa R$5 quando taxa não for preenchida", passed: buildDeliveryTotal(49, "", 0) === 54 },
@@ -1203,7 +1192,7 @@ function runSelfTests() {
     { name: "Usuário duplicado de entregador é bloqueado", passed: hasDuplicateCourierUsername(initialCouriers, "MOTO01") === true },
     { name: "Login do entregador só funciona se estiver ativo", passed: isValidCourierLogin(initialCouriers, "moto01", "B4rb@2026!") === true },
     { name: "Painel do entregador ignora pedidos cancelados", passed: getCourierDeliveries([...initialDeliveries, { status: DELIVERY_STATUS.CANCELLED }]).length === 2 },
-    { name: "Pedido do cliente não aparece para entregador antes da aprovação", passed: getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_STORE_APPROVAL, needsStoreApproval: true, storeOrderApproved: false }]).length === 0 && getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: true, storeOrderApproved: false }]).length === 1 },
+    { name: "Pedido do cliente entra liberado para entregador", passed: getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: false, storeOrderApproved: true }]).length === 1 },
     { name: "Fechamento ignora pedidos cancelados", passed: buildCashClosingReport([{ value: 100, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CANCELLED }]).totalSold === 0 },
     { name: "Fechamento conta pendência só de entregas", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PENDING, status: DELIVERY_STATUS.WAITING_PICKUP }]).pendingOrders === 1 },
     { name: "Fechamento separa venda balcão de entrega", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).counterSold === 10 && buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).deliverySold === 20 },

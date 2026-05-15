@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.37-fase-50-corrige-imports-vercel";
+export const APP_VERSION = "6.0.38-fase-51-pedido-direto-sem-aprovacao";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
@@ -6,7 +6,7 @@ export const COURIER_DELIVERY_SHARE = 0.7;
 export const STORE_DELIVERY_SHARE = 0.3;
 
 export const DELIVERY_STATUS = {
-  WAITING_STORE_APPROVAL: "Aguardando aprovação do pedido",
+  WAITING_STORE_APPROVAL: "Aguardando aprovação do pedido", // legado: pedidos novos entram direto como Aguardando retirada
   WAITING_PICKUP: "Aguardando retirada",
   OUT_FOR_DELIVERY: "Saiu para entrega",
   WAITING_OWNER_APPROVAL: "Aguardando aprovação da loja",

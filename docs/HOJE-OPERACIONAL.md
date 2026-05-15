@@ -19,7 +19,7 @@ Dar uma visão imediata da operação do dia, sem precisar entrar em várias aba
 
 O bloco destaca automaticamente:
 
-- Pedidos aguardando aprovação.
+- Pedidos recebidos entram direto na operação, sem aprovação manual.
 - Entregas atrasadas.
 - Pagamentos pendentes.
 - Produtos zerados.

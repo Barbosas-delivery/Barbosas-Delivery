@@ -10,7 +10,7 @@ O bloco verifica quatro pontos principais:
 
 - **Entregas ativas**: mostra se ainda existe entrega em andamento.
 - **Pagamentos pendentes**: mostra pedidos ainda pendentes, a receber ou fiados.
-- **Pedidos aguardando aprovação**: mostra pedidos que ainda precisam de confirmação da loja.
+- **Pedidos recebidos**: pedidos do aplicativo entram direto na operação, sem etapa de aprovação manual.
 - **Backup diário**: mostra se o backup do dia ainda não foi baixado neste navegador.
 
 ## Status do fechamento

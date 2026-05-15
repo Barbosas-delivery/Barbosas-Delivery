@@ -2988,11 +2988,11 @@ function App() {
         whatsappOpenedAt: "",
         whatsappSentAt: "",
         whatsappMessage: "",
-        status: DELIVERY_STATUS.WAITING_STORE_APPROVAL,
+        status: DELIVERY_STATUS.WAITING_PICKUP,
         origin: "customer",
-        needsStoreApproval: true,
-        storeOrderApproved: false,
-        approvedAt: "",
+        needsStoreApproval: false,
+        storeOrderApproved: true,
+        approvedAt: new Date().toISOString(),
         reference: customerForm.reference,
         deliveryDistrict: String(customerForm.district || "").trim(),
         deliveryZone: customerDeliveryZone?.district || "",
@@ -3030,7 +3030,8 @@ function App() {
       setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
       await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
       addNotification("novo_pedido", "Novo pedido recebido", `${normalizedCustomerName} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
-      addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${savedDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
+      addNotification("pedido_recebido", "Pedido recebido", `Pedido #${savedDelivery.id} recebido pela loja e enviado para preparo.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
+      addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${savedDelivery.id} recebido e disponível para retirada.`, "courier", savedDelivery.id);
       if (appliedCustomerCoupon) await registerCouponUsage(appliedCustomerCoupon);
       setCustomerCart([]);
       setAppliedCustomerCoupon(null);
@@ -3038,7 +3039,7 @@ function App() {
       setShowCustomerCheckout(false);
       setCustomerChangeFor("");
       setCustomerOrderConfirmation(buildOrderConfirmation(savedDelivery));
-      setCustomerError("Pedido enviado para a loja. Aguarde a confirmação.");
+      setCustomerError("Pedido recebido pela loja e enviado para preparo.");
     } finally {
       setCustomerSubmitting(false);
     }
@@ -3641,7 +3642,7 @@ function App() {
     if (storeSettings.autoPrintCustomerOrders === false) return false;
     if (!delivery || !isDeliveryOrder(delivery)) return false;
     if (String(delivery.id || "") === "") return false;
-    if (delivery.status !== DELIVERY_STATUS.WAITING_STORE_APPROVAL) return false;
+    if (delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return false;
     if (delivery.origin !== "customer") return false;
     if (autoPrintedDeliveryIdsRef.current.has(String(delivery.id))) return false;
     return true;
@@ -3915,7 +3916,7 @@ function App() {
 
   async function markCourierPickedUp(id) {
     const delivery = deliveries.find((item) => item.id === id);
-    if (!delivery || !isDeliveryOrder(delivery) || needsStoreApprovalBeforeCourier(delivery) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return setLastAction("Essa entrega não está disponível para retirada ou ainda precisa ser aprovada pela loja.");
+    if (!delivery || !isDeliveryOrder(delivery) || delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return setLastAction("Essa entrega não está disponível para retirada.");
     const acceptBlockReason = getCourierAcceptBlockReason({ deliveries, courierUsername: loggedCourier?.username, maxActiveDeliveries: storeSettings.maxActiveDeliveriesPerCourier });
     if (acceptBlockReason) return setLastAction(acceptBlockReason);
     const rpcResult = await supabase.rpc("accept_delivery_order", { p_order_id: id, p_courier_username: loggedCourier?.username || "", p_courier_name: loggedCourier?.name || "" });
@@ -3991,7 +3992,6 @@ function App() {
   async function updateDeliveryStatus(id, status) {
     const deliveryToUpdate = deliveries.find((item) => item.id === id);
     if (!deliveryToUpdate || !isDeliveryOrder(deliveryToUpdate)) return setLastAction("Entrega não encontrada.");
-    if (needsStoreApprovalBeforeCourier(deliveryToUpdate)) return setLastAction("A loja precisa aprovar o pedido antes de liberar qualquer status.");
     if (deliveryToUpdate.status === DELIVERY_STATUS.CANCELLED || deliveryToUpdate.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return setLastAction("Essa entrega não pode mais ser alterada.");
     if (status === DELIVERY_STATUS.DELIVERY_PROBLEM && deliveryToUpdate.status !== DELIVERY_STATUS.OUT_FOR_DELIVERY) return setLastAction("Problema na entrega só pode ser registrado depois da saída da loja.");
     if (loggedCourier && !canCourierControlDelivery(deliveryToUpdate, loggedCourier.username)) return setLastAction("Essa entrega está vinculada a outro entregador.");
@@ -4030,7 +4030,6 @@ function App() {
     if (currentDelivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return setLastAction("Pedido já está entregue e confirmado.");
 
     if (currentDelivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
-      if (!isCashOpen) return setLastAction("Abra o caixa antes de aprovar pedidos recebidos pelo cliente.");
       const approvedAt = new Date().toISOString();
       const dbPatch = {
         status: DELIVERY_STATUS.WAITING_PICKUP,
@@ -4059,7 +4058,7 @@ function App() {
       addNotification("pedido_aprovado", "Pedido aprovado", `Pedido #${id} aprovado pela loja. Em breve um entregador fará a retirada.`, "customer", id, { customerPhone: currentDelivery.phone });
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${id} aprovado pela loja e liberado para retirada.`, "courier", id);
       await auditAction("approve_customer_order", "orders", id, dbPatch, currentDelivery);
-      setLastAction(`Pedido #${id} aprovado e liberado para os entregadores.`);
+      setLastAction(`Pedido legado #${id} liberado para os entregadores.`);
       await loadDeliveries();
       return;
     }
@@ -4107,7 +4106,6 @@ function App() {
     const delivery = deliveries.find((item) => String(item.id) === paymentKey);
     if (!delivery) return setLastAction("Pedido ou venda não encontrado.");
     const orderLabel = getOrderLabel(delivery);
-    if (delivery?.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return setLastAction("Aprove o pedido antes de confirmar recebimento.");
     if (delivery?.status === DELIVERY_STATUS.CANCELLED) return setLastAction(`${orderLabel === "venda" ? "Venda cancelada" : "Pedido cancelado"} não pode ter pagamento alterado.`);
     if (delivery?.paymentStatus === paymentStatus) return setLastAction(`Pagamento da ${orderLabel} #${id} já está como: ${paymentStatus}.`);
 

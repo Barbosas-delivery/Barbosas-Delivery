@@ -135,3 +135,13 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 ### Versão 6.0.37-fase-50-corrige-imports-vercel
 
 Correção de deploy na Vercel: imports de componentes com extensão explícita `.jsx` e confirmação da pasta `src/components`.
+
+## Fase 51 — Pedido direto sem aprovação
+
+Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
+
+- Pedido feito pelo aplicativo do cliente entra direto como **Aguardando retirada**.
+- Removida a necessidade de aprovação manual da loja para pedido novo.
+- Estoque continua sendo reservado antes de salvar o pedido.
+- Pedidos antigos aguardando aprovação são liberados pela migração final.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-38.sql`.

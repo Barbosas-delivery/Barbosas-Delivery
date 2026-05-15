@@ -19,29 +19,10 @@ export function isCounterOrder(order) {
 }
 
 export function needsStoreApprovalBeforeCourier(order) {
-  if (!isDeliveryOrder(order)) return false;
-
-  // A única situação que deve bloquear o painel do entregador é o pedido ainda
-  // estar explicitamente aguardando aprovação da loja. Depois que a loja muda
-  // o status para "Aguardando retirada", o pedido precisa aparecer para os
-  // entregadores mesmo se colunas antigas como store_order_approved não existirem
-  // ou não tiverem sido gravadas no Supabase.
-  if (order.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return true;
-
-  const releasedStatuses = [
-    DELIVERY_STATUS.WAITING_PICKUP,
-    DELIVERY_STATUS.OUT_FOR_DELIVERY,
-    DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
-    DELIVERY_STATUS.DELIVERY_PROBLEM,
-    DELIVERY_STATUS.CONFIRMED_DELIVERED,
-  ];
-
-  if (releasedStatuses.includes(order.status)) return false;
-
-  if (order.needsStoreApproval === true && order.storeOrderApproved !== true) return true;
-  if (order.origin === "customer" && order.storeOrderApproved !== true && !order.approvedAt) return true;
-  if (String(order.notes || "").toLowerCase().includes("pedido enviado pelo cliente") && order.storeOrderApproved !== true && !order.approvedAt) return true;
-  return false;
+  // Fase 51: pedidos do aplicativo não passam mais por aprovação da loja.
+  // Registros antigos ainda podem trazer flags de aprovação, mas não devem
+  // bloquear painel da loja, entregador, pagamento ou impressão.
+  return !isDeliveryOrder(order) ? false : false;
 }
 
 export function canCourierControlDelivery(delivery, courierUsername) {
@@ -86,7 +67,6 @@ export function calculateStoreFee(deliveryFee = DELIVERY_FEE, motorcycleType = "
 export function isActiveDeliveryForEstimate(delivery) {
   if (!isDeliveryOrder(delivery)) return false;
   return [
-    DELIVERY_STATUS.WAITING_STORE_APPROVAL,
     DELIVERY_STATUS.WAITING_PICKUP,
     DELIVERY_STATUS.OUT_FOR_DELIVERY,
     DELIVERY_STATUS.WAITING_OWNER_APPROVAL,

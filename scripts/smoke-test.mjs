@@ -50,17 +50,21 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.37-fase-50-corrige-imports-vercel"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-37-fase-50-corrige-imports-vercel-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.38-fase-51-pedido-direto-sem-aprovacao"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-38-fase-51-pedido-direto-sem-aprovacao-sem-cache/);
   assert.match(serviceWorkerSource, /cache: "no-store"/);
   assert.doesNotMatch(serviceWorkerSource, /cache\.addAll|caches\.match|cache\.put/);
+
+  assert.ok(appSource.includes('status: DELIVERY_STATUS.WAITING_PICKUP,\n        origin: "customer",\n        needsStoreApproval: false'), "pedido do app deve nascer direto como aguardando retirada, sem aprovação");
+  assert.ok(appSource.includes('Pedido recebido pela loja e enviado para preparo.'), "mensagem do cliente não deve pedir aprovação manual");
+  assert.doesNotMatch(appSource, /A loja vai aprovar e liberar para entrega|Pedido enviado para a loja\. Aguarde a confirmação|Aprove o pedido antes de confirmar recebimento/, "fluxo novo não deve orientar aprovação manual do pedido");
   assert.ok(appSource.includes("restoreProductInSupabase"), "recadastro de produto excluído precisa reativar por ID, não atualizar todos por código de barras");
   assert.ok(appSource.includes("makeUniqueNumericId()"), "IDs críticos não devem depender só de Date.now() em produção");
   assert.ok(appSource.includes("buildStockDeltasFromItems"), "persistência de estoque deve calcular deltas dos produtos alterados");
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-36.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-38.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -167,7 +171,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-36.sql",
+    "supabase/migracao-final-producao-6-0-38.sql",
   ];
   for (const file of requiredFiles) {
     assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), true, `Arquivo ausente: ${file}`);

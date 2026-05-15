@@ -20,16 +20,16 @@ Ele consolida as colunas adicionadas nas fases anteriores para evitar que algum 
 - WhatsApp do pedido.
 - Notificações com leitura, resolução, cliente e entregador específico.
 - Pagamentos detalhados.
-- Campos extras de status de pedido, aprovação, cancelamento e finalização.
+- Campos extras de status de pedido, cancelamento e finalização. A aprovação manual do pedido foi removida na Fase 51.
 
 O script usa `IF NOT EXISTS`, então pode ser rodado mais de uma vez sem recriar colunas já existentes.
 
 ## Migração final de produção
 
-Para a versão 6.0.36, rode também o arquivo:
+Para a versão 6.0.38 ou superior, rode também o arquivo mais recente:
 
 ```sql
-supabase/migracao-final-producao-6-0-36.sql
+supabase/migracao-final-producao-6-0-38.sql
 ```
 
 Ele reforça as tabelas principais e cria/atualiza as funções:

@@ -39,8 +39,7 @@ function getOrderTimeValue(order = {}) {
 
 function getCustomerOrderStatusInfo(delivery) {
   const status = delivery?.status;
-  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) return { title: "Aguardando aprovação da loja", description: "Seu pedido foi enviado. A loja vai confirmar em instantes.", tone: "amber", step: 1 };
-  if (status === DELIVERY_STATUS.WAITING_PICKUP) return { title: "Pedido aprovado", description: "A loja já confirmou seu pedido. Ele será separado para entrega.", tone: "emerald", step: 2 };
+  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL || status === DELIVERY_STATUS.WAITING_PICKUP) return { title: "Pedido recebido", description: "A loja recebeu seu pedido. Ele será preparado e liberado para entrega.", tone: "emerald", step: 2 };
   if (status === DELIVERY_STATUS.OUT_FOR_DELIVERY) return { title: "Saiu para entrega", description: "Seu pedido saiu para entrega. Fique atento ao telefone.", tone: "blue", step: 4 };
   if (status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL) return { title: "Entrega em confirmação", description: "O entregador informou a entrega. A loja está conferindo a finalização.", tone: "blue", step: 4 };
   if (status === DELIVERY_STATUS.CONFIRMED_DELIVERED) return { title: "Pedido entregue", description: "Pedido entregue. Obrigado pela preferência!", tone: "emerald", step: 5, final: true };
@@ -225,7 +224,7 @@ function NotificationPanel({ title, notifications, onMarkRead }) {
 
 function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent, onOpenStatusWhatsApp, onCopyStatusWhatsApp }) {
   const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
-  const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
+  const isWaitingOrderApproval = false;
   const isCounterSale = isCounterOrder(delivery);
   const actions = getOrderAllowedActions(delivery, storeRole);
   const isFinalized = isOrderFinalized(delivery);
@@ -242,7 +241,7 @@ function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing 
           {delivery.phone && <p className="text-sm text-zinc-700 flex items-center gap-1"><Icon name="phone" /> {formatBrazilMobilePhone(delivery.phone)}</p>}
           <p className="text-sm text-zinc-700 flex items-center gap-1"><Icon name="pin" /> {delivery.address}</p>
           {delivery.reference && <p className="text-sm text-zinc-500">Referência: {delivery.reference}</p>}
-          <p className="text-sm text-zinc-500">{isCounterOrder(delivery) ? "Tipo: venda no balcão" : isWaitingOrderApproval ? "Pedido aguardando aprovação da loja antes de ir aos entregadores" : isFinalized ? "Pedido finalizado: somente consulta e impressão" : "Disponível para: todos os motoboys ativos"}</p>
+          <p className="text-sm text-zinc-500">{isCounterOrder(delivery) ? "Tipo: venda no balcão" : isWaitingOrderApproval ? "Pedido recebido e disponível para operação" : isFinalized ? "Pedido finalizado: somente consulta e impressão" : "Disponível para: todos os motoboys ativos"}</p>
           {isDeliveryOrder(delivery) ? (
             <p className="text-sm text-zinc-500">Taxa entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))} • Motoboy: {money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType))} • Loja: {money(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType))}</p>
           ) : (
@@ -273,12 +272,12 @@ function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing 
                 <div className="border-t border-emerald-100 pt-2">
                   <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-800">Mensagens rápidas por status</p>
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Aprovado</Button>
+                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Recebido</Button>
                     <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "outForDelivery")} variant="secondary" className="rounded-2xl bg-white text-xs">Saiu para entrega</Button>
                     <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "delivered")} variant="secondary" className="rounded-2xl bg-white text-xs">Entregue</Button>
                     <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "cancelled")} variant="secondary" className="rounded-2xl bg-white text-xs">Cancelado</Button>
                     <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "paymentReminder")} variant="secondary" className="rounded-2xl bg-white text-xs">Cobrar pagamento</Button>
-                    <Button onClick={() => onCopyStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Copiar aprovado</Button>
+                    <Button onClick={() => onCopyStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Copiar recebido</Button>
                   </div>
                 </div>
               )}
@@ -293,7 +292,7 @@ function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing 
             {actions.print && <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>}
             {actions.summary && <Button onClick={showSummary} variant="secondary" className="rounded-2xl">Ver resumo</Button>}
             {actions.reopenCounterSale && <Button onClick={() => onReopenCounterSale?.(delivery.id)} variant="secondary" className="rounded-2xl text-amber-700">Reabrir no PDV</Button>}
-            {actions.approve && <Button onClick={() => onApprove(delivery.id)} disabled={(!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">{isWaitingOrderApproval ? "Aprovar pedido" : "Aprovar entrega"}</Button>}
+            {actions.approve && isWaitingDeliveryApproval && <Button onClick={() => onApprove(delivery.id)} disabled={delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">Aprovar entrega</Button>}
             {actions.confirmPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>}
             {actions.reopenPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">Reabrir recebimento</Button>}
             {actions.cancel && <Button onClick={() => onCancel(delivery.id)} variant="secondary" className="rounded-2xl text-red-600">{isCounterSale ? "Cancelar venda" : "Cancelar pedido"}</Button>}
@@ -552,10 +551,8 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
   const todayActiveDeliveries = deliveries.filter((delivery) => !isCounterOrder(delivery) && !isOrderFinalized(delivery));
   const todayCounterSales = deliveries.filter((delivery) => isCounterOrder(delivery));
   const todayPendingPayments = deliveries.filter((delivery) => !isOrderFinalized(delivery) && [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.RECEIVABLE, PAYMENT_STATUS.STORE_CREDIT].includes(delivery.paymentStatus));
-  const waitingStoreApproval = deliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL);
   const delayedDeliveries = Array.isArray(attentionSummary.delayedDeliveries) ? attentionSummary.delayedDeliveries : [];
   const todayActionItems = [
-    waitingStoreApproval.length > 0 && { title: "Aprovar pedidos", value: waitingStoreApproval.length, description: "Pedidos aguardando confirmação da loja." },
     delayedDeliveries.length > 0 && { title: "Resolver atrasos", value: delayedDeliveries.length, description: "Entregas passaram do limite operacional." },
     todayPendingPayments.length > 0 && { title: "Receber pagamentos", value: todayPendingPayments.length, description: "Pedidos ainda pendentes, a receber ou fiados." },
     criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length > 0 && { title: "Repor estoque zerado", value: criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length, description: "Produtos sem estoque disponível." },
@@ -573,12 +570,6 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
       pending: todayPendingPayments.length,
       okText: "Nenhum pagamento pendente",
       pendingText: `${todayPendingPayments.length} pagamento${todayPendingPayments.length === 1 ? "" : "s"} para conferir`,
-    },
-    {
-      title: "Pedidos aguardando aprovação",
-      pending: waitingStoreApproval.length,
-      okText: "Nenhum pedido aguardando",
-      pendingText: `${waitingStoreApproval.length} pedido${waitingStoreApproval.length === 1 ? "" : "s"} aguardando aprovação`,
     },
     {
       title: "Backup diário",
@@ -778,7 +769,7 @@ function DashboardTab({ dayReport, selfTests, passedTests, products, clients, co
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <Metric title="Aguardando retirada" value={dayReport.waitingPickup} icon="calendar" />
           <Metric title="Saiu para entrega" value={dayReport.outForDelivery} icon="truck" />
-          <Metric title="Aguardando aprovação" value={dayReport.waitingApproval} icon="alert" />
+          <Metric title="Entregas em conferência" value={dayReport.waitingApproval} icon="alert" />
           <Metric title="Confirmadas" value={dayReport.delivered} icon="check" />
           <Metric title="Problemas" value={dayReport.deliveryProblem} icon="alert" />
           <Metric title="Cancelados" value={dayReport.cancelled} icon="alert" />

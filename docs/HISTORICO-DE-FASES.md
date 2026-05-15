@@ -346,3 +346,14 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 - Corrigidos imports do `App.jsx` para usar extensão `.jsx` explicitamente.
 - Confirmada inclusão dos arquivos `src/components/ui.jsx` e `src/components/OperationalPanels.jsx`.
 - Build validado localmente para evitar erro de módulo não encontrado na Vercel.
+
+## Fase 51 — Pedido direto sem aprovação
+
+Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
+
+- Remove a aprovação manual para pedidos feitos pelo aplicativo do cliente.
+- Pedido novo entra direto como **Aguardando retirada**.
+- Estoque é reservado antes de salvar o pedido, mantendo a proteção das fases anteriores.
+- O painel Hoje e o Fechamento do Dia deixam de cobrar pedidos aguardando aprovação.
+- A mensagem do cliente muda para **Pedido recebido**.
+- Pedidos legados ainda em aprovação são convertidos pela migração `supabase/migracao-final-producao-6-0-38.sql`.

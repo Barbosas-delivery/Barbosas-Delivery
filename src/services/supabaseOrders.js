@@ -27,8 +27,8 @@ export async function fetchOrderPaymentsFromSupabase() {
 }
 
 export function mapOrderFromDatabase(order, items = []) {
-  const orderStatus = order.status || DELIVERY_STATUS.WAITING_PICKUP;
-  const isReleasedToCourier = orderStatus !== DELIVERY_STATUS.WAITING_STORE_APPROVAL;
+  const rawOrderStatus = order.status || DELIVERY_STATUS.WAITING_PICKUP;
+  const orderStatus = rawOrderStatus === DELIVERY_STATUS.WAITING_STORE_APPROVAL ? DELIVERY_STATUS.WAITING_PICKUP : rawOrderStatus;
   return {
     id: order.id,
     orderType: order.order_type || ORDER_TYPE.DELIVERY,
@@ -60,9 +60,9 @@ export function mapOrderFromDatabase(order, items = []) {
     whatsappMessage: order.whatsapp_message || "",
     status: orderStatus,
     origin: order.origin || "store",
-    needsStoreApproval: orderStatus === DELIVERY_STATUS.WAITING_STORE_APPROVAL || (order.needs_store_approval === true && !isReleasedToCourier),
-    storeOrderApproved: order.store_order_approved === true || isReleasedToCourier,
-    approvedAt: order.approved_at || (isReleasedToCourier ? order.updated_at || order.created_at || "" : ""),
+    needsStoreApproval: false,
+    storeOrderApproved: true,
+    approvedAt: order.approved_at || order.updated_at || order.created_at || "",
     cashSessionId: order.cash_session_id || "",
     originType: order.origin_type || order.origin || "",
     tabAccountId: order.tab_account_id || null,
@@ -140,9 +140,9 @@ export function mapOrderToDatabase(delivery) {
     whatsapp_message: delivery.whatsappMessage || "",
     status: delivery.status || DELIVERY_STATUS.WAITING_PICKUP,
     origin: delivery.origin || "store",
-    needs_store_approval: delivery.needsStoreApproval === true,
-    store_order_approved: delivery.storeOrderApproved === true,
-    approved_at: delivery.approvedAt || null,
+    needs_store_approval: false,
+    store_order_approved: true,
+    approved_at: delivery.approvedAt || delivery.launchedAt || new Date().toISOString(),
     reference: delivery.reference || "",
     delivery_district: delivery.deliveryDistrict || "",
     delivery_zone: delivery.deliveryZone || "",
