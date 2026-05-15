@@ -50,8 +50,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.36-fase-50-comandas-transacionais"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-36-fase-50-comandas-transacionais-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.37-fase-50-corrige-imports-vercel"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-37-fase-50-corrige-imports-vercel-sem-cache/);
   assert.match(serviceWorkerSource, /cache: "no-store"/);
   assert.doesNotMatch(serviceWorkerSource, /cache\.addAll|caches\.match|cache\.put/);
   assert.ok(appSource.includes("restoreProductInSupabase"), "recadastro de produto excluído precisa reativar por ID, não atualizar todos por código de barras");

@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.36-fase-50-comandas-transacionais";
+export const APP_VERSION = "6.0.37-fase-50-corrige-imports-vercel";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

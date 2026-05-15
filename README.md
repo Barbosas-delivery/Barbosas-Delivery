@@ -130,3 +130,8 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 - Itens de comanda/fiado agora são substituídos pela função SQL `replace_tab_account_items`.
 - Isso evita perder itens caso a atualização da comanda falhe entre apagar os itens antigos e gravar os novos.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-36.sql`.
+
+
+### Versão 6.0.37-fase-50-corrige-imports-vercel
+
+Correção de deploy na Vercel: imports de componentes com extensão explícita `.jsx` e confirmação da pasta `src/components`.

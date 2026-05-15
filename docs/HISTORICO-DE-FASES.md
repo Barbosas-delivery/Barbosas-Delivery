@@ -339,3 +339,10 @@ Correção adicional: produtos com `active` nulo/ausente no Supabase agora são 
 - Removido o fluxo perigoso de apagar itens de comanda e inserir novamente pelo front-end em duas etapas.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-36.sql`.
 - Teste de fumaça reforçado para impedir retorno do padrão `delete` + `insert` em `tab_account_items`.
+
+
+## 6.0.37-fase-50-corrige-imports-vercel
+
+- Corrigidos imports do `App.jsx` para usar extensão `.jsx` explicitamente.
+- Confirmada inclusão dos arquivos `src/components/ui.jsx` e `src/components/OperationalPanels.jsx`.
+- Build validado localmente para evitar erro de módulo não encontrado na Vercel.

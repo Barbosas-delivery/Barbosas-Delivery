@@ -200,8 +200,8 @@ import {
 
 import { printThermalHtml as printThermalHtmlBase } from "./utils/printing";
 
-import { Card, CardContent, Button, DarkLoginInput, Icon, StoreLogo, Title, Metric, CardBox, Input, DarkInput, SearchBox } from "./components/ui";
-import { CustomerOrderStatusCard, NotificationPanel, OwnerDeliveryCard, AuditTab, DiagnosticsTab, DashboardTab } from "./components/OperationalPanels";
+import { Card, CardContent, Button, DarkLoginInput, Icon, StoreLogo, Title, Metric, CardBox, Input, DarkInput, SearchBox } from "./components/ui.jsx";
+import { CustomerOrderStatusCard, NotificationPanel, OwnerDeliveryCard, AuditTab, DiagnosticsTab, DashboardTab } from "./components/OperationalPanels.jsx";
 import {
   normalizeCustomerCartItem,
   sanitizeCustomerCart,

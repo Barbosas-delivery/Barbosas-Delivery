@@ -1,4 +1,4 @@
-const CACHE_NAME = "barbosas-delivery-6-0-36-fase-50-comandas-transacionais-sem-cache";
+const CACHE_NAME = "barbosas-delivery-6-0-37-fase-50-corrige-imports-vercel-sem-cache";
 self.__BARBOSAS_DELIVERY_CACHE_POLICY__ = CACHE_NAME;
 
 self.addEventListener("install", (event) => {
