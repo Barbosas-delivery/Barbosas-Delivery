@@ -357,3 +357,15 @@ Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
 - O painel Hoje e o Fechamento do Dia deixam de cobrar pedidos aguardando aprovação.
 - A mensagem do cliente muda para **Pedido recebido**.
 - Pedidos legados ainda em aprovação são convertidos pela migração `supabase/migracao-final-producao-6-0-38.sql`.
+
+
+## Fase 52 — Fila de impressão no Supabase
+
+Versão: `6.0.39-fase-52-fila-impressao-supabase`
+
+- Adicionada tabela `print_jobs` para separar pedido/venda da execução da impressão.
+- Pedido do aplicativo e PDV Entregas criam automaticamente uma via de cozinha e uma via de entrega.
+- PDV Balcão cria automaticamente uma via de balcão.
+- Adicionadas funções SQL para o Electron reservar jobs pendentes, marcar como impresso e registrar falha.
+- Removida a dependência de impressão automática por janela do navegador nos fluxos de criação.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-39.sql`.

@@ -13,6 +13,7 @@ const constantsSource = readFileSync(new URL("../src/constants/appConstants.js",
 const serviceWorkerSource = readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../src/main.jsx", import.meta.url), "utf8");
 const supabaseClientSource = readFileSync(new URL("../src/supabaseClient.js", import.meta.url), "utf8");
+const printJobsServiceSource = readFileSync(new URL("../src/services/supabasePrintJobs.js", import.meta.url), "utf8");
 
 function test(name, fn) {
   try {
@@ -50,13 +51,13 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.38-fase-51-pedido-direto-sem-aprovacao"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-38-fase-51-pedido-direto-sem-aprovacao-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.39-fase-52-fila-impressao-supabase"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-39-fase-52-fila-impressao-sem-cache/);
   assert.match(serviceWorkerSource, /cache: "no-store"/);
   assert.doesNotMatch(serviceWorkerSource, /cache\.addAll|caches\.match|cache\.put/);
 
   assert.ok(appSource.includes('status: DELIVERY_STATUS.WAITING_PICKUP,\n        origin: "customer",\n        needsStoreApproval: false'), "pedido do app deve nascer direto como aguardando retirada, sem aprovação");
-  assert.ok(appSource.includes('Pedido recebido pela loja e enviado para preparo.'), "mensagem do cliente não deve pedir aprovação manual");
+  assert.ok(appSource.includes('Pedido recebido pela loja, enviado para preparo e colocado na fila de impressão.'), "mensagem do cliente não deve pedir aprovação manual");
   assert.doesNotMatch(appSource, /A loja vai aprovar e liberar para entrega|Pedido enviado para a loja\. Aguarde a confirmação|Aprove o pedido antes de confirmar recebimento/, "fluxo novo não deve orientar aprovação manual do pedido");
   assert.ok(appSource.includes("restoreProductInSupabase"), "recadastro de produto excluído precisa reativar por ID, não atualizar todos por código de barras");
   assert.ok(appSource.includes("makeUniqueNumericId()"), "IDs críticos não devem depender só de Date.now() em produção");
@@ -64,7 +65,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-38.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-39.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -98,6 +99,15 @@ test("versão final consistente", () => {
   assert.doesNotMatch(readFileSync(new URL("../src/services/supabaseTabs.js", import.meta.url), "utf8"), /from\("tab_account_items"\)\.delete\(\)[\s\S]*insertWithSchemaRetry\("tab_account_items"/, "comandas não podem apagar e inserir itens pelo front-end em duas etapas");
   assert.match(stockMigrationSource, /alter table orders add column if not exists payment_status/i, "migração final precisa reforçar colunas de orders em bancos antigos");
   assert.match(stockMigrationSource, /alter table order_items add column if not exists is_kit/i, "migração final precisa reforçar colunas de order_items em bancos antigos");
+  assert.match(stockMigrationSource, /create table if not exists print_jobs/i, "migração final precisa criar a fila de impressão");
+  assert.match(stockMigrationSource, /create or replace function claim_pending_print_jobs/i, "migração final precisa permitir o Electron reservar jobs de impressão com segurança");
+  assert.match(stockMigrationSource, /create or replace function mark_print_job_printed/i, "migração final precisa permitir marcar impressão como concluída");
+  assert.match(stockMigrationSource, /create or replace function mark_print_job_failed/i, "migração final precisa registrar falha de impressão");
+  assert.ok(printJobsServiceSource.includes('PRINT_JOB_TYPE.KITCHEN') && printJobsServiceSource.includes('PRINT_JOB_TYPE.DELIVERY') && printJobsServiceSource.includes('PRINT_JOB_TYPE.COUNTER'), "serviço precisa criar vias cozinha, entrega e balcão");
+  assert.ok(appSource.includes("createPrintJobsForOrder(savedDelivery)"), "pedido/venda salvo deve criar jobs de impressão no Supabase");
+  assert.ok(appSource.includes("impressão pendente criada") || appSource.includes("impressões pendentes criadas"), "fluxos de PDV devem informar fila de impressão, não pop-up do navegador");
+  assert.doesNotMatch(appSource, /printDeliveryReceipt\(savedSale|printDeliveryReceipt\(savedDelivery|preOpenedPrintWindow/, "criação de pedido/venda não deve depender de janela de impressão do navegador");
+
   assert.doesNotMatch(appSource, /restoreProductByBarcodeInSupabase|updateWithFilterSchemaRetry\("products"/, "não pode reativar produto por filtro amplo de código de barras");
   assert.ok(supabaseClientSource.includes("channel()"), "cliente Supabase desativado precisa ter channel() para não quebrar sem env");
   assert.ok(supabaseClientSource.includes("removeChannel()"), "cliente Supabase desativado precisa ter removeChannel() para cleanup seguro");
@@ -150,6 +160,8 @@ test("fluxos principais existem no código", () => {
     "Baixar backup diário",
     "isSupabaseConfigured",
     "Cliente Supabase desativado",
+    "print_jobs",
+    "createPrintJobsForOrder",
   ];
   for (const snippet of requiredSnippets) {
     assert.ok(appSource.includes(snippet), `Trecho obrigatório ausente: ${snippet}`);
@@ -171,7 +183,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-38.sql",
+    "supabase/migracao-final-producao-6-0-39.sql",
   ];
   for (const file of requiredFiles) {
     assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), true, `Arquivo ausente: ${file}`);

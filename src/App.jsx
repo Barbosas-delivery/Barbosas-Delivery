@@ -55,6 +55,7 @@ import {
 } from "./services/supabaseCash";
 import { loadTabsAccountsFromSupabase, persistTabAccountInSupabase } from "./services/supabaseTabs";
 import { loadStoreSettingsFromSupabaseService, saveStoreSettingsToSupabaseService } from "./services/supabaseStoreSettings";
+import { createPrintJobsForOrder } from "./services/supabasePrintJobs";
 import {
   APP_VERSION,
   DELIVERY_STATUS,
@@ -957,9 +958,14 @@ function App() {
     }
 
     await saveStockMovements(savedDelivery, "sale");
-    await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "" });
+    const printJobResult = await createPrintJobsForOrder(savedDelivery);
+    if (printJobResult.error) {
+      console.error("Erro ao criar fila de impressão:", printJobResult.error);
+      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.39 e verifique a tabela print_jobs.`, "loja", orderId);
+    }
+    await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "", printJobsQueued: printJobResult.jobs?.length || 0, printJobQueueError: printJobResult.error?.message || "" });
 
-    return savedDelivery;
+    return { ...savedDelivery, printJobsQueued: printJobResult.error ? 0 : (printJobResult.jobs?.length || 0) };
   }
 
   async function updateDeliveryInSupabase(id, patch) {
@@ -3030,7 +3036,7 @@ function App() {
       setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
       await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
       addNotification("novo_pedido", "Novo pedido recebido", `${normalizedCustomerName} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
-      addNotification("pedido_recebido", "Pedido recebido", `Pedido #${savedDelivery.id} recebido pela loja e enviado para preparo.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
+      addNotification("pedido_recebido", "Pedido recebido", `Pedido #${savedDelivery.id} recebido pela loja, enviado para preparo e colocado na fila de impressão.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
       addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${savedDelivery.id} recebido e disponível para retirada.`, "courier", savedDelivery.id);
       if (appliedCustomerCoupon) await registerCouponUsage(appliedCustomerCoupon);
       setCustomerCart([]);
@@ -3039,7 +3045,7 @@ function App() {
       setShowCustomerCheckout(false);
       setCustomerChangeFor("");
       setCustomerOrderConfirmation(buildOrderConfirmation(savedDelivery));
-      setCustomerError("Pedido recebido pela loja e enviado para preparo.");
+      setCustomerError("Pedido recebido pela loja, enviado para preparo e colocado na fila de impressão.");
     } finally {
       setCustomerSubmitting(false);
     }
@@ -3639,13 +3645,10 @@ function App() {
 
 
   function shouldAutoPrintIncomingCustomerOrder(delivery) {
-    if (storeSettings.autoPrintCustomerOrders === false) return false;
-    if (!delivery || !isDeliveryOrder(delivery)) return false;
-    if (String(delivery.id || "") === "") return false;
-    if (delivery.status !== DELIVERY_STATUS.WAITING_PICKUP) return false;
-    if (delivery.origin !== "customer") return false;
-    if (autoPrintedDeliveryIdsRef.current.has(String(delivery.id))) return false;
-    return true;
+    // Fase 52: impressão automática real deve sair da fila print_jobs no Supabase.
+    // O navegador fica apenas com reimpressão manual para evitar pop-up, duplicidade e cache de impressão.
+    if (!delivery) return false;
+    return false;
   }
 
   function registerDeliveryAsPrinted(deliveryId) {
@@ -3725,14 +3728,9 @@ function App() {
 
   async function launchCounterSale() {
     if (!isCashOpen) return setLastAction("Abra o caixa antes de usar o PDV Balcão.");
-    const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
-    if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão. Libere pop-ups para finalizar e imprimir a venda.");
-    if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) { preOpenedPrintWindow.close(); return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco."); }
+    if (counterDraft.phone && !isValidBrazilMobilePhone(counterDraft.phone)) return setLastAction("Telefone do balcão inválido. Use DDD + 9 + 8 dígitos ou deixe em branco.");
     const validation = validateOrderItems(counterDraft.items, products);
-    if (!authorizePdvStockOverride(validation, "PDV Balcão", counterDraft.items)) {
-      if (typeof preOpenedPrintWindow !== "undefined" && preOpenedPrintWindow) preOpenedPrintWindow.close();
-      return;
-    }
+    if (!authorizePdvStockOverride(validation, "PDV Balcão", counterDraft.items)) return;
 
     const syncedItems = syncOrderItemsWithProducts(counterDraft.items, products);
     const syncedProductsTotal = buildOrderTotal(syncedItems);
@@ -3741,7 +3739,6 @@ function App() {
     const syncedDiscount = normalizeDiscount(roleLimitedDiscount, syncedProductsTotal);
     const syncedFinalTotal = buildDiscountedProductsTotal(syncedProductsTotal, syncedDiscount);
     if (counterDraft.payment === "Dinheiro" && counterDraft.changeFor && toSafeMoneyNumber(counterDraft.changeFor, 0) < syncedFinalTotal) {
-      preOpenedPrintWindow.close();
       return setLastAction(`Valor recebido menor que o total. Total: ${money(syncedFinalTotal)} • recebido: ${money(counterDraft.changeFor)}.`);
     }
 
@@ -3782,7 +3779,6 @@ function App() {
 
     const stockPersisted = await persistStockDeltasForItems(syncedItems, "sale");
     if (!stockPersisted) {
-      preOpenedPrintWindow.close();
       addNotification("estoque_balcao_bloqueado", "Venda bloqueada por estoque", "Venda de balcão não foi salva porque o estoque não pôde ser reservado no Supabase.", "loja");
       return setLastAction("Venda não finalizada: não foi possível reservar o estoque no Supabase. Atualize os produtos e tente novamente.");
     }
@@ -3793,17 +3789,15 @@ function App() {
     } catch (error) {
       await rollbackStockAfterSaveFailure(syncedItems, "Venda de balcão");
       await loadProducts({ silent: true });
-      preOpenedPrintWindow.close();
       return setLastAction(`Venda não salva no Supabase: ${error.message || "verifique Supabase."}`);
     }
 
     setDeliveries((previousDeliveries) => [savedSale, ...previousDeliveries]);
     await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
-    printDeliveryReceipt(savedSale, 1, { printWindow: preOpenedPrintWindow });
     setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
     setCounterProductSearch("");
     setCounterKitSearch("");
-    setLastAction("Venda de balcão registrada no Supabase, estoque baixado e impressão aberta.");
+    setLastAction(`Venda de balcão registrada, estoque baixado e ${savedSale.printJobsQueued || 1} impressão pendente criada na fila do Supabase.`);
   }
 
   async function launchDeliveryOrder() {
@@ -3883,12 +3877,10 @@ function App() {
     await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     addNotification("pedido_pdv_entrega", "Pedido lançado no PDV Entregas", `Pedido #${savedDelivery.id} de ${selectedDeliveryClient.name} foi lançado com total de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
     addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${savedDelivery.id} liberado para retirada na loja.`, "courier", savedDelivery.id);
-    registerDeliveryAsPrinted(savedDelivery.id);
-    printDeliveryReceipt(savedDelivery, 2);
     setDeliveryDraft({ clientId: "", payment: "Pix", changeFor: "", notes: "", items: [], deliveryFee: storeSettings.defaultDeliveryFee, discount: 0 });
     setDeliveryProductSearch("");
     setPvdKitSearch("");
-    setLastAction("Entrega lançada no Supabase, taxa adicionada e impressão enviada para o navegador.");
+    setLastAction(`Entrega lançada no Supabase, estoque baixado e ${savedDelivery.printJobsQueued || 2} impressões pendentes criadas na fila.`);
   }
 
   function isCourierActionBusy(id) {
@@ -4463,20 +4455,16 @@ function App() {
     if (!typedStorePassword || (currentStorePassword && typedStorePassword !== currentStorePassword) || (!currentStorePassword && !isValidLogin(login || "loja", typedStorePassword))) {
       return setLastAction("Senha da loja incorreta. Use a mesma senha do login da loja para fechar a comanda.");
     }
-    const preOpenedPrintWindow = window.open("about:blank", "_blank", "width=420,height=760");
-    if (!preOpenedPrintWindow) return setLastAction("Navegador bloqueou a impressão da comanda. Libere pop-ups e tente novamente.");
     const tab = tabsAccounts.find((item) => item.id === tabId);
-    if (!tab) { preOpenedPrintWindow.close(); return setLastAction("Comanda não encontrada."); }
+    if (!tab) return setLastAction("Comanda não encontrada.");
     const validation = validateOrderItems(tab.items, products);
-    if (!validation.valid) { preOpenedPrintWindow.close(); return setLastAction(validation.message); }
+    if (!validation.valid) return setLastAction(validation.message);
     const syncedItems = syncOrderItemsWithProducts(tab.items, products);
     const total = buildOrderTotal(syncedItems);
     if (tabClosingPayment === "Misto" && !isMixedPaymentBalanced(tabClosingMixedPayment, total)) {
-      preOpenedPrintWindow.close();
       return setLastAction(`Pagamento misto da comanda precisa fechar ${money(total)}. Informado: ${money(getMixedPaymentTotal(tabClosingMixedPayment))}.`);
     }
     if (tabClosingPayment === "Dinheiro" && tabClosingChangeFor && toSafeMoneyNumber(tabClosingChangeFor, 0) < total) {
-      preOpenedPrintWindow.close();
       return setLastAction(`Troco da comanda inválido: recebido ${money(tabClosingChangeFor)} é menor que ${money(total)}.`);
     }
     const mixedPaymentDetails = tabClosingPayment === "Misto" ? getMixedPaymentDetails(tabClosingMixedPayment) : "";
@@ -4521,7 +4509,6 @@ function App() {
     const nextLimit = adjustTabCreditLimitAfterClose(tab, total, tabClosingPayment);
     const stockPersisted = await persistStockDeltasForItems(syncedItems, "sale");
     if (!stockPersisted) {
-      preOpenedPrintWindow.close();
       addNotification("estoque_comanda_bloqueado", "Comanda bloqueada por estoque", `Comanda #${tabId} não foi fechada porque o estoque não pôde ser reservado no Supabase.`, "loja");
       return setLastAction("Comanda não fechada: não foi possível reservar o estoque no Supabase. Atualize os produtos e tente novamente.");
     }
@@ -4536,7 +4523,6 @@ function App() {
       }
       await rollbackStockAfterSaveFailure(syncedItems, "Fechamento de comanda");
       await loadProducts({ silent: true });
-      preOpenedPrintWindow.close();
       return setLastAction(`Comanda não salva no Supabase: ${error.message || "verifique Supabase/tab_accounts."}`);
     }
 
@@ -4544,8 +4530,7 @@ function App() {
     await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     setTabsAccounts((previous) => previous.filter((item) => item.id !== tabId));
     cancelClosingTab();
-    printDeliveryReceipt(savedClosedOrder, 2, { printWindow: preOpenedPrintWindow });
-    setLastAction(`Comanda de ${tab.customerName} fechada em ${money(total)} e salva no Supabase. Novo limite sugerido: ${money(nextLimit)}. Foram abertas 2 vias para impressão.`);
+    setLastAction(`Comanda de ${tab.customerName} fechada em ${money(total)} e salva no Supabase. Novo limite sugerido: ${money(nextLimit)}. ${savedClosedOrder.printJobsQueued || 1} impressão pendente criada na fila.`);
   }
 
 

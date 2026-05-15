@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.38-fase-51-pedido-direto-sem-aprovacao";
+export const APP_VERSION = "6.0.39-fase-52-fila-impressao-supabase";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
@@ -47,6 +47,26 @@ export const DELIVERY_PROBLEM_REASONS = [
 export const ORDER_TYPE = {
   DELIVERY: "delivery",
   COUNTER: "counter",
+};
+
+export const PRINT_JOB_STATUS = {
+  PENDING: "pending",
+  PRINTING: "printing",
+  PRINTED: "printed",
+  FAILED: "failed",
+  CANCELLED: "cancelled",
+};
+
+export const PRINT_JOB_TYPE = {
+  KITCHEN: "kitchen",
+  DELIVERY: "delivery",
+  COUNTER: "counter",
+};
+
+export const PRINT_JOB_SOURCE = {
+  CUSTOMER_APP: "customer_app",
+  PDV_DELIVERY: "pdv_entregas",
+  PDV_COUNTER: "pdv_balcao",
 };
 
 export const DEFAULT_TAB_CREDIT_LIMIT = 50;

@@ -144,4 +144,16 @@ Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
 - Removida a necessidade de aprovação manual da loja para pedido novo.
 - Estoque continua sendo reservado antes de salvar o pedido.
 - Pedidos antigos aguardando aprovação são liberados pela migração final.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-38.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-39.sql`.
+
+
+## Fase 52 — Fila de impressão no Supabase
+
+Versão: `6.0.39-fase-52-fila-impressao-supabase`
+
+- Cria a tabela `print_jobs` para o aplicativo Electron consumir impressões pendentes.
+- Pedido do app gera 2 jobs: `kitchen` e `delivery`.
+- PDV Entregas gera 2 jobs: `kitchen` e `delivery`.
+- PDV Balcão gera 1 job: `counter`.
+- A impressão automática do navegador fica desativada como solução principal para evitar pop-ups, duplicidade e perda por atualização de página.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-39.sql`.
