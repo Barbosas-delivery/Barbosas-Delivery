@@ -110,9 +110,13 @@ export async function openCashSessionInSupabase({ openingAmount = 0, openedBy = 
   return { data, error, openedAt };
 }
 
+function makeUniqueNumericId() {
+  return Date.now() * 1000 + Math.floor(Math.random() * 1000);
+}
+
 export async function insertCashSangriaInSupabase({ cashSession = {}, value = 0, reason = "Sangria" } = {}) {
   const movement = {
-    id: Date.now(),
+    id: makeUniqueNumericId(),
     value,
     reason: reason || "Sangria",
     createdAt: new Date().toISOString(),

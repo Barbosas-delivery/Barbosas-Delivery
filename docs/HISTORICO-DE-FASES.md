@@ -218,9 +218,117 @@ Depois teste no sistema publicado:
 ## Fase 50 — Revisão final de produção
 
 - Revisão final antes de publicar o aplicativo.
-- Atualiza versão para `6.0.18-fase-50-revisao-final-producao`.
-- Atualiza cache do PWA para `barbosas-delivery-6-0-18-fase-50`.
+- Atualiza versão para `6.0.22-fase-50-auditoria-linha-a-linha-final`.
+- Atualiza cache do PWA para `barbosas-delivery-6-0-22-fase-50-auditoria-linha-a-linha-final-sem-cache`.
 - Adiciona `.env.example` com variáveis obrigatórias do Supabase.
 - Protege o cliente Supabase contra travamento quando variáveis de ambiente estiverem ausentes.
 - Amplia diagnóstico para indicar cliente Supabase ativo ou desativado.
 - Documentação em `docs/FASE-50-REVISAO-FINAL-PRODUCAO.md`.
+
+## Fase 50 corrigida — Correção emergencial de produção
+
+- Atualiza versão para `6.0.22-fase-50-auditoria-linha-a-linha-final`.
+- Remove dependência de cache/localStorage para configurações importantes da loja.
+- Sincroniza categorias de produtos no Supabase via `store_settings.settings.productGroups`.
+- Reativa produto excluído quando o mesmo código de barras é recadastrado.
+- Recarrega catálogo do Supabase após edição/cadastro para refletir no cliente.
+- Altera service worker para política `network-only` e limpeza de caches antigos.
+- Adiciona documentação `docs/CORRECAO-EMERGENCIAL-FINAL.md`.
+
+
+
+## Fase 50.2 — Auditoria final sem cache
+
+- Atualiza versão para `6.0.22-fase-50-auditoria-linha-a-linha-final`.
+- Remove o registro de service worker no app e força desregistro de service workers antigos.
+- Limpa caches antigos do navegador na abertura do app.
+- Mantém o arquivo de service worker apenas como limpeza/network-only para instalações antigas.
+- Corrige condição de corrida entre carregamento de configurações e reconstrução de categorias pelos produtos.
+- Permite recadastrar produto com código de barras de cadastro inativo/excluído sem bloqueio local indevido.
+- Remove dados de demonstração do estado inicial de clientes e pedidos na operação real.
+- Fortalece teste de fumaça para impedir retorno de service worker com cache e regressão de categorias/código de barras.
+
+
+## Fase 50 — Revisão linha a linha final
+
+- Atualiza versão para `6.0.22-fase-50-auditoria-linha-a-linha-final`.
+- Corrige recadastro de produto excluído para reativar pelo ID exato, evitando atualização ampla por código de barras.
+- Adiciona atualização periódica silenciosa do catálogo para cliente aberto, sem depender de cache nem apenas do realtime.
+- Mantém remoção de service workers e caches antigos.
+- Adiciona `docs/REVISAO-LINHA-A-LINHA-FINAL.md`.
+
+## Fase 50 — Auditoria linha a linha final 6.0.22
+
+- Atualiza versão para `6.0.22-fase-50-auditoria-linha-a-linha-final`.
+- Salva categorias imediatamente no Supabase ao adicionar grupo.
+- Substitui IDs críticos baseados só em `Date.now()` por IDs numéricos com sufixo aleatório.
+- Normaliza validação de código de barras em edição e ignora produtos inativos/excluídos.
+- Passa a alertar quando atualização de estoque retorna erro do Supabase.
+- Mantém o app sem cache operacional/localStorage crítico para produtos, categorias e configurações.
+
+
+## Fase 50 — Auditoria final criteriosa
+
+Versão: `6.0.23-fase-50-auditoria-final-criteriosa`
+
+Correção adicional: produtos com `active` nulo/ausente no Supabase agora são tratados como ativos para evitar que produtos antigos sumam do catálogo do cliente após atualização, mantendo ocultação por `active=false` ou `deleted_at`.
+
+
+## Revisão 6.0.24 — auditoria final kit Supabase
+
+- Edição de kits agora salva dados principais e itens no Supabase.
+- A tela recarrega os kits do Supabase após salvar.
+- Teste de fumaça ampliado para impedir edição de kit apenas local.
+
+## Revisão 6.0.25 — auditoria final de produção real
+
+- Estoque sincronizado com Supabase usando `await` antes de atualizar a tela.
+- Pedido salvo sem itens agora tenta rollback automático.
+- Kit salvo sem itens agora tenta rollback automático.
+- Adicionado SQL consolidado `supabase/migracao-final-producao-6-0-28.sql` para banco novo ou antigo.
+- Documentação: `docs/AUDITORIA-FINAL-PRODUCAO-REAL.md`.
+
+## Revisão 6.0.28 — auditoria de estoque atômico
+
+- Corrigida sincronização de estoque para atualizar somente produtos alterados.
+- Corrigido risco de mensagem de sucesso mascarar falha ao gravar estoque no Supabase.
+- Adicionada notificação operacional quando pedido/venda é salvo, mas o estoque não sincroniza.
+- Corrigido diagnóstico do WhatsApp da loja para usar `storePhone`.
+
+
+## Revisão 6.0.28 — estoque atômico sem negativo
+
+- Corrigida a função `apply_product_stock_deltas` para bloquear baixas que deixariam estoque negativo.
+- Removido fallback não atômico de estoque no front-end.
+- Adicionada migração `supabase/migracao-final-producao-6-0-28.sql`.
+- O app passa a exigir a função SQL de produção para não mascarar erro de configuração do Supabase.
+
+
+## Revisão 6.0.30 — reserva de estoque antes de salvar pedido
+
+- Pedidos do cliente, vendas de balcão, PDV Entregas e fechamento de comandas agora aplicam delta atômico de estoque antes de gravar a operação final.
+- Se o pedido/venda não for salvo depois da reserva, o sistema tenta devolver o estoque automaticamente.
+- O sistema não mantém pedido como sucesso quando a reserva de estoque no Supabase falha.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-30.sql`.
+
+
+## Revisão 6.0.32 — revisão completa do script
+
+- Corrigida migração final com coluna duplicada em `cash_sessions`.
+- Categoria nova só é aplicada na tela após salvar no Supabase.
+- Ajuste manual de estoque usa delta atômico também em correções.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-32.sql`.
+
+## Revisão 6.0.34 — revisão total do script final
+
+- Estoque atômico ajustado para ser tudo-ou-nada em pedidos com múltiplos produtos.
+- Edição de produto separada do estoque para evitar sobrescrita de vendas feitas em outro aparelho.
+- Adicionada migração obrigatória `supabase/migracao-final-producao-6-0-34.sql`.
+- Validações: `npm test`, `npm run lint`, `npm run build` e `npm audit --audit-level=moderate`.
+
+
+## Revisão 6.0.35 — schema completo e kits transacionais
+
+- Migração final reforçada para bancos antigos que já tinham tabelas sem todas as colunas atuais.
+- Edição de kits agora usa a função SQL `replace_kit_items` para evitar substituição parcial de itens.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-35.sql`.

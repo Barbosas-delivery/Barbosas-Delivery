@@ -1,4 +1,5 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+/* eslint-disable no-unused-vars, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-hooks/preserve-manual-memoization */
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import { insertWithSchemaRetry, updateWithSchemaRetry } from "./services/supabaseSchema";
 import {
@@ -11,7 +12,11 @@ import {
   updateProductStatusInSupabase,
   updateProductImageInSupabase,
   softDeleteProductInSupabase,
+  findProductByBarcodeInSupabase,
+  restoreProductInSupabase,
   normalizeProductVariants,
+  applyProductStockDeltasInSupabase,
+  fetchProductStockFromSupabase,
 } from "./services/supabaseProducts";
 import {
   mapClientFromDatabase,
@@ -102,6 +107,7 @@ import {
   getPaymentStatusClass,
 } from "./utils/payments";
 import {
+  expandItemsForStock,
   validateOrderItems,
   syncOrderItemsWithProducts,
   reduceProductStock,
@@ -194,1410 +200,114 @@ import {
 
 import { printThermalHtml as printThermalHtmlBase } from "./utils/printing";
 
-// Bloco 4: ajustes de layout e experiência por perfil. Cliente/entregador mobile-first; caixa/admin otimizados para tablet e desktop.
-const Card = memo(function Card({ className = "", children, ...props }) {
-  return <div className={className} {...props}>{children}</div>;
-});
+import { Card, CardContent, Button, DarkLoginInput, Icon, StoreLogo, Title, Metric, CardBox, Input, DarkInput, SearchBox } from "./components/ui";
+import { CustomerOrderStatusCard, NotificationPanel, OwnerDeliveryCard, AuditTab, DiagnosticsTab, DashboardTab } from "./components/OperationalPanels";
+import {
+  normalizeCustomerCartItem,
+  sanitizeCustomerCart,
+  hasCurrencyValue,
+  hasDuplicateBarcode,
+  makeUniqueNumericId,
+  hasDuplicateClientRecord,
+  isProductBarcodeAvailable,
+  buildOrderTotal,
+  normalizeCouponCode,
+  normalizeCouponFromDatabase,
+  isCouponInPeriod,
+  getCouponDiscount,
+  validateCouponForCart,
+  getActiveProductVariants,
+  productHasActiveVariants,
+  makeVariantCartName,
+  WEEKDAY_LABELS,
+  normalizeTimeValue,
+  normalizeStoreSchedule,
+  getMinutesFromTime,
+  getStoreOpenStatus,
+  buildOpeningHoursSummary,
+  getTodayOpeningHours,
+  CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY,
+  DAILY_BACKUP_STORAGE_KEY,
+  clampPrintCopies,
+  clampPrintCloseDelaySeconds,
+  sanitizePrintOutputMode,
+  sanitizeLocalPrintServiceUrl,
+  clampLocalPrintTimeoutMs,
+  sanitizePauseUntil,
+  getStorePauseStatus,
+  normalizeDistrictName,
+  normalizeDeliveryZone,
+  normalizeDeliveryZones,
+  findDeliveryZoneByDistrict,
+  getCustomerDeliveryFee,
+  getCustomerMinimumOrderValue,
+  getDeliveryZoneIssue,
+  makeEmptyDeliveryZone,
+  normalizeProductGroups,
+  mergeProductGroups,
+  sanitizeStoreSettings,
+  loadInitialStoreSettings,
+  loadDismissedCustomerOrderIds,
+  saveDismissedCustomerOrderIds,
+  loadLastDailyBackupAt,
+  saveLastDailyBackupAt,
+  isSameLocalDate,
+  formatBackupDate,
+  formatShortDateTime,
+  getAuditActionLabel,
+  getAuditEntityLabel,
+  buildAuditSummary,
+  formatProductImageHelp,
+  buildWhatsAppUrl,
+  buildMapsUrl,
+  getWhatsAppOrderItemsText,
+  buildCustomerWhatsAppMessage,
+  getWhatsAppTemplateVariables,
+  fillWhatsAppTemplate,
+  getDefaultStatusWhatsAppMessages,
+  normalizeStatusWhatsAppMessages,
+  buildStatusWhatsAppMessage,
+  getWhatsAppStatusLabel,
+  buildCustomerHistory,
+  isCustomerOrderFinalStatus,
+  getOrderTimeValue,
+  DELIVERY_DELAY_ALERT_MINUTES,
+  getDeliveryLaunchTimeValue,
+  getDeliveryAgeMinutes,
+  isDeliveryDelayCandidate,
+  isDeliveryDelayed,
+  isCourierAssignedToDelivery,
+  sortDeliveriesByPriority,
+  getDeliveryDistrict,
+  buildDeliveryRouteGroups,
+  getCourierAssignedActiveDeliveries,
+  getCourierAcceptBlockReason,
+  buildStoreAttentionSummary,
+  getDeliveryCompletionTimeValue,
+  getDeliveryCompletionDate,
+  getDeliveryCompletionMinutes,
+  isDeliveryCompletedByCourier,
+  isDateInInputRange,
+  buildCourierClosingReport,
+  buildCourierTodaySummary,
+  getCustomerOrderStatusInfo,
+  getCustomerOrderTimeline,
+  getLastCustomerOrderUpdate,
+  getCustomerOrderItemsSummary,
+  getCartMatchKey,
+  getCustomerCartLineIdentity,
+  mergeCustomerCartItems,
+  getCustomerCheckoutIssue,
+  isOrderFinalized,
+  normalizeDeliveryProblemReasonInput,
+  promptDeliveryProblemReason,
+  getOrderAllowedActions,
+  buildOrderSummaryText,
+  getDateInputValue,
+  isCustomerFormComplete,
+  runSelfTests
+} from "./utils/appRuntime";
 
-const CardContent = memo(function CardContent({ className = "", children, ...props }) {
-  return <div className={className} {...props}>{children}</div>;
-});
-
-const Button = memo(function Button({ className = "", variant = "default", children, disabled = false, ...props }) {
-  const hasCustomBg = /(?:^|\s)!?bg-/.test(className);
-  const disabledClass = disabled ? "opacity-50 cursor-not-allowed pointer-events-none" : "";
-  const variantClass =
-    variant === "secondary"
-      ? `${hasCustomBg ? "" : "bg-zinc-100 hover:bg-zinc-200"} text-zinc-950`
-      : `${hasCustomBg ? "" : "bg-zinc-950 hover:bg-zinc-800"} text-white`;
-
-  return (
-    <button
-      {...props}
-      type={props.type || "button"}
-      disabled={disabled}
-      className={`inline-flex min-h-[44px] touch-manipulation items-center justify-center transition active:scale-[0.99] ${variantClass} ${className} ${disabledClass}`.trim()}
-    >
-      <span className="relative z-10 inline-flex items-center justify-center gap-1 text-inherit">{children}</span>
-    </button>
-  );
-});
-
-function getStableFocusKey(label = "", placeholder = "", type = "text") {
-  return `${label}-${placeholder}-${type}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function keepInputFocused(event, focusKey) {
-  const currentInput = event.currentTarget;
-  const start = currentInput.selectionStart;
-  const end = currentInput.selectionEnd;
-  const scrollX = window.scrollX;
-  const scrollY = window.scrollY;
-
-  window.requestAnimationFrame(() => {
-    const target = currentInput.isConnected ? currentInput : document.querySelector(`[data-focus-key="${focusKey}"]`);
-    if (!target) return;
-    if (document.activeElement !== target) target.focus({ preventScroll: true });
-    try {
-      if (typeof start === "number" && typeof end === "number") target.setSelectionRange(start, end);
-    } catch {
-      // Mantém o foco sem interromper a digitação caso o navegador não permita setSelectionRange.
-    }
-    window.scrollTo(scrollX, scrollY);
-  });
-}
-const ICONS = {
-  lock: "🔒",
-  mail: "✉️",
-  user: "👤",
-  package: "📦",
-  percent: "%",
-  calendar: "⏱️",
-  chart: "📊",
-  barcode: "▥",
-  truck: "🛵",
-  users: "👥",
-  search: "🔎",
-  plus: "+",
-  check: "✅",
-  alert: "⚠️",
-  logout: "↪",
-  shield: "🛡️",
-  eye: "👁️",
-  eyeOff: "🙈",
-  pin: "📍",
-  phone: "☎️",
-  save: "💾",
-  money: "💰",
-  bell: "🔔",
-  tools: "🧰",
-};
-
-function normalizeCustomerCartItem(item, index = 0) {
-  if (!item || typeof item !== "object") return null;
-  const isKit = item.isKit === true;
-  const itemId = item.id ?? item.productId ?? `item-${index}`;
-  const quantity = toPositiveInteger(item.quantity, 1);
-  const price = toSafeMoneyNumber(item.price, 0);
-  return {
-    ...item,
-    id: itemId,
-    name: String(item.name || (isKit ? "Kit" : "Produto")),
-    price,
-    quantity,
-    barcode: item.barcode || "",
-    isKit,
-    cartKey: String(item.cartKey || `${isKit ? "kit" : "prod"}-${itemId}-${item.kitId || ""}-${index}`),
-    kitItems: isKit && Array.isArray(item.kitItems) ? item.kitItems.filter(Boolean) : item.kitItems,
-  };
-}
-
-function sanitizeCustomerCart(cart) {
-  return (Array.isArray(cart) ? cart : [])
-    .map((item, index) => normalizeCustomerCartItem(item, index))
-    .filter((item) => item && item.quantity > 0 && item.price >= 0);
-}
-
-function hasCurrencyValue(text, value) {
-  const normalized = String(text || "").replace(/\u00a0/g, " ").replace(/&nbsp;/g, " ");
-  return normalized.includes(money(value).replace(/\u00a0/g, " "));
-}
-
-function hasDuplicateBarcode(products, barcode) {
-  return products.some((product) => String(product.barcode) === String(barcode));
-}
-
-function hasDuplicateClientRecord(clients, client, currentClientId = null) {
-  const normalizedPhone = onlyPhoneNumbers(client?.phone);
-  if (!normalizedPhone) return false;
-  return (Array.isArray(clients) ? clients : []).some((existingClient) => {
-    if (currentClientId !== null && String(existingClient.id) === String(currentClientId)) return false;
-    return onlyPhoneNumbers(existingClient.phone) === normalizedPhone;
-  });
-}
-
-function isProductBarcodeAvailable(products, barcode, currentProductId) {
-  const normalizedBarcode = String(barcode || "").trim();
-  if (!normalizedBarcode) return false;
-  return !products.some((product) => product.id !== currentProductId && String(product.barcode) === normalizedBarcode);
-}
-
-function buildOrderTotal(items) {
-  return sanitizeCustomerCart(items).reduce((sum, item) => sum + toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1), 0);
-}
-
-function normalizeCouponCode(value = "") {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
-}
-
-function normalizeCouponFromDatabase(coupon = {}) {
-  return {
-    id: coupon.id || Date.now(),
-    code: normalizeCouponCode(coupon.code),
-    description: coupon.description || "",
-    discountType: coupon.discount_type || coupon.discountType || "fixed",
-    discountValue: Number(coupon.discount_value ?? coupon.discountValue ?? 0),
-    minimumOrderValue: Number(coupon.minimum_order_value ?? coupon.minimumOrderValue ?? 0),
-    maxDiscount: Number(coupon.max_discount ?? coupon.maxDiscount ?? 0),
-    startDate: coupon.start_date || coupon.startDate || "",
-    endDate: coupon.end_date || coupon.endDate || "",
-    usageLimit: Number(coupon.usage_limit ?? coupon.usageLimit ?? 0),
-    usedCount: Number(coupon.used_count ?? coupon.usedCount ?? 0),
-    active: isTruthyActive(coupon.active),
-    createdAt: coupon.created_at || coupon.createdAt || "",
-    updatedAt: coupon.updated_at || coupon.updatedAt || "",
-  };
-}
-
-function isCouponInPeriod(coupon) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (coupon?.startDate) {
-    const start = new Date(`${coupon.startDate}T00:00:00`);
-    if (Number.isFinite(start.getTime()) && today < start) return false;
-  }
-  if (coupon?.endDate) {
-    const end = new Date(`${coupon.endDate}T23:59:59`);
-    if (Number.isFinite(end.getTime()) && new Date() > end) return false;
-  }
-  return true;
-}
-
-function getCouponDiscount(coupon, productsTotal = 0) {
-  const base = Math.max(0, Number(productsTotal || 0));
-  if (!coupon || base <= 0) return 0;
-  if (base < Number(coupon.minimumOrderValue || 0)) return 0;
-  let discount = String(coupon.discountType || "fixed") === "percent" ? base * (Number(coupon.discountValue || 0) / 100) : Number(coupon.discountValue || 0);
-  if (Number(coupon.maxDiscount || 0) > 0) discount = Math.min(discount, Number(coupon.maxDiscount || 0));
-  return normalizeDiscount(discount, base);
-}
-
-function validateCouponForCart(coupon, productsTotal = 0) {
-  if (!coupon) return { valid: false, message: "Cupom não encontrado." };
-  if (!coupon.active) return { valid: false, message: "Esse cupom está inativo." };
-  if (!isCouponInPeriod(coupon)) return { valid: false, message: "Esse cupom está fora do período de validade." };
-  if (Number(coupon.usageLimit || 0) > 0 && Number(coupon.usedCount || 0) >= Number(coupon.usageLimit || 0)) return { valid: false, message: "Esse cupom atingiu o limite de uso." };
-  if (Number(productsTotal || 0) < Number(coupon.minimumOrderValue || 0)) return { valid: false, message: `Esse cupom exige pedido mínimo de ${money(coupon.minimumOrderValue)} em produtos.` };
-  if (getCouponDiscount(coupon, productsTotal) <= 0) return { valid: false, message: "Esse cupom não gera desconto para este pedido." };
-  return { valid: true, message: "Cupom aplicado." };
-}
-
-function getActiveProductVariants(product) {
-  return normalizeProductVariants(product?.variants).filter((variant) => variant.active !== false);
-}
-
-function productHasActiveVariants(product) {
-  return product?.hasVariants === true && getActiveProductVariants(product).length > 0;
-}
-
-function makeVariantCartName(product, variant) {
-  return `${product?.name || "Produto"} - ${variant?.name || "Sabor"}`;
-}
-
-const WEEKDAY_LABELS = [
-  { day: 1, label: "Segunda" },
-  { day: 2, label: "Terça" },
-  { day: 3, label: "Quarta" },
-  { day: 4, label: "Quinta" },
-  { day: 5, label: "Sexta" },
-  { day: 6, label: "Sábado" },
-  { day: 0, label: "Domingo" },
-];
-
-function normalizeTimeValue(value, fallback = "09:00") {
-  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return fallback;
-  const hours = Math.min(23, Math.max(0, Number(match[1] || 0)));
-  const minutes = Math.min(59, Math.max(0, Number(match[2] || 0)));
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-function normalizeStoreSchedule(schedule) {
-  const currentSchedule = Array.isArray(schedule) ? schedule : [];
-  return WEEKDAY_LABELS.map(({ day, label }) => {
-    const found = currentSchedule.find((item) => Number(item?.day) === Number(day));
-    return {
-      day,
-      label: found?.label || label,
-      closed: found?.closed === true,
-      open: normalizeTimeValue(found?.open, day === 0 ? "13:00" : "09:00"),
-      close: normalizeTimeValue(found?.close, day === 5 || day === 6 ? "03:00" : "00:00"),
-    };
-  });
-}
-
-function getMinutesFromTime(value) {
-  const [hours, minutes] = normalizeTimeValue(value, "00:00").split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-function getStoreOpenStatus(schedule, date = new Date()) {
-  const normalizedSchedule = normalizeStoreSchedule(schedule);
-  const currentDay = date.getDay();
-  const currentMinutes = date.getHours() * 60 + date.getMinutes();
-  const today = normalizedSchedule.find((item) => Number(item.day) === currentDay);
-  const previousDay = normalizedSchedule.find((item) => Number(item.day) === (currentDay + 6) % 7);
-
-  const checkSchedule = (item, minutes, isPreviousDay = false) => {
-    if (!item || item.closed) return false;
-    const openMinutes = getMinutesFromTime(item.open);
-    let closeMinutes = getMinutesFromTime(item.close);
-    const crossesMidnight = closeMinutes <= openMinutes;
-    if (!crossesMidnight) return !isPreviousDay && minutes >= openMinutes && minutes < closeMinutes;
-    if (isPreviousDay) return minutes < closeMinutes;
-    return minutes >= openMinutes;
-  };
-
-  const isOpen = checkSchedule(today, currentMinutes, false) || checkSchedule(previousDay, currentMinutes, true);
-  if (isOpen) {
-    const activeSchedule = checkSchedule(today, currentMinutes, false) ? today : previousDay;
-    return { isOpen: true, message: `Aberto até ${activeSchedule.close}`, today };
-  }
-  if (!today || today.closed) return { isOpen: false, message: "Fechado hoje", today };
-  return { isOpen: false, message: `Abre às ${today.open}`, today };
-}
-
-function buildOpeningHoursSummary(schedule) {
-  return normalizeStoreSchedule(schedule)
-    .map((item) => `${item.label}: ${item.closed ? "Fechado" : `${item.open} às ${item.close}`}`)
-    .join(" • ");
-}
-
-function getTodayOpeningHours(schedule, date = new Date()) {
-  const today = normalizeStoreSchedule(schedule).find((item) => Number(item.day) === date.getDay());
-  if (!today) return "Horário de hoje não configurado";
-  if (today.closed) return `${today.label}: fechado hoje`;
-  return `${today.label}: ${today.open} às ${today.close}`;
-}
-
-
-const STORE_SETTINGS_STORAGE_KEY = "barbosas-delivery-store-settings-v1";
-const CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY = "barbosas-delivery-customer-dismissed-orders-v1";
-const DAILY_BACKUP_STORAGE_KEY = "barbosas-delivery-last-backup-at-v1";
-
-function clampPrintCopies(value, fallback = 1) {
-  return Math.min(5, Math.max(1, toPositiveInteger(value, fallback)));
-}
-
-function clampPrintCloseDelaySeconds(value) {
-  const seconds = Math.floor(Number(value || 0));
-  if (!Number.isFinite(seconds)) return 0;
-  return Math.min(10, Math.max(0, seconds));
-}
-
-function sanitizePrintOutputMode(value) {
-  return value === "local_service" ? "local_service" : "browser";
-}
-
-function sanitizeLocalPrintServiceUrl(value) {
-  const url = String(value || "").trim();
-  if (!url) return initialStoreSettings.localPrintServiceUrl || "http://localhost:9191/print";
-  return url;
-}
-
-function clampLocalPrintTimeoutMs(value) {
-  const timeout = Math.floor(Number(value || 5000));
-  if (!Number.isFinite(timeout)) return 5000;
-  return Math.min(15000, Math.max(1000, timeout));
-}
-
-function sanitizePauseUntil(value) {
-  const rawValue = String(value || "").trim();
-  if (!rawValue) return "";
-  const time = new Date(rawValue).getTime();
-  return Number.isFinite(time) ? new Date(time).toISOString() : "";
-}
-
-function getStorePauseStatus(settings = {}, date = new Date()) {
-  const pausedUntil = sanitizePauseUntil(settings.storePausedUntil || settings.store_paused_until);
-  if (!pausedUntil) return { active: false, message: "" };
-  const until = new Date(pausedUntil);
-  if (until.getTime() <= date.getTime()) return { active: false, message: "" };
-  const timeLabel = until.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const reason = String(settings.storePauseReason || settings.store_pause_reason || "alta demanda").trim() || "alta demanda";
-  return { active: true, until: pausedUntil, reason, message: `Pedidos pausados até ${timeLabel}. Motivo: ${reason}` };
-}
-
-function normalizeDistrictName(value = "") {
-  return String(value || "")
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-}
-
-function normalizeDeliveryZone(zone = {}, index = 0) {
-  const district = String(zone.district || zone.name || "").trim();
-  return {
-    id: zone.id || Date.now() + index,
-    district,
-    fee: normalizeDeliveryFee(zone.fee ?? zone.deliveryFee ?? initialStoreSettings.defaultDeliveryFee),
-    minimumOrderValue: toNonNegativeNumber(zone.minimumOrderValue ?? zone.minimum_order_value ?? 0, 0),
-    active: zone.active !== false && Boolean(district),
-  };
-}
-
-function normalizeDeliveryZones(zones = []) {
-  const normalized = (Array.isArray(zones) ? zones : [])
-    .map((zone, index) => normalizeDeliveryZone(zone, index))
-    .filter((zone) => zone.district);
-  const seen = new Set();
-  return normalized.filter((zone) => {
-    const key = normalizeDistrictName(zone.district);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function findDeliveryZoneByDistrict(zones = [], district = "") {
-  const normalizedDistrict = normalizeDistrictName(district);
-  if (!normalizedDistrict) return null;
-  return normalizeDeliveryZones(zones).find((zone) => zone.active !== false && normalizeDistrictName(zone.district) === normalizedDistrict) || null;
-}
-
-function getCustomerDeliveryFee(settings = {}, district = "") {
-  const zone = findDeliveryZoneByDistrict(settings.deliveryZones, district);
-  return zone ? normalizeDeliveryFee(zone.fee) : normalizeDeliveryFee(settings.defaultDeliveryFee);
-}
-
-function getCustomerMinimumOrderValue(settings = {}, district = "") {
-  const zone = findDeliveryZoneByDistrict(settings.deliveryZones, district);
-  const zoneMinimum = Number(zone?.minimumOrderValue || 0);
-  return zoneMinimum > 0 ? zoneMinimum : toNonNegativeNumber(settings.minimumOrderValue, initialStoreSettings.minimumOrderValue);
-}
-
-function getDeliveryZoneIssue(settings = {}, district = "") {
-  const safeDistrict = String(district || "").trim();
-  if (!safeDistrict) return "";
-  if (settings.allowUnlistedDistricts !== false) return "";
-  return findDeliveryZoneByDistrict(settings.deliveryZones, safeDistrict) ? "" : `Ainda não atendemos o bairro ${safeDistrict}. Fale com a loja pelo WhatsApp para confirmar.`;
-}
-
-function makeEmptyDeliveryZone() {
-  return { id: Date.now(), district: "Novo bairro", fee: initialStoreSettings.defaultDeliveryFee, minimumOrderValue: 0, active: true };
-}
-
-function sanitizeStoreSettings(settings = {}) {
-  const source = settings && typeof settings === "object" ? settings : {};
-  const schedule = normalizeStoreSchedule(source.schedule || initialStoreSettings.schedule);
-
-  return {
-    ...initialStoreSettings,
-    ...source,
-    storeName: String(source.storeName || initialStoreSettings.storeName).trim() || initialStoreSettings.storeName,
-    storePhone: formatBrazilMobilePhone(source.storePhone || initialStoreSettings.storePhone),
-    defaultDeliveryFee: normalizeDeliveryFee(source.defaultDeliveryFee ?? initialStoreSettings.defaultDeliveryFee),
-    minimumOrderValue: toNonNegativeNumber(source.minimumOrderValue ?? initialStoreSettings.minimumOrderValue, initialStoreSettings.minimumOrderValue),
-    allowUnlistedDistricts: source.allowUnlistedDistricts !== false,
-    deliveryZones: normalizeDeliveryZones(source.deliveryZones || initialStoreSettings.deliveryZones),
-    whatsappMessage: String(source.whatsappMessage || initialStoreSettings.whatsappMessage),
-    statusWhatsappMessages: normalizeStatusWhatsAppMessages(source.statusWhatsappMessages || initialStoreSettings.statusWhatsappMessages),
-    autoPrintCustomerOrders: source.autoPrintCustomerOrders !== false,
-    customerOrderPrintCopies: clampPrintCopies(source.customerOrderPrintCopies, initialStoreSettings.customerOrderPrintCopies || 2),
-    manualReprintCopies: clampPrintCopies(source.manualReprintCopies, initialStoreSettings.manualReprintCopies || 1),
-    printCloseDelaySeconds: clampPrintCloseDelaySeconds(source.printCloseDelaySeconds),
-    printOutputMode: sanitizePrintOutputMode(source.printOutputMode || initialStoreSettings.printOutputMode),
-    localPrintServiceUrl: sanitizeLocalPrintServiceUrl(source.localPrintServiceUrl || initialStoreSettings.localPrintServiceUrl),
-    localPrintFallbackToBrowser: source.localPrintFallbackToBrowser !== false,
-    localPrintTimeoutMs: clampLocalPrintTimeoutMs(source.localPrintTimeoutMs || initialStoreSettings.localPrintTimeoutMs),
-    maxActiveDeliveriesPerCourier: Math.min(6, Math.max(1, Math.floor(Number(source.maxActiveDeliveriesPerCourier ?? initialStoreSettings.maxActiveDeliveriesPerCourier ?? 2)))),
-    storePausedUntil: sanitizePauseUntil(source.storePausedUntil || source.store_paused_until || initialStoreSettings.storePausedUntil),
-    storePauseReason: String(source.storePauseReason || source.store_pause_reason || initialStoreSettings.storePauseReason || "").trim(),
-    schedule,
-    openingHours: buildOpeningHoursSummary(schedule),
-  };
-}
-
-function loadStoreSettingsFromLocalStorage() {
-  if (typeof window === "undefined") return sanitizeStoreSettings(initialStoreSettings);
-  try {
-    const storedSettings = window.localStorage.getItem(STORE_SETTINGS_STORAGE_KEY);
-    return sanitizeStoreSettings(storedSettings ? JSON.parse(storedSettings) : initialStoreSettings);
-  } catch {
-    return sanitizeStoreSettings(initialStoreSettings);
-  }
-}
-
-function saveStoreSettingsToLocalStorage(settings) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORE_SETTINGS_STORAGE_KEY, JSON.stringify(sanitizeStoreSettings(settings)));
-  } catch {
-    // O navegador pode bloquear localStorage em modo privado; o app continua usando o estado atual.
-  }
-}
-
-function loadDismissedCustomerOrderIds() {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = window.localStorage.getItem(CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY);
-    const parsed = stored ? JSON.parse(stored) : [];
-    return Array.isArray(parsed) ? parsed.map((id) => String(id)).filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveDismissedCustomerOrderIds(ids) {
-  if (typeof window === "undefined") return;
-  try {
-    const safeIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id)).filter(Boolean))).slice(-40);
-    window.localStorage.setItem(CUSTOMER_DISMISSED_ORDERS_STORAGE_KEY, JSON.stringify(safeIds));
-  } catch {
-    // O painel do cliente continua funcionando mesmo se o navegador bloquear localStorage.
-  }
-}
-
-
-function loadLastDailyBackupAt() {
-  if (typeof window === "undefined") return "";
-  try {
-    return String(window.localStorage.getItem(DAILY_BACKUP_STORAGE_KEY) || "");
-  } catch {
-    return "";
-  }
-}
-
-function saveLastDailyBackupAt(value) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(DAILY_BACKUP_STORAGE_KEY, String(value || new Date().toISOString()));
-  } catch {
-    // O lembrete de backup é apenas local; se o navegador bloquear, o sistema segue funcionando.
-  }
-}
-
-function isSameLocalDate(value, date = new Date()) {
-  if (!value) return false;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return parsed.toLocaleDateString("pt-BR") === date.toLocaleDateString("pt-BR");
-}
-
-function formatBackupDate(value) {
-  if (!value) return "Nenhum backup baixado neste navegador";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Data de backup inválida";
-  return parsed.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-}
-
-function formatShortDateTime(value) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-}
-
-function getAuditActionLabel(action) {
-  const labels = {
-    approve_customer_order: "Pedido aprovado",
-    accept_delivery: "Entrega aceita",
-    request_delivery_approval: "Entrega enviada para aprovação",
-    approve_delivery_completion: "Entrega aprovada/finalizada",
-    manual_finish_delivery: "Entrega finalizada manualmente",
-    update_payment_status: "Pagamento alterado",
-    reopen_counter_sale: "Venda reaberta no PDV",
-    cancel_order: "Pedido/venda cancelado",
-    delete_promotion: "Promoção excluída",
-    pause_product: "Produto pausado",
-    resume_product: "Produto retomado",
-    manual_stock_adjustment: "Estoque ajustado",
-    pdv_stock_override: "Venda sem estoque autorizada",
-    create_store_user: "Usuário criado",
-    update_store_user: "Usuário atualizado",
-    store_login_success: "Login da loja",
-    store_login_failed: "Tentativa de login inválida",
-    store_logout: "Saída da loja",
-    print_receipt: "Comprovante impresso",
-    export_period_sales_csv: "CSV de vendas exportado",
-    export_stock_csv: "CSV de estoque exportado",
-  };
-  return labels[action] || String(action || "Ação").replace(/_/g, " ");
-}
-
-function getAuditEntityLabel(entity) {
-  const labels = {
-    orders: "Pedido/Venda",
-    products: "Produto",
-    promotions: "Promoção",
-    store_users: "Usuário",
-    cash_sessions: "Caixa",
-    courier_closing: "Fechamento entregador",
-    reports: "Relatório",
-    store_session: "Sessão da loja",
-  };
-  return labels[entity] || String(entity || "Sistema");
-}
-
-function buildAuditSummary(log) {
-  const data = log?.afterJson || {};
-  const pieces = [];
-  if (data.reason) pieces.push(`Motivo: ${data.reason}`);
-  if (data.value !== undefined) pieces.push(`Valor: ${money(Number(data.value || 0))}`);
-  if (data.status) pieces.push(`Status: ${data.status}`);
-  if (data.paymentStatus) pieces.push(`Pagamento: ${data.paymentStatus}`);
-  if (data.product) pieces.push(`Produto: ${data.product}`);
-  if (data.rows !== undefined) pieces.push(`Linhas: ${data.rows}`);
-  if (data.role) pieces.push(`Perfil: ${data.role}`);
-  return pieces.join(" • ") || "Sem detalhes adicionais.";
-}
-
-
-
-
-
-
-
-
-
-
-
-function formatProductImageHelp() {
-  return "Formatos aceitos: JPG, PNG ou WEBP. Melhor proporção: quadrada 1:1 ou vertical 4:5.";
-}
-
-function buildWhatsAppUrl(phone, message) {
-  const numbers = onlyPhoneNumbers(phone);
-  if (!numbers) return "#";
-  const normalized = numbers.startsWith("55") ? numbers : `55${numbers}`;
-  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
-}
-
-function buildMapsUrl(address) {
-  const cleanAddress = String(address || "").trim();
-  if (!cleanAddress) return "#";
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanAddress)}`;
-}
-
-function getWhatsAppOrderItemsText(items = []) {
-  const safeItems = Array.isArray(items) ? items : [];
-  if (safeItems.length === 0) return "- Pedido sem itens detalhados";
-  return safeItems
-    .map((item) => {
-      const quantity = Number(item.quantity || 0);
-      const name = item.name || item.productName || "Produto";
-      const unitPrice = Number(item.price || 0);
-      const lineTotal = unitPrice * quantity;
-      return `${quantity}x ${name} - ${money(lineTotal)}`;
-    })
-    .join("\n");
-}
-
-function buildCustomerWhatsAppMessage(delivery, storeSettings = initialStoreSettings) {
-  const storeName = storeSettings.storeName || "Barbosas Delivery";
-  const customerName = delivery.client || "cliente";
-  const orderKind = isCounterOrder(delivery) ? "sua venda" : "seu pedido";
-  const productsTotal = Number(delivery.productsTotal ?? Number(delivery.value || 0) - (isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee)));
-  const deliveryFee = isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee);
-  const discount = Number(delivery.discount || 0);
-  const total = Number(delivery.value || 0);
-  const estimated = Number(delivery.estimatedDeliveryMinutes || 0);
-  const estimatedLine = isDeliveryOrder(delivery) && estimated > 0 ? `\nTempo estimado de entrega: ${formatEstimatedDeliveryTime(estimated)}.` : "";
-  const paymentLine = delivery.payment ? `\nPagamento: ${getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails)}.` : "";
-
-  return [
-    `Olá, ${customerName}! ${orderKind.charAt(0).toUpperCase() + orderKind.slice(1)} #${delivery.id} foi recebido pela ${storeName}.`,
-    "",
-    "Resumo do pedido:",
-    getWhatsAppOrderItemsText(delivery.items),
-    "",
-    `Subtotal: ${money(productsTotal)}`,
-    discount > 0 ? `Desconto: -${money(discount)}` : null,
-    `Taxa de entrega: ${money(deliveryFee)}`,
-    `Total: ${money(total)}`,
-    `${estimatedLine}${paymentLine}`,
-    "",
-    "Obrigado pela preferência!",
-  ].filter((line) => line !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function getWhatsAppTemplateVariables(delivery, storeSettings = initialStoreSettings) {
-  const storeName = storeSettings.storeName || "Barbosas Delivery";
-  const deliveryFee = isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee);
-  const total = Number(delivery.value || 0);
-  const estimated = Number(delivery.estimatedDeliveryMinutes || 0);
-  return {
-    loja: storeName,
-    cliente: delivery?.client || "cliente",
-    pedido: String(delivery?.id || ""),
-    total: money(total),
-    taxa: money(deliveryFee),
-    status: delivery?.status || "",
-    previsao: estimated > 0 ? formatEstimatedDeliveryTime(estimated) : "em breve",
-    pagamento: getPaymentLabel(delivery?.payment, delivery?.changeFor, delivery?.mixedPaymentDetails),
-  };
-}
-
-function fillWhatsAppTemplate(template, delivery, storeSettings = initialStoreSettings) {
-  const variables = getWhatsAppTemplateVariables(delivery, storeSettings);
-  return String(template || "")
-    .replace(/\{(loja|cliente|pedido|total|taxa|status|previsao|pagamento)\}/g, (_, key) => variables[key] || "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function getDefaultStatusWhatsAppMessages() {
-  return {
-    approved: "Olá, {cliente}! Seu pedido #{pedido} foi aprovado pela {loja}.\n\nPrevisão: {previsao}.\nTotal: {total}.\n\nObrigado pela preferência!",
-    outForDelivery: "Olá, {cliente}! Seu pedido #{pedido} saiu para entrega.\n\nO entregador já está a caminho. Total: {total}.\n\nObrigado pela preferência!",
-    delivered: "Olá, {cliente}! Seu pedido #{pedido} foi entregue.\n\nA {loja} agradece pela preferência!",
-    cancelled: "Olá, {cliente}. Seu pedido #{pedido} foi cancelado pela {loja}.\n\nSe precisar, responda esta mensagem para falar com a loja.",
-    paymentReminder: "Olá, {cliente}! Passando para lembrar sobre o pagamento do pedido #{pedido}.\n\nValor: {total}. Forma informada: {pagamento}.",
-  };
-}
-
-function normalizeStatusWhatsAppMessages(messages = {}) {
-  const defaults = getDefaultStatusWhatsAppMessages();
-  return {
-    approved: String(messages.approved || defaults.approved),
-    outForDelivery: String(messages.outForDelivery || defaults.outForDelivery),
-    delivered: String(messages.delivered || defaults.delivered),
-    cancelled: String(messages.cancelled || defaults.cancelled),
-    paymentReminder: String(messages.paymentReminder || defaults.paymentReminder),
-  };
-}
-
-function buildStatusWhatsAppMessage(delivery, statusKey, storeSettings = initialStoreSettings) {
-  const templates = normalizeStatusWhatsAppMessages(storeSettings.statusWhatsappMessages);
-  const template = templates[statusKey] || templates.approved;
-  return fillWhatsAppTemplate(template, delivery, storeSettings);
-}
-
-function getWhatsAppStatusLabel(status) {
-  if (status === "sent") return "Marcado como enviado";
-  if (status === "opened") return "Aberto para envio";
-  return "Não enviado";
-}
-
-function buildCustomerHistory(deliveries, phone) {
-  const normalizedPhone = onlyPhoneNumbers(phone);
-  const customerDeliveries = deliveries.filter((delivery) => onlyPhoneNumbers(delivery.phone) === normalizedPhone && delivery.status !== DELIVERY_STATUS.CANCELLED);
-  return {
-    totalOrders: customerDeliveries.length,
-    totalSpent: customerDeliveries.reduce((sum, delivery) => sum + Number(delivery.value || 0), 0),
-    lastOrders: customerDeliveries.slice(0, 3),
-  };
-}
-
-function isCustomerOrderFinalStatus(status) {
-  return [DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(status);
-}
-
-function getOrderTimeValue(delivery) {
-  const dates = [delivery?.launchedAt, delivery?.createdAt, delivery?.approvedAt, delivery?.acceptedAt, delivery?.deliveredAt, delivery?.ownerApprovedAt, delivery?.cancelledAt]
-    .map((value) => new Date(value || 0).getTime())
-    .filter((value) => Number.isFinite(value) && value > 0);
-  return dates.length > 0 ? Math.max(...dates) : Number(delivery?.id || 0);
-}
-
-const DELIVERY_DELAY_ALERT_MINUTES = 15;
-
-function getDeliveryLaunchTimeValue(delivery) {
-  const dates = [delivery?.launchedAt, delivery?.createdAt, delivery?.approvedAt, delivery?.acceptedAt, delivery?.pickedUpAt]
-    .map((value) => new Date(value || 0).getTime())
-    .filter((value) => Number.isFinite(value) && value > 0);
-  return dates.length > 0 ? Math.min(...dates) : Number(delivery?.id || 0);
-}
-
-function getDeliveryAgeMinutes(delivery, nowMs = Date.now()) {
-  const startedAt = getDeliveryLaunchTimeValue(delivery);
-  if (!startedAt) return 0;
-  return Math.max(0, Math.floor((nowMs - startedAt) / 60000));
-}
-
-function isDeliveryDelayCandidate(delivery) {
-  if (!isDeliveryOrder(delivery)) return false;
-  if ([DELIVERY_STATUS.CANCELLED, DELIVERY_STATUS.CONFIRMED_DELIVERED].includes(delivery?.status)) return false;
-  return [
-    DELIVERY_STATUS.WAITING_PICKUP,
-    DELIVERY_STATUS.OUT_FOR_DELIVERY,
-    DELIVERY_STATUS.WAITING_OWNER_APPROVAL,
-    DELIVERY_STATUS.DELIVERY_PROBLEM,
-  ].includes(delivery?.status);
-}
-
-function isDeliveryDelayed(delivery, nowMs = Date.now()) {
-  return isDeliveryDelayCandidate(delivery) && getDeliveryAgeMinutes(delivery, nowMs) >= DELIVERY_DELAY_ALERT_MINUTES;
-}
-
-function isCourierAssignedToDelivery(delivery, username) {
-  const normalizedUsername = String(username || '').trim().toLowerCase();
-  if (!normalizedUsername) return false;
-  return [delivery?.pickedUpByUsername, delivery?.acceptedByUsername, delivery?.deliveredByUsername]
-    .some((value) => String(value || '').trim().toLowerCase() === normalizedUsername);
-}
-
-function sortDeliveriesByPriority(a, b) {
-  const now = Date.now();
-  const delayedA = isDeliveryDelayed(a, now) ? 1 : 0;
-  const delayedB = isDeliveryDelayed(b, now) ? 1 : 0;
-  if (delayedA !== delayedB) return delayedB - delayedA;
-  return getDeliveryLaunchTimeValue(a) - getDeliveryLaunchTimeValue(b);
-}
-
-function getDeliveryDistrict(delivery) {
-  const rawDistrict = String(delivery?.district || delivery?.deliveryDistrict || delivery?.zoneDistrict || "").trim();
-  if (rawDistrict) return rawDistrict;
-  const address = String(delivery?.address || "");
-  const parts = address.split(" - " );
-  if (parts.length >= 2) return parts[1].split(",")[0].trim() || "Sem bairro";
-  return "Sem bairro";
-}
-
-function buildDeliveryRouteGroups(deliveries = []) {
-  const groups = new Map();
-  deliveries.forEach((delivery) => {
-    if (!isDeliveryOrder(delivery)) return;
-    const district = getDeliveryDistrict(delivery);
-    const current = groups.get(district) || { district, count: 0, delayedCount: 0, totalFee: 0, orderIds: [] };
-    current.count += 1;
-    current.delayedCount += isDeliveryDelayed(delivery) ? 1 : 0;
-    current.totalFee += normalizeDeliveryFee(delivery.deliveryFee);
-    current.orderIds.push(delivery.id);
-    groups.set(district, current);
-  });
-  return Array.from(groups.values()).sort((a, b) => b.delayedCount - a.delayedCount || b.count - a.count || a.district.localeCompare(b.district));
-}
-
-function getCourierAssignedActiveDeliveries(deliveries = [], courierUsername = "") {
-  return (Array.isArray(deliveries) ? deliveries : []).filter((delivery) => {
-    if (!isDeliveryOrder(delivery)) return false;
-    if ([DELIVERY_STATUS.CANCELLED, DELIVERY_STATUS.CONFIRMED_DELIVERED].includes(delivery?.status)) return false;
-    return isCourierAssignedToDelivery(delivery, courierUsername);
-  });
-}
-
-function getCourierAcceptBlockReason({ deliveries = [], courierUsername = "", maxActiveDeliveries = 2 } = {}) {
-  const ownActive = getCourierAssignedActiveDeliveries(deliveries, courierUsername);
-  const ownDelayed = ownActive.filter((delivery) => isDeliveryDelayed(delivery));
-  if (ownDelayed.length > 0) return "Finalize a entrega atrasada antes de aceitar outra.";
-  const limit = Math.min(6, Math.max(1, Math.floor(Number(maxActiveDeliveries || 2))));
-  if (ownActive.length >= limit) return `Você já possui ${ownActive.length} entrega${ownActive.length === 1 ? "" : "s"} ativa${ownActive.length === 1 ? "" : "s"}. Limite atual: ${limit}.`;
-  return "";
-}
-
-
-function buildStoreAttentionSummary({ products = [], deliveries = [], notifications = [], lastBackupAt = "" }) {
-  const activeDeliveryOrders = deliveries.filter((delivery) => isDeliveryOrder(delivery) && ![DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(delivery.status));
-  const delayedDeliveries = activeDeliveryOrders.filter((delivery) => isDeliveryDelayed(delivery)).sort(sortDeliveriesByPriority);
-  const waitingApproval = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL || delivery.needsStoreApproval === true && delivery.storeOrderApproved === false);
-  const deliveryProblems = activeDeliveryOrders.filter((delivery) => delivery.status === DELIVERY_STATUS.DELIVERY_PROBLEM);
-  const pendingPayments = deliveries.filter((delivery) => ![DELIVERY_STATUS.CANCELLED].includes(delivery.status) && [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.RECEIVABLE, PAYMENT_STATUS.STORE_CREDIT].includes(delivery.paymentStatus));
-  const whatsappPending = activeDeliveryOrders.filter((delivery) => delivery.phone && delivery.whatsappStatus !== "sent");
-  const lowStockProducts = products
-    .filter((product) => product.active !== false)
-    .filter((product) => Number(product.stock || 0) <= Number(product.minStock || 0))
-    .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
-  const outOfStockProducts = lowStockProducts.filter((product) => Number(product.stock || 0) <= 0);
-  const unreadStoreNotifications = notifications.filter((notification) => !notification.readAt && !notification.read_at && !notification.resolvedAt && !notification.resolved_at);
-  const backupDue = !isSameLocalDate(lastBackupAt);
-
-  const items = [
-    ...delayedDeliveries.map((delivery) => ({
-      type: "delay",
-      severity: getDeliveryAgeMinutes(delivery) >= 25 ? "critical" : "high",
-      title: `Pedido #${delivery.id} atrasado`,
-      description: `${delivery.client || "Cliente"} • ${getDeliveryAgeMinutes(delivery)} min desde o lançamento • ${delivery.status}`,
-      action: "Priorize a entrega ou fale com o entregador.",
-    })),
-    ...deliveryProblems.map((delivery) => ({
-      type: "problem",
-      severity: "critical",
-      title: `Problema na entrega #${delivery.id}`,
-      description: `${delivery.client || "Cliente"} • ${delivery.problemReason || "motivo não informado"}`,
-      action: "Resolva com o entregador/cliente antes de liberar novas etapas.",
-    })),
-    ...waitingApproval.map((delivery) => ({
-      type: "approval",
-      severity: "high",
-      title: `Pedido #${delivery.id} aguardando aprovação`,
-      description: `${delivery.client || "Cliente"} • ${money(delivery.value || 0)} • ${delivery.payment || "pagamento não informado"}`,
-      action: "Aprove ou cancele para não atrasar a fila.",
-    })),
-    ...pendingPayments.slice(0, 6).map((delivery) => ({
-      type: "payment",
-      severity: "medium",
-      title: `Recebimento pendente #${delivery.id}`,
-      description: `${delivery.client || "Cliente"} • ${delivery.paymentStatus || PAYMENT_STATUS.PENDING} • ${money(delivery.value || 0)}`,
-      action: "Confirme o pagamento quando receber.",
-    })),
-    ...whatsappPending.slice(0, 6).map((delivery) => ({
-      type: "whatsapp",
-      severity: "medium",
-      title: `WhatsApp não marcado #${delivery.id}`,
-      description: `${delivery.client || "Cliente"} • ${formatBrazilMobilePhone(delivery.phone || "")}`,
-      action: "Envie ou marque como enviado no card do pedido.",
-    })),
-    ...outOfStockProducts.slice(0, 8).map((product) => ({
-      type: "stock_out",
-      severity: "high",
-      title: `${product.name} sem estoque`,
-      description: `Estoque atual: ${product.stock || 0} • mínimo: ${product.minStock || 0}`,
-      action: "Reponha, pause ou inative o produto.",
-    })),
-    ...lowStockProducts.filter((product) => Number(product.stock || 0) > 0).slice(0, 8).map((product) => ({
-      type: "stock_low",
-      severity: "medium",
-      title: `${product.name} com estoque baixo`,
-      description: `Estoque atual: ${product.stock || 0} • mínimo: ${product.minStock || 0}`,
-      action: "Planeje reposição antes de acabar.",
-    })),
-    ...(backupDue ? [{
-      type: "backup",
-      severity: "medium",
-      title: "Backup diário pendente",
-      description: `Último backup: ${formatBackupDate(lastBackupAt)}`,
-      action: "Baixe o backup operacional de hoje.",
-    }] : []),
-  ];
-
-  return {
-    items,
-    delayedDeliveries,
-    waitingApproval,
-    deliveryProblems,
-    pendingPayments,
-    whatsappPending,
-    lowStockProducts,
-    outOfStockProducts,
-    unreadStoreNotifications,
-    backupDue,
-  };
-}
-
-function getDeliveryCompletionTimeValue(delivery) {
-  const dates = [delivery?.ownerApprovedAt, delivery?.deliveredAt, delivery?.finalizedAt, delivery?.closedAt]
-    .map((value) => new Date(value || 0).getTime())
-    .filter((value) => Number.isFinite(value) && value > 0);
-  return dates.length > 0 ? Math.max(...dates) : 0;
-}
-
-function getDeliveryCompletionDate(delivery) {
-  const completedAt = delivery?.ownerApprovedAt || delivery?.deliveredAt || delivery?.finalizedAt || delivery?.closedAt || delivery?.launchedAt || delivery?.createdAt || "";
-  return String(completedAt).slice(0, 10);
-}
-
-function getDeliveryCompletionMinutes(delivery) {
-  const startedAt = getDeliveryLaunchTimeValue(delivery);
-  const completedAt = getDeliveryCompletionTimeValue(delivery);
-  if (!startedAt || !completedAt || completedAt < startedAt) return 0;
-  return Math.max(0, Math.floor((completedAt - startedAt) / 60000));
-}
-
-function isDeliveryCompletedByCourier(delivery, courierUsername = "") {
-  if (!isDeliveryOrder(delivery)) return false;
-  if (delivery.status !== DELIVERY_STATUS.CONFIRMED_DELIVERED && delivery.ownerApproved !== true) return false;
-  return isCourierAssignedToDelivery(delivery, courierUsername);
-}
-
-function isDateInInputRange(dateText, startDate = "", endDate = "") {
-  if (!dateText) return false;
-  if (startDate && dateText < startDate) return false;
-  if (endDate && dateText > endDate) return false;
-  return true;
-}
-
-function buildCourierClosingReport(deliveries = [], courierUsername = "", startDate = "", endDate = "") {
-  const normalizedUsername = String(courierUsername || "").trim().toLowerCase();
-  const completed = (deliveries || [])
-    .filter((delivery) => {
-      if (!normalizedUsername || !isDeliveryCompletedByCourier(delivery, normalizedUsername)) return false;
-      return isDateInInputRange(getDeliveryCompletionDate(delivery), startDate, endDate);
-    })
-    .slice()
-    .sort((a, b) => getDeliveryCompletionTimeValue(b) - getDeliveryCompletionTimeValue(a));
-
-  const grossDeliveryFee = completed.reduce((sum, delivery) => sum + normalizeDeliveryFee(delivery.deliveryFee), 0);
-  const courierAmount = completed.reduce((sum, delivery) => sum + Number(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType)), 0);
-  const storeAmount = completed.reduce((sum, delivery) => sum + Number(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType)), 0);
-  const ownMotorcycleCount = completed.filter((delivery) => !String(delivery.motorcycleType || "").toLowerCase().includes("estabelecimento")).length;
-  const storeMotorcycleCount = completed.filter((delivery) => String(delivery.motorcycleType || "").toLowerCase().includes("estabelecimento")).length;
-  const delayedCount = completed.filter((delivery) => getDeliveryCompletionMinutes(delivery) >= DELIVERY_DELAY_ALERT_MINUTES).length;
-  const totalMinutes = completed.reduce((sum, delivery) => sum + getDeliveryCompletionMinutes(delivery), 0);
-
-  return {
-    courierUsername,
-    startDate,
-    endDate,
-    deliveries: completed,
-    completedCount: completed.length,
-    grossDeliveryFee,
-    courierAmount,
-    storeAmount,
-    ownMotorcycleCount,
-    storeMotorcycleCount,
-    delayedCount,
-    averageMinutes: completed.length > 0 ? Math.round(totalMinutes / completed.length) : 0,
-  };
-}
-
-function buildCourierTodaySummary(deliveries = [], courierUsername = '') {
-  const today = new Date().toISOString().slice(0, 10);
-  return buildCourierClosingReport(deliveries, courierUsername, today, today);
-}
-
-function getCustomerOrderStatusInfo(delivery) {
-  const status = delivery?.status;
-  if (status === DELIVERY_STATUS.WAITING_STORE_APPROVAL) {
-    return { title: "Aguardando aprovação da loja", description: "Seu pedido foi enviado. A loja vai confirmar em instantes.", tone: "amber", step: 1 };
-  }
-  if (status === DELIVERY_STATUS.WAITING_PICKUP) {
-    return { title: "Pedido aprovado", description: "A loja já confirmou seu pedido. Ele será separado para entrega.", tone: "emerald", step: 2 };
-  }
-  if (status === DELIVERY_STATUS.OUT_FOR_DELIVERY) {
-    return { title: "Saiu para entrega", description: "Seu pedido saiu para entrega. Fique atento ao telefone.", tone: "blue", step: 4 };
-  }
-  if (status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL) {
-    return { title: "Entrega em confirmação", description: "O entregador informou a entrega. A loja está conferindo a finalização.", tone: "blue", step: 4 };
-  }
-  if (status === DELIVERY_STATUS.CONFIRMED_DELIVERED) {
-    return { title: "Pedido entregue", description: "Pedido entregue. Obrigado pela preferência!", tone: "emerald", step: 5, final: true };
-  }
-  if (status === DELIVERY_STATUS.DELIVERY_PROBLEM) {
-    return { title: "Atenção na entrega", description: "Houve uma ocorrência na entrega. Fale com a loja se precisar de ajuda.", tone: "red", step: 4, important: true };
-  }
-  if (status === DELIVERY_STATUS.CANCELLED) {
-    return { title: "Pedido cancelado", description: "Seu pedido foi cancelado pela loja.", tone: "red", step: 0, final: true, important: true };
-  }
-  return { title: status || "Pedido em andamento", description: "Acompanhe a atualização do seu pedido por aqui.", tone: "amber", step: 1 };
-}
-
-function getCustomerOrderTimeline(status) {
-  const info = getCustomerOrderStatusInfo({ status });
-  const steps = [
-    { key: "received", label: "Recebido" },
-    { key: "approval", label: "Aprovação" },
-    { key: "preparing", label: "Preparando" },
-    { key: "route", label: "Entrega" },
-    { key: "done", label: "Finalizado" },
-  ];
-  if (status === DELIVERY_STATUS.CANCELLED) {
-    return steps.map((step, index) => ({ ...step, done: index === 0, current: index === 0, cancelled: index > 0 }));
-  }
-  return steps.map((step, index) => ({ ...step, done: index <= info.step - 1, current: index === Math.max(0, info.step - 1) }));
-}
-
-function getLastCustomerOrderUpdate(delivery, notifications = []) {
-  const relatedNotifications = (notifications || [])
-    .filter((notification) => String(notification.orderId || notification.deliveryId) === String(delivery?.id))
-    .sort((a, b) => getOrderTimeValue({ launchedAt: b.createdAt }) - getOrderTimeValue({ launchedAt: a.createdAt }));
-  if (relatedNotifications[0]?.message) return relatedNotifications[0].message;
-  const info = getCustomerOrderStatusInfo(delivery);
-  return info.description;
-}
-
-function getCustomerOrderItemsSummary(items = []) {
-  const safeItems = Array.isArray(items) ? items : [];
-  const itemCount = safeItems.reduce((sum, item) => sum + toPositiveInteger(item.quantity, 0), 0);
-  return `${itemCount} item${itemCount === 1 ? "" : "s"} • ${safeItems.length} produto${safeItems.length === 1 ? "" : "s"}`;
-}
-
-
-
-
-
-function getCartMatchKey(item) {
-  if (!item) return "";
-  return String(item.cartKey || item.id || item.productId || "");
-}
-
-function getCustomerCartLineIdentity(item) {
-  if (!item || typeof item !== "object") return "";
-  if (item.isKit === true) return `kit-${item.kitId || item.id || ""}`;
-  if (item.variantId) return `product-${item.id || item.productId || ""}-variant-${item.variantId}`;
-  return `product-${item.id || item.productId || ""}`;
-}
-
-function mergeCustomerCartItems(cart) {
-  const merged = [];
-  sanitizeCustomerCart(cart).forEach((item) => {
-    const identity = getCustomerCartLineIdentity(item) || getCartMatchKey(item);
-    const existingIndex = merged.findIndex((currentItem) => (getCustomerCartLineIdentity(currentItem) || getCartMatchKey(currentItem)) === identity);
-    if (existingIndex >= 0) {
-      merged[existingIndex] = {
-        ...merged[existingIndex],
-        quantity: toPositiveInteger(merged[existingIndex].quantity, 0) + toPositiveInteger(item.quantity, 0),
-      };
-      return;
-    }
-    merged.push(item);
-  });
-  return merged;
-}
-
-function getCustomerCheckoutIssue({ cart, products, productsTotal, minimumOrderValue, storeIsOpen, storeMessage, customerForm, payment, changeFor, deliveryTotal, deliveryZoneIssue = "" }) {
-  if (deliveryZoneIssue) return deliveryZoneIssue;
-  if (!storeIsOpen) return `A loja está fechada no momento. ${storeMessage || "Tente novamente dentro do horário de atendimento."}`;
-  if (!isCustomerFormComplete(customerForm)) return "Confira seus dados de entrega antes de finalizar.";
-  if (customerForm?.phone && !isValidBrazilMobilePhone(customerForm.phone)) return "Telefone inválido. Corrija o número antes de finalizar.";
-  const validation = validateOrderItems(cart, products);
-  if (!validation.valid) return validation.message;
-  if (!isOrderAboveMinimum(productsTotal, minimumOrderValue)) return `Pedido mínimo de ${money(minimumOrderValue)} em produtos. Adicione mais itens para finalizar.`;
-  const changeForValue = toSafeMoneyNumber(changeFor, 0);
-  if (payment === "Dinheiro" && changeFor !== "" && changeForValue > 0 && changeForValue < deliveryTotal) return `O valor para troco precisa ser maior ou igual ao total do pedido: ${money(deliveryTotal)}.`;
-  return "";
-}
-
-function isOrderFinalized(order) {
-  return [DELIVERY_STATUS.CONFIRMED_DELIVERED, DELIVERY_STATUS.CANCELLED].includes(order?.status);
-}
-
-function normalizeDeliveryProblemReasonInput(input) {
-  const raw = String(input || "").trim();
-  if (!raw) return "";
-  const numericIndex = Number(raw);
-  if (Number.isInteger(numericIndex) && numericIndex >= 1 && numericIndex <= DELIVERY_PROBLEM_REASONS.length) {
-    return DELIVERY_PROBLEM_REASONS[numericIndex - 1];
-  }
-  const matchedReason = DELIVERY_PROBLEM_REASONS.find((reason) => reason.toLowerCase() === raw.toLowerCase());
-  return matchedReason || raw;
-}
-
-function promptDeliveryProblemReason() {
-  const optionsText = DELIVERY_PROBLEM_REASONS.map((reason, index) => `${index + 1}. ${reason}`).join("\n");
-  const selected = window.prompt(`Informe o motivo do problema na entrega:\n\n${optionsText}\n\nDigite o número ou descreva o motivo.`, "1");
-  const reason = normalizeDeliveryProblemReasonInput(selected);
-  if (!reason) return "";
-  if (reason === "Outro motivo") {
-    const details = window.prompt("Descreva o problema na entrega:", "") || "";
-    const trimmedDetails = details.trim();
-    return trimmedDetails ? `Outro motivo: ${trimmedDetails}` : "";
-  }
-  return reason;
-}
-
-function getOrderAllowedActions(order, role = "admin") {
-  const status = order?.status;
-  const isDelivery = isDeliveryOrder(order);
-  const isCounter = isCounterOrder(order);
-  const finalized = isOrderFinalized(order);
-  const waitingStoreApproval = status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
-  const waitingPickup = status === DELIVERY_STATUS.WAITING_PICKUP;
-  const outForDelivery = status === DELIVERY_STATUS.OUT_FOR_DELIVERY;
-  const waitingOwnerApproval = status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
-  const deliveryProblem = status === DELIVERY_STATUS.DELIVERY_PROBLEM;
-  const paymentPaid = order?.paymentStatus === PAYMENT_STATUS.PAID;
-  const canApprove = canPerformStoreAction(role, STORE_ACTIONS.APPROVE_ORDER);
-  const canCancel = canPerformStoreAction(role, STORE_ACTIONS.CANCEL_ORDER);
-  const canConfirmPayment = canPerformStoreAction(role, STORE_ACTIONS.CONFIRM_PAYMENT);
-  const canReopenPayment = canPerformStoreAction(role, STORE_ACTIONS.REOPEN_PAYMENT);
-  const canReopenCounterSale = canPerformStoreAction(role, STORE_ACTIONS.REOPEN_COUNTER_SALE);
-  const canManualFinish = canPerformStoreAction(role, STORE_ACTIONS.MANUAL_FINISH_DELIVERY);
-
-  if (isCounter && status === DELIVERY_STATUS.CONFIRMED_DELIVERED) {
-    return {
-      print: true,
-      summary: true,
-      reopenCounterSale: canReopenCounterSale,
-      whatsapp: false,
-      approve: false,
-      manualFinish: false,
-      cancel: false,
-      confirmPayment: false,
-      reopenPayment: false,
-    };
-  }
-
-  if (finalized) {
-    return {
-      print: true,
-      summary: true,
-      reopenCounterSale: false,
-      whatsapp: false,
-      approve: false,
-      manualFinish: false,
-      cancel: false,
-      confirmPayment: false,
-      reopenPayment: false,
-    };
-  }
-
-  if (isDelivery) {
-    return {
-      print: true,
-      summary: true,
-      whatsapp: Boolean(order?.phone),
-      approve: canApprove && (waitingStoreApproval || waitingOwnerApproval),
-      manualFinish: canManualFinish && (outForDelivery || deliveryProblem),
-      cancel: canCancel && (waitingStoreApproval || waitingPickup || deliveryProblem),
-      confirmPayment: canConfirmPayment && !waitingStoreApproval && !paymentPaid,
-      reopenPayment: canReopenPayment && paymentPaid && !waitingOwnerApproval,
-      reopenCounterSale: false,
-    };
-  }
-
-  return {
-    print: true,
-    summary: true,
-    whatsapp: false,
-    approve: false,
-    manualFinish: false,
-    cancel: canCancel && status !== DELIVERY_STATUS.CANCELLED,
-    confirmPayment: canConfirmPayment && !paymentPaid,
-    reopenPayment: canReopenPayment && paymentPaid,
-    reopenCounterSale: false,
-  };
-}
-
-function buildOrderSummaryText(order) {
-  const itemsText = (Array.isArray(order?.items) ? order.items : [])
-    .map((item) => `${item.quantity}x ${item.name} - ${money(Number(item.price || 0) * Number(item.quantity || 0))}`)
-    .join("\n");
-  return [
-    `${isCounterOrder(order) ? "Venda" : "Pedido"} #${order?.id || ""}`,
-    `Cliente: ${order?.client || "-"}`,
-    `Status: ${order?.status || "-"}`,
-    `Pagamento: ${order?.paymentStatus || PAYMENT_STATUS.PENDING}`,
-    `Total: ${money(order?.value || 0)}`,
-    "",
-    "Itens:",
-    itemsText || "Sem itens detalhados",
-  ].join("\n");
-}
-
-function getDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function isCustomerFormComplete(customer) {
-  return Boolean(
-    customer.name &&
-      customer.phone &&
-      isValidCep(customer.cep) &&
-      customer.street &&
-      customer.number &&
-      customer.district &&
-      customer.city &&
-      customer.state
-  );
-}
-
-function runSelfTests() {
-  const tests = [
-    { name: "Login da loja com senha válida", passed: isValidLogin("loja", "1234") === true },
-    { name: "Login bloqueia senha curta", passed: isValidLogin("loja", "123") === false },
-    { name: "Login legado não aceita qualquer e-mail", passed: isValidLogin("gabriel@loja.com", "1234") === false },
-    { name: "Código de barras duplicado é detectado", passed: hasDuplicateBarcode(initialProducts, "7894900011517") === true },
-    { name: "Código de barras novo é permitido", passed: hasDuplicateBarcode(initialProducts, "0001112223334") === false },
-    { name: "Produto editado não pode duplicar código de barras", passed: isProductBarcodeAvailable(initialProducts, "0001112223334", 1) === true && isProductBarcodeAvailable(initialProducts, "7894900011517", 1) === false },
-    { name: "Relatório soma entregas corretamente", passed: buildDayReport(initialProducts, initialDeliveries).totalDelivery === 71 },
-    { name: "PDV balcão entra no caixa sem virar entrega pendente", passed: buildDayReport(initialProducts, [...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, value: 10, productsTotal: 10, deliveryFee: 0 }]).pending === 2 },
-    { name: "Taxas lançadas contam somente entregas", passed: buildDayReport(initialProducts, [...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, value: 10, productsTotal: 10 }]).deliveryFeesTotal === 10 },
-    { name: "Notificação nova começa como não lida", passed: createNotification("pedido", "Teste", "Mensagem", "loja").read === false },
-    { name: "Promoção ativa precisa apontar para produto ativo", passed: getActivePromotions(initialPromotions, initialProducts).length === 1 },
-    { name: "Promoção sem período fica ativa até desativar manualmente", passed: isPromotionInPeriod({ startDate: "", endDate: "" }) === true },
-    { name: "Kit soma valor dos produtos cadastrados", passed: buildKitProductsTotal([{ productId: 1, quantity: 2 }], initialProducts) === 34 },
-    { name: "Kit sem data final fica ativo até retirar manualmente", passed: isKitInPeriod({ endDate: "" }) === true },
-    { name: "Kit ativo precisa ter produtos ativos e estoque suficiente", passed: getActiveKits(initialKits, initialProducts).length === 1 },
-    { name: "Kit sem produto não aparece para cliente nem PDV", passed: getActiveKits([{ id: 99, active: true, endDate: "", items: [] }], initialProducts).length === 0 },
-    { name: "Kit mantém itens internos para baixar estoque", passed: syncOrderItemsWithProducts([{ isKit: true, price: 44, kitItems: [{ id: 1, quantity: 2 }] }], initialProducts)[0].kitItems[0].id === 1 },
-    { name: "Relatório identifica estoque baixo", passed: buildDayReport(initialProducts, initialDeliveries).lowStock === 1 },
-    { name: "CEP aceita somente 8 números válidos", passed: isValidCep("87000-000") === true && isValidCep("8700") === false },
-    { name: "Cliente completo também precisa de CEP válido", passed: isCustomerFormComplete({ name: "Teste", phone: "(43) 98873-6791", cep: "8700", street: "Rua A", number: "1", district: "Centro", city: "Cidade", state: "PR" }) === false },
-    { name: "CEP é formatado antes de salvar", passed: formatCep("87000000") === "87000-000" },
-    {
-      name: "Telefone exige DDD + 9 + 8 dígitos",
-      passed: isValidBrazilMobilePhone("(43) 98873-6791") === true && isValidBrazilMobilePhone("(43) 8873-6791") === false,
-    },
-    { name: "Telefone é formatado com DDD, 9 e traço", passed: formatBrazilMobilePhone("43988736791") === "(43) 98873-6791" },
-    { name: "WhatsApp não duplica código do Brasil", passed: buildWhatsAppUrl("5543988736791", "teste").startsWith("https://wa.me/5543") },
-    { name: "Mensagem de status substitui variáveis", passed: buildStatusWhatsAppMessage({ id: 123, client: "João", value: 52, payment: "Pix", estimatedDeliveryMinutes: 21 }, "approved", { storeName: "Loja Teste", statusWhatsappMessages: { approved: "Pedido {pedido} de {cliente} na {loja}: {total}" } }).includes("Pedido 123 de João na Loja Teste: R$ 52,00") },
-    { name: "Pedido soma itens corretamente", passed: buildOrderTotal([{ price: 17, quantity: 2 }, { price: 5, quantity: 3 }]) === 49 },
-    { name: "Pagamento em dinheiro mostra troco", passed: hasCurrencyValue(getPaymentLabel("Dinheiro", 100), 100) },
-    { name: "Histórico do cliente soma compras pelo telefone", passed: buildCustomerHistory([{ phone: "(43) 99999-0000", value: 20, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }], "43999990000").totalSpent === 20 },
-    { name: "Pedido bloqueia produto inativo ou sem estoque", passed: validateOrderItems([{ id: 1, name: "Teste", quantity: 1 }], [{ id: 1, active: false, stock: 10, name: "Teste" }]).valid === false && validateOrderItems([{ id: 2, name: "Teste", quantity: 9 }], [{ id: 2, active: true, stock: 2, name: "Teste" }]).valid === false },
-    { name: "Estoque baixa quando pedido é lançado", passed: reduceProductStock([{ id: 1, stock: 10 }], [{ id: 1, quantity: 3 }])[0].stock === 7 },
-    { name: "Cancelamento devolve estoque", passed: restoreProductStock([{ id: 1, stock: 7 }], [{ id: 1, quantity: 3 }])[0].stock === 10 },
-    { name: "Fechamento de caixa separa recebido e pendente", passed: buildCashClosingReport([{ value: 50, payment: "Pix", paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { value: 20, payment: "Dinheiro", paymentStatus: PAYMENT_STATUS.PENDING, status: DELIVERY_STATUS.WAITING_PICKUP }]).totalReceived === 50 },
-    { name: "Pedido mínimo bloqueia valor abaixo do configurado", passed: isOrderAboveMinimum(19, 20) === false && isOrderAboveMinimum(20, 20) === true },
-    { name: "Pagamento visual destaca pendência", passed: getPaymentStatusClass(PAYMENT_STATUS.PENDING).includes("red") && getPaymentStatusClass(PAYMENT_STATUS.PAID).includes("emerald") },
-    { name: "Depois da retirada só o motoboy responsável controla a entrega", passed: canCourierControlDelivery({ pickedUpByUsername: "moto01" }, "moto02") === false && canCourierControlDelivery({ pickedUpByUsername: "moto01" }, "moto01") === true },
-    { name: "Problema na entrega só deve ser registrado após saída da loja", passed: DELIVERY_STATUS.OUT_FOR_DELIVERY === "Saiu para entrega" },
-    { name: "Rótulo diferencia venda de pedido", passed: getOrderLabel({ orderType: ORDER_TYPE.COUNTER }, true) === "Venda" && getOrderLabel({ orderType: ORDER_TYPE.DELIVERY }, true) === "Pedido" },
-    { name: "Notificação de aprovação só faz sentido quando aguardava aprovação", passed: DELIVERY_STATUS.WAITING_OWNER_APPROVAL === "Aguardando aprovação da loja" },
-    { name: "Taxa de entrega de R$5 é somada automaticamente", passed: buildDeliveryTotal(49) === 54 },
-    { name: "PDV permite alterar taxa de entrega", passed: buildDeliveryTotal(49, 8, 0) === 57 },
-    { name: "PDV usa R$5 quando taxa não for preenchida", passed: buildDeliveryTotal(49, "", 0) === 54 },
-    { name: "PDV aplica desconto no total", passed: buildDeliveryTotal(49, 5, 4) === 50 },
-    { name: "Desconto nunca passa do valor dos produtos", passed: normalizeDiscount(999, 49) === 49 && normalizeDiscount(-10, 49) === 0 },
-    { name: "Limite de desconto respeita perfil", passed: clampDiscountByStoreRole(50, "operador") === 5 && clampDiscountByStoreRole(50, "caixa") === 10 && clampDiscountByStoreRole(50, "gerente") === 30 },
-    { name: "Operador não pode cancelar nem reabrir venda", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }, "operador").reopenCounterSale === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, paymentStatus: PAYMENT_STATUS.PENDING }, "operador").cancel === false },
-    { name: "Somente gerente e administrador autorizam venda sem estoque", passed: canPerformStoreAction("gerente", STORE_ACTIONS.OVERRIDE_STOCK) === true && canPerformStoreAction("admin", STORE_ACTIONS.OVERRIDE_STOCK) === true && canPerformStoreAction("caixa", STORE_ACTIONS.OVERRIDE_STOCK) === false && canPerformStoreAction("operador", STORE_ACTIONS.OVERRIDE_STOCK) === false },
-    { name: "Taxa de entrega divide 70% motoboy e 30% loja quando moto é do estabelecimento", passed: calculateCourierFee(5, "Moto do estabelecimento") === 3.5 && calculateStoreFee(5, "Moto do estabelecimento") === 1.5 },
-    { name: "Moto própria não cobra 30% da loja", passed: calculateCourierFee(5, "Moto própria") === 5 && calculateStoreFee(5, "Moto própria") === 0 },
-    { name: "Endereço da entrega é montado pelo cliente", passed: buildDeliveryAddress(initialClients[0]) === "Av. Brasil, 1500 - Centro, Maringá/PR" },
-    {
-      name: "Impressão monta itens do pedido",
-      passed: hasCurrencyValue(buildReceiptItemsHtml([{ name: "Teste", price: 10, quantity: 2 }]), 20),
-    },
-    { name: "Impressão não quebra pedido antigo sem itens", passed: buildReceiptItemsHtml([]).includes("Pedido sem itens detalhados") },
-    {
-      name: "Cliente web precisa preencher endereço completo e telefone",
-      passed: isCustomerFormComplete({ name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }) === true,
-    },
-    { name: "Cliente web não precisa criar conta", passed: isValidLogin("cliente", "") === false },
-    { name: "Senha forte do entregador tem maiúscula, minúscula, número e símbolo", passed: isStrongPassword("B4rb@2026!") === true && isStrongPassword("senha123") === false },
-    { name: "Usuário duplicado de entregador é bloqueado", passed: hasDuplicateCourierUsername(initialCouriers, "MOTO01") === true },
-    { name: "Login do entregador só funciona se estiver ativo", passed: isValidCourierLogin(initialCouriers, "moto01", "B4rb@2026!") === true },
-    { name: "Painel do entregador ignora pedidos cancelados", passed: getCourierDeliveries([...initialDeliveries, { status: DELIVERY_STATUS.CANCELLED }]).length === 2 },
-    { name: "Pedido do cliente não aparece para entregador antes da aprovação", passed: getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_STORE_APPROVAL, needsStoreApproval: true, storeOrderApproved: false }]).length === 0 && getCourierDeliveries([{ orderType: ORDER_TYPE.DELIVERY, origin: "customer", status: DELIVERY_STATUS.WAITING_PICKUP, needsStoreApproval: true, storeOrderApproved: false }]).length === 1 },
-    { name: "Fechamento ignora pedidos cancelados", passed: buildCashClosingReport([{ value: 100, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CANCELLED }]).totalSold === 0 },
-    { name: "Fechamento conta pendência só de entregas", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PENDING, status: DELIVERY_STATUS.WAITING_PICKUP }]).pendingOrders === 1 },
-    { name: "Fechamento separa venda balcão de entrega", passed: buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).counterSold === 10 && buildCashClosingReport([{ orderType: ORDER_TYPE.COUNTER, value: 10, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }, { orderType: ORDER_TYPE.DELIVERY, value: 20, paymentStatus: PAYMENT_STATUS.PAID, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).deliverySold === 20 },
-    { name: "Venda balcão finalizada mostra só reimpressão, resumo e reabrir PDV", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).print === true && getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).reopenCounterSale === true && getOrderAllowedActions({ orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
-    { name: "Pedido entregue não exibe ações operacionais indevidas", passed: getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).approve === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).manualFinish === false && getOrderAllowedActions({ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.CONFIRMED_DELIVERED, paymentStatus: PAYMENT_STATUS.PAID }).cancel === false },
-    { name: "Cliente vê somente produtos ativos e não pausados", passed: getActiveProducts([{ active: true }, { active: false }, { active: true, pausedUntil: new Date(Date.now() + 60_000).toISOString() }]).length === 1 },
-    { name: "Pausa temporária da loja fecha pedidos online", passed: getStorePauseStatus({ storePausedUntil: new Date(Date.now() + 60_000).toISOString(), storePauseReason: "Teste" }).active === true },
-    { name: "Taxa por bairro substitui taxa padrão", passed: getCustomerDeliveryFee({ defaultDeliveryFee: 5, deliveryZones: [{ district: "Centro", fee: 8, active: true }] }, "centro") === 8 },
-    { name: "Bairro não cadastrado pode ser bloqueado", passed: getDeliveryZoneIssue({ allowUnlistedDistricts: false, deliveryZones: [{ district: "Centro", fee: 5, active: true }] }, "Zona 7").includes("não atendemos") },
-    { name: "Grupos de produtos não podem duplicar", passed: hasDuplicateGroup(["Bebidas"], "bebidas") === true },
-    { name: "Cliente vê grupos com produtos ativos", passed: getVisibleProductGroups(initialProducts, initialProductGroups).includes("Bebidas") === true },
-    { name: "Carrinho do cliente soma linhas repetidas do mesmo sabor", passed: mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }]).length === 1 && mergeCustomerCartItems([{ id: 1, variantId: "uva", price: 10, quantity: 1 }, { id: 1, variantId: "uva", price: 10, quantity: 2 }])[0].quantity === 3 },
-    { name: "Checkout do cliente bloqueia loja fechada", passed: getCustomerCheckoutIssue({ cart: [{ id: 1, price: 20, quantity: 1 }], products: [{ id: 1, active: true, stock: 10, name: "Teste" }], productsTotal: 20, minimumOrderValue: 10, storeIsOpen: false, storeMessage: "Abre às 09:00", customerForm: { name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }, payment: "Pix", changeFor: "", deliveryTotal: 25 }).includes("fechada") },
-    { name: "Checkout do cliente bloqueia troco menor que total", passed: getCustomerCheckoutIssue({ cart: [{ id: 1, price: 20, quantity: 1 }], products: [{ id: 1, active: true, stock: 10, name: "Teste" }], productsTotal: 20, minimumOrderValue: 10, storeIsOpen: true, storeMessage: "Aberto", customerForm: { name: "Gabriel", phone: "(43) 98873-6791", cep: "86610-000", street: "Av. Paraná", number: "480", district: "Centro", city: "Jaguapitã", state: "PR" }, payment: "Dinheiro", changeFor: "10", deliveryTotal: 25 }).includes("troco") },
-    { name: "Entregas sem motoboy também aparecem para todos os entregadores", passed: getCourierDeliveries(initialDeliveries).every((delivery) => delivery.courierUsername === "ALL") },
-    { name: "Limite de entregas ativas bloqueia novo aceite", passed: getCourierAcceptBlockReason({ deliveries: [{ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.OUT_FOR_DELIVERY, pickedUpByUsername: "moto01" }, { orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.OUT_FOR_DELIVERY, pickedUpByUsername: "moto01" }], courierUsername: "moto01", maxActiveDeliveries: 2 }).includes("Limite") },
-    { name: "Agrupamento por região soma entregas", passed: buildDeliveryRouteGroups([{ orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, district: "Centro", deliveryFee: 7 }, { orderType: ORDER_TYPE.DELIVERY, status: DELIVERY_STATUS.WAITING_PICKUP, address: "Rua A, 1 - Centro, Cidade/PR", deliveryFee: 5 }])[0].count === 2 },
-    { name: "PDV balcão não aparece para entregadores", passed: getCourierDeliveries([...initialDeliveries, { orderType: ORDER_TYPE.COUNTER, status: DELIVERY_STATUS.CONFIRMED_DELIVERED }]).length === initialDeliveries.length },
-    { name: "Tipo de pedido inválido não quebra validações", passed: isDeliveryOrder(null) === false && isCounterOrder(null) === false },
-    { name: "Sincronizar pedido vazio não quebra", passed: Array.isArray(syncOrderItemsWithProducts(null, initialProducts)) && syncOrderItemsWithProducts(null, initialProducts).length === 0 },
-    { name: "Usuário de entregador editado não pode duplicar outro", passed: isCourierUsernameAvailable(initialCouriers, "moto02", 1) === true && isCourierUsernameAvailable(initialCouriers, "moto01", 999) === false },
-    {
-      name: "Resumo financeiro da loja soma 30% e 70% das entregas aprovadas",
-      passed:
-        buildStoreDeliveryFinancialSummary([
-          { status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, deliveryFee: 5, courierFee: 3.5, storeFee: 1.5 },
-        ]).storeAmount === 1.5 &&
-        buildStoreDeliveryFinancialSummary([
-          { status: DELIVERY_STATUS.CONFIRMED_DELIVERED, ownerApproved: true, deliveryFee: 5, courierFee: 3.5, storeFee: 1.5 },
-        ]).courierAmount === 3.5,
-    },
-  ];
-
-  return tests;
-}
-
-function DarkLoginInput({ icon, label, value, onChange, placeholder, type = "text", rightButton = null }) {
-  const focusKey = getStableFocusKey(label, placeholder, type);
-  return (
-    <div>
-      <label className="text-sm text-zinc-300">{label}</label>
-      <div className="mt-2 flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-2xl px-4 py-3">
-        <Icon name={icon} className="text-zinc-400" />
-        <input
-          data-focus-key={focusKey}
-          value={value ?? ""}
-          onChange={(event) => {
-            keepInputFocused(event, focusKey);
-            onChange?.(event.target.value);
-          }}
-          placeholder={placeholder}
-          type={type}
-          className="min-h-[44px] bg-transparent text-base outline-none text-white w-full placeholder:text-zinc-500"
-        />
-        {rightButton}
-      </div>
-    </div>
-  );
-}
-
-function Icon({ name, className = "" }) {
-  return <span aria-hidden="true" className={`inline-flex h-5 min-w-5 items-center justify-center text-base leading-none ${className}`}>{ICONS[name] || "•"}</span>;
-}
-
-function StoreLogo({ size = "h-14 w-14" }) {
-  return (
-    <div
-      aria-label="Logo Conveniência Barbosa's"
-      className={`${size} shrink-0 rounded-full bg-yellow-300 text-black border border-yellow-200 shadow-sm flex flex-col items-center justify-center overflow-hidden px-1`}
-    >
-      <span className="text-[5px] font-medium tracking-tight leading-none">
-        Conveniência
-      </span>
-
-      <span className="text-[8px] font-extrabold tracking-[-0.05em] leading-none mt-[1px]">
-        BARBOSA'S
-      </span>
-
-      <div className="mt-[2px] h-[1px] w-6 bg-black/30 rounded-full" />
-
-      <span className="text-[7px] leading-none mt-[2px]">🍻</span>
-    </div>
-  );
-}
-
-function Title({ title, subtitle }) {
-  return <div className="min-w-0"><h2 className="text-xl md:text-3xl font-bold tracking-tight leading-tight">{title}</h2><p className="text-zinc-500 mt-1 text-sm md:text-base">{subtitle}</p></div>;
-}
-
-function Metric({ title, value, icon }) {
-  return <Card className="rounded-3xl border-zinc-200 shadow-sm"><CardContent className="p-4 md:p-5"><div className="h-9 w-9 md:h-10 md:w-10 rounded-2xl bg-zinc-100 flex items-center justify-center mb-3 md:mb-4"><Icon name={icon} /></div><p className="text-xs md:text-sm text-zinc-500">{title}</p><p className="text-xl md:text-2xl font-bold mt-1 break-words">{value}</p></CardContent></Card>;
-}
-
-function CardBox({ children }) {
-  return <Card className="rounded-3xl border-zinc-200 shadow-sm overflow-hidden"><CardContent className="p-4 md:p-5 min-w-0">{children}</CardContent></Card>;
-}
-
-function Input({ label, value, onChange, type = "text", placeholder = "" }) {
-  const focusKey = getStableFocusKey(label, placeholder, type);
-  return (
-    <label className="block">
-      <span className="text-xs font-medium text-zinc-600">{label}</span>
-      <input
-        data-focus-key={focusKey}
-        type={type}
-        value={value ?? ""}
-        onChange={(event) => {
-          keepInputFocused(event, focusKey);
-          onChange?.(event.target.value);
-        }}
-        placeholder={placeholder}
-        className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20"
-      />
-    </label>
-  );
-}
-
-function DarkInput({ label, value, onChange, type = "text", placeholder = "" }) {
-  const focusKey = getStableFocusKey(label, placeholder, type);
-  return (
-    <label className="block">
-      <span className="text-xs font-medium text-zinc-300">{label}</span>
-      <input
-        data-focus-key={focusKey}
-        type={type}
-        value={value ?? ""}
-        onChange={(event) => {
-          keepInputFocused(event, focusKey);
-          onChange?.(event.target.value);
-        }}
-        placeholder={placeholder}
-        className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-base text-white outline-none placeholder:text-zinc-500 focus:ring-2 focus:ring-white/20"
-      />
-    </label>
-  );
-}
-
-function SearchBox({ value, onChange, placeholder }) {
-  const focusKey = getStableFocusKey("Busca", placeholder, "search");
-  return (
-    <div className="bg-white rounded-3xl border border-zinc-200 px-4 py-2 flex items-center gap-3 shadow-sm">
-      <Icon name="search" className="text-zinc-400" />
-      <input
-        data-focus-key={focusKey}
-        value={value ?? ""}
-        onChange={(event) => {
-          keepInputFocused(event, focusKey);
-          onChange?.(event.target.value);
-        }}
-        placeholder={placeholder}
-        className="w-full outline-none bg-transparent"
-      />
-    </div>
-  );
-}
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -1666,7 +376,7 @@ function App() {
   const [showCustomerPromo, setShowCustomerPromo] = useState(false);
   const [canCloseCustomerPromo, setCanCloseCustomerPromo] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [storeSettings, setStoreSettings] = useState(() => loadStoreSettingsFromLocalStorage());
+  const [storeSettings, setStoreSettings] = useState(() => loadInitialStoreSettings());
   const [storeSettingsSyncReady, setStoreSettingsSyncReady] = useState(false);
   const [storeSettingsSyncStatus, setStoreSettingsSyncStatus] = useState("Carregando configurações...");
   const [showStoreScheduleModal, setShowStoreScheduleModal] = useState(false);
@@ -1682,7 +392,10 @@ function App() {
       if (settings) {
         const sanitizedSettings = sanitizeStoreSettings(settings);
         setStoreSettings(sanitizedSettings);
-        saveStoreSettingsToLocalStorage(sanitizedSettings);
+        setProductGroups((previousGroups) => normalizeProductGroups([
+          ...normalizeProductGroups(sanitizedSettings.productGroups),
+          ...normalizeProductGroups(previousGroups),
+        ]));
         setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: sanitizedSettings.defaultDeliveryFee }));
         setStoreSettingsSyncStatus("Configurações carregadas do Supabase.");
       } else if (error) {
@@ -1703,8 +416,6 @@ function App() {
 
   useEffect(() => {
     const sanitizedSettings = sanitizeStoreSettings(storeSettings);
-    saveStoreSettingsToLocalStorage(sanitizedSettings);
-
     if (!storeSettingsSyncReady) return undefined;
 
     const timer = window.setTimeout(async () => {
@@ -1723,8 +434,8 @@ function App() {
   const [promotions, setPromotions] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [kits, setKits] = useState([]);
-  const [clients, setClients] = useState(initialClients);
-  const [deliveries, setDeliveries] = useState(initialDeliveries);
+  const [clients, setClients] = useState([]);
+  const [deliveries, setDeliveries] = useState([]);
   const [couriers, setCouriers] = useState([]);
   const [search, setSearch] = useState("");
   const [ownerPinOpen, setOwnerPinOpen] = useState(false);
@@ -1733,18 +444,20 @@ function App() {
   const [auditStatus, setAuditStatus] = useState("Auditoria ainda não carregada.");
   const [auditFilters, setAuditFilters] = useState({ search: "", action: "all", userType: "all" });
 
-  async function loadProducts() {
+  async function loadProducts(options = {}) {
+    const silent = options === true || options?.silent === true;
     const { products: formattedProducts, error } = await loadProductsFromSupabase();
 
     if (error) {
       console.error("Erro ao carregar produtos:", error);
       setProducts([]);
-      setLastAction(`Erro ao carregar produtos do Supabase: ${error.message || "verifique URL, chave e policies."}`);
+      if (!silent) setLastAction(`Erro ao carregar produtos do Supabase: ${error.message || "verifique URL, chave e policies."}`);
       return;
     }
 
     setProducts(formattedProducts);
-    setLastAction("Produtos carregados do Supabase.");
+    setProductGroups((previousGroups) => mergeProductGroups(previousGroups, formattedProducts));
+    if (!silent) setLastAction("Produtos carregados do Supabase.");
   }
 
   async function loadClients() {
@@ -1752,6 +465,7 @@ function App() {
 
     if (error) {
       console.error("Erro ao carregar clientes:", error);
+      setClients([]);
       setLastAction(`Clientes não carregados do Supabase: ${error.message || "verifique SELECT em clients."}`);
       return;
     }
@@ -2189,6 +903,8 @@ function App() {
 
     if (result.ordersError) {
       console.error("Erro ao carregar pedidos:", result.ordersError);
+      setDeliveries([]);
+      setDeliveriesLoaded(true);
       setLastAction(
         `PDV Entregas não conseguiu ler a tabela orders: ${result.ordersError.message || "verifique a policy SELECT de orders no Supabase."}`
       );
@@ -2229,7 +945,17 @@ function App() {
     }
 
     const savedDelivery = { ...delivery, id: orderId };
-    await saveOrderPayments(savedDelivery);
+
+    try {
+      await saveOrderPayments(savedDelivery);
+    } catch (error) {
+      const cleanup = await cleanupOrderAfterPartialSave(orderId, "pedido com pagamento incompleto");
+      const cleanupMessage = cleanup.cleaned
+        ? "Pedido removido automaticamente para evitar venda incompleta."
+        : `Pedido pode ter ficado salvo sem pagamento; limpe manualmente no Supabase. Detalhe da limpeza: ${cleanup.message}`;
+      throw new Error(`${error.message || "Pagamentos não foram salvos."} ${cleanupMessage}`, { cause: error });
+    }
+
     await saveStockMovements(savedDelivery, "sale");
     await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "" });
 
@@ -2370,20 +1096,77 @@ function App() {
     return !error;
   }
 
-  async function persistProductStocks(nextProducts) {
+  async function cleanupOrderAfterPartialSave(orderId, label = "pedido") {
+    if (!orderId) return { cleaned: false, message: "ID do pedido ausente." };
+
+    const { error: itemsCleanupError } = await supabase
+      .from("order_items")
+      .delete()
+      .eq("order_id", orderId);
+
+    const { error: paymentsCleanupError } = await supabase
+      .from("order_payments")
+      .delete()
+      .eq("order_id", orderId);
+
+    const { error: orderCleanupError } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId);
+
+    const errors = [itemsCleanupError, paymentsCleanupError, orderCleanupError].filter(Boolean);
+    if (errors.length > 0) {
+      console.error(`Limpeza de ${label} salvo parcialmente falhou:`, errors);
+      return {
+        cleaned: false,
+        message: errors.map((error) => error.message || String(error)).join("; "),
+      };
+    }
+
+    return { cleaned: true, message: "" };
+  }
+
+  function buildStockDeltasFromItems(items, movementType = "sale") {
+    const sign = movementType === "restore" || movementType === "cancel" ? 1 : -1;
+    const grouped = expandItemsForStock(items || []).reduce((acc, item) => {
+      const productId = Number(item.id ?? item.productId ?? item.product_id);
+      const quantity = toPositiveInteger(item.quantity, 0);
+      if (!Number.isFinite(productId) || quantity <= 0) return acc;
+      acc[productId] = Number(acc[productId] || 0) + quantity * sign;
+      return acc;
+    }, {});
+
+    return Object.entries(grouped).map(([productId, delta]) => ({ productId: Number(productId), delta }));
+  }
+
+  async function persistStockDeltasForItems(items, movementType = "sale") {
     try {
-      await Promise.all(
-        nextProducts.map((product) =>
-          supabase
-            .from("products")
-            .update({ stock: Number(product.stock || 0) })
-            .eq("id", product.id)
-        )
-      );
+      const stockDeltas = buildStockDeltasFromItems(items, movementType);
+      if (stockDeltas.length === 0) return true;
+
+      const { error, data } = await applyProductStockDeltasInSupabase(stockDeltas);
+      if (error) {
+        console.error("Erro ao atualizar estoque no Supabase:", error, data);
+        setLastAction(`Estoque não sincronizado no Supabase: ${error.message || "verifique a função apply_product_stock_deltas."}`);
+        return false;
+      }
+
+      return true;
     } catch (error) {
       console.error("Erro ao atualizar estoque no Supabase:", error);
+      setLastAction(`Estoque não sincronizado no Supabase: ${error.message || error}`);
+      return false;
     }
   }
+
+  async function rollbackStockAfterSaveFailure(items, label) {
+    const restored = await persistStockDeltasForItems(items, "restore");
+    if (!restored) {
+      addNotification("estoque_rollback_falhou", "Atenção: estoque precisa de conferência", `${label} não foi salvo, mas a devolução automática do estoque falhou. Confira manualmente antes de vender novamente.`, "loja");
+    }
+    return restored;
+  }
+
 
   useEffect(() => {
     let isMounted = true;
@@ -2409,7 +1192,16 @@ function App() {
       loadDeliveries();
     };
 
+    const refreshCatalog = () => {
+      if (!isMounted) return;
+      loadProducts({ silent: true });
+      loadPromotions();
+      loadCoupons();
+      loadKits();
+    };
+
     const refreshInterval = window.setInterval(refreshDeliveries, 3000);
+    const catalogRefreshInterval = window.setInterval(refreshCatalog, 10000);
 
     const ordersChannel = supabase
       .channel("orders-pvd-entregas-sync")
@@ -2419,7 +1211,7 @@ function App() {
 
     const productsClientsChannel = supabase
       .channel("products-clients-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => { if (isMounted) loadProducts(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => { if (isMounted) loadProducts({ silent: true }); })
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => { if (isMounted) loadClients(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "couriers" }, () => { if (isMounted) loadCouriers(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "promotions" }, () => { if (isMounted) loadPromotions(); })
@@ -2438,6 +1230,7 @@ function App() {
     return () => {
       isMounted = false;
       window.clearInterval(refreshInterval);
+      window.clearInterval(catalogRefreshInterval);
       supabase.removeChannel(ordersChannel);
       supabase.removeChannel(productsClientsChannel);
     };
@@ -2459,8 +1252,17 @@ function App() {
   const todayInput = getDateInputValue(new Date());
   const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
   const [stockAdjustmentDraft, setStockAdjustmentDraft] = useState({ productId: "", mode: "entrada", quantity: "", targetStock: "", reason: "Reposição de estoque" });
-  const [productGroups, setProductGroups] = useState(initialProductGroups);
+  const [productGroups, setProductGroups] = useState(() => normalizeProductGroups(initialProductGroups));
   const [newProductGroup, setNewProductGroup] = useState("");
+  useEffect(() => {
+    setStoreSettings((previousSettings) => {
+      const normalizedGroups = normalizeProductGroups(productGroups);
+      const currentGroups = normalizeProductGroups(previousSettings.productGroups || []);
+      if (JSON.stringify(normalizedGroups) === JSON.stringify(currentGroups)) return previousSettings;
+      return sanitizeStoreSettings({ ...previousSettings, productGroups: normalizedGroups });
+    });
+  }, [productGroups]);
+
   const [newPromotion, setNewPromotion] = useState({ title: "", description: "", productId: "", badge: "Promoção da loja", imageUrl: "", discountPercent: "", promotionalPrice: "", startDate: "", endDate: "", active: true });
   const [newCoupon, setNewCoupon] = useState({ code: "", description: "", discountType: "fixed", discountValue: "", minimumOrderValue: "", maxDiscount: "", usageLimit: "", startDate: "", endDate: "", active: true });
   const [promotionProductSearch, setPromotionProductSearch] = useState("");
@@ -3046,7 +1848,7 @@ function App() {
     setNewProduct((previousProduct) => ({
       ...previousProduct,
       hasVariants: true,
-      variants: [...normalizeProductVariants(previousProduct.variants), { id: Date.now(), name: "", imageUrl: "", active: true }],
+      variants: [...normalizeProductVariants(previousProduct.variants), { id: makeUniqueNumericId(), name: "", imageUrl: "", active: true }],
     }));
   }
 
@@ -3079,7 +1881,7 @@ function App() {
   function addExistingProductVariant(productId) {
     setProducts((previousProducts) => previousProducts.map((product) => (
       product.id === productId
-        ? { ...product, hasVariants: true, variants: [...normalizeProductVariants(product.variants), { id: Date.now(), name: "", imageUrl: "", active: true }] }
+        ? { ...product, hasVariants: true, variants: [...normalizeProductVariants(product.variants), { id: makeUniqueNumericId(), name: "", imageUrl: "", active: true }] }
         : product
     )));
   }
@@ -3147,13 +1949,25 @@ function App() {
     await saveProductImage(id, "", "Foto do produto removida com sucesso.");
   }
 
-  function addProductGroup() {
+  async function addProductGroup() {
     const groupName = normalizeGroupName(newProductGroup);
     if (!groupName) return setLastAction("Digite o nome do grupo antes de adicionar.");
     if (hasDuplicateGroup(productGroups, groupName)) return setLastAction("Esse grupo já existe.");
-    setProductGroups((previousGroups) => [...previousGroups, groupName]);
+
+    const nextGroups = normalizeProductGroups([...productGroups, groupName]);
+    const nextSettings = sanitizeStoreSettings({ ...storeSettings, productGroups: nextGroups });
+
+    const { error } = await saveStoreSettingsToSupabaseService(nextSettings);
+    if (error) {
+      setStoreSettingsSyncStatus("Grupo não foi salvo no Supabase.");
+      return setLastAction(`Grupo não criado: não foi possível salvar no Supabase (${error.message || "verifique store_settings."}).`);
+    }
+
+    setProductGroups(nextGroups);
+    setStoreSettings(nextSettings);
     setNewProductGroup("");
-    setLastAction("Grupo de produtos criado com sucesso.");
+    setStoreSettingsSyncStatus("Grupo sincronizado no Supabase.");
+    setLastAction("Grupo de produtos criado e salvo no Supabase.");
   }
 
   async function addCoupon() {
@@ -3165,7 +1979,7 @@ function App() {
     if (newCoupon.discountType === "percent" && discountValue > 100) return setLastAction("Cupom percentual não pode passar de 100%.");
 
     const couponToSave = {
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       code,
       description: newCoupon.description.trim(),
       discountType: newCoupon.discountType,
@@ -3249,7 +2063,7 @@ function App() {
     if (!(promotionalPrice > 0) || promotionalPrice >= toNonNegativeNumber(product.price, 0)) return setLastAction("Informe uma porcentagem de desconto ou preço promocional menor que o preço normal.");
 
     const promotionToSave = {
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       title: newPromotion.title.trim(),
       description: newPromotion.description.trim(),
       productId: Number(newPromotion.productId),
@@ -3380,11 +2194,17 @@ function App() {
     if (newKit.items.length === 0) return setLastAction("Adicione produtos cadastrados para montar o kit.");
     const baseTotal = buildKitProductsTotal(newKit.items, products);
     const finalPrice = newKit.price === "" ? baseTotal : Number(newKit.price || 0);
-    const kitToSave = { id: Date.now(), name: newKit.name.trim(), description: newKit.description.trim(), items: newKit.items, price: finalPrice, endDate: newKit.endDate, active: true };
+    const kitToSave = { id: makeUniqueNumericId(), name: newKit.name.trim(), description: newKit.description.trim(), items: newKit.items, price: finalPrice, endDate: newKit.endDate, active: true };
     const { error: kitError } = await insertWithSchemaRetry("kits", { id: kitToSave.id, name: kitToSave.name, description: kitToSave.description, price: kitToSave.price, end_date: kitToSave.endDate || null, active: true }, false);
     if (kitError) return setLastAction(`Kit não salvo no Supabase: ${kitError.message || "verifique kits."}`);
-    const { error: kitItemsError } = await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: Date.now() + Math.floor(Math.random() * 1000000), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
-    if (kitItemsError) return setLastAction(`Itens do kit não salvos no Supabase: ${kitItemsError.message || "verifique kit_items."}`);
+    const { error: kitItemsError } = await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: makeUniqueNumericId(), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
+    if (kitItemsError) {
+      const { error: cleanupError } = await supabase.from("kits").delete().eq("id", kitToSave.id);
+      if (cleanupError) console.warn("Kit principal não removido após falha nos itens:", cleanupError);
+      return setLastAction(cleanupError
+        ? `Itens do kit não salvos no Supabase e o kit principal pode ter ficado incompleto: ${kitItemsError.message || "verifique kit_items."}`
+        : `Itens do kit não salvos no Supabase. O kit principal foi removido para evitar cadastro incompleto: ${kitItemsError.message || "verifique kit_items."}`);
+    }
     setKits((previousKits) => [...previousKits, kitToSave]);
     setNewKit({ name: "", description: "", items: [], price: "", endDate: "", active: true });
     setNewKitPriceEdited(false);
@@ -3431,13 +2251,46 @@ function App() {
     ));
   }
 
-  function saveKitEdits(id) {
+  async function saveKitEdits(id) {
     const kit = kits.find((item) => item.id === id);
     if (!kit) return;
     if (!kit.name.trim()) return setLastAction("Kit não salvo: informe o nome.");
     if (!kit.items || kit.items.length === 0) return setLastAction("Kit não salvo: adicione produtos cadastrados.");
+
+    const normalizedItems = (kit.items || [])
+      .map((item) => ({ productId: Number(item.productId), quantity: Math.max(1, Number(item.quantity || 1)) }))
+      .filter((item) => Number.isFinite(item.productId) && item.productId > 0);
+
+    if (normalizedItems.length === 0) return setLastAction("Kit não salvo: os produtos vinculados não foram encontrados.");
+
+    const { error: kitError } = await updateWithSchemaRetry("kits", id, {
+      name: kit.name.trim(),
+      description: String(kit.description || "").trim(),
+      price: Number(kit.price || buildKitProductsTotal(normalizedItems, products)),
+      end_date: kit.endDate || null,
+      active: kit.active !== false,
+    });
+
+    if (kitError) {
+      console.error("Erro ao salvar kit no Supabase:", kitError);
+      return setLastAction(`Kit não salvo no Supabase: ${kitError.message || "verifique UPDATE em kits."}`);
+    }
+
+    const { data: replaceItemsResult, error: replaceItemsError } = await supabase.rpc("replace_kit_items", {
+      p_kit_id: id,
+      p_items: normalizedItems.map((item) => ({ product_id: item.productId, quantity: item.quantity })),
+    });
+
+    if (replaceItemsError || replaceItemsResult?.success === false) {
+      const reason = replaceItemsError?.message || replaceItemsResult?.error || "verifique a função replace_kit_items";
+      console.error("Erro ao substituir itens do kit de forma transacional:", replaceItemsError || replaceItemsResult);
+      return setLastAction(`Kit salvo parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-35.sql.`);
+    }
+
+    setKits((previousKits) => previousKits.map((item) => (item.id === id ? { ...kit, items: normalizedItems } : item)));
     setEditingKitId(null);
-    setLastAction("Kit atualizado com sucesso.");
+    await loadKits();
+    setLastAction("Kit atualizado e sincronizado no Supabase.");
   }
 
   function addKitToCustomerCart(kit) {
@@ -3477,12 +2330,36 @@ function App() {
     const barcode = normalizeBarcode(newProduct.barcode);
     if (!newProduct.name || !newProduct.price || !barcode) return setLastAction("Produto não salvo: nome, preço e código de barras são obrigatórios.");
     if (!normalizeGroupName(newProduct.category)) return setLastAction("Selecione um grupo para o produto.");
-    if (hasDuplicateBarcode(products, barcode)) return setLastAction("Código de barras já cadastrado em outro produto.");
+    if (hasDuplicateBarcode(products, barcode)) return setLastAction("Código de barras já cadastrado em outro produto ativo.");
     const cleanVariants = normalizeProductVariants(newProduct.variants);
     if (newProduct.hasVariants && cleanVariants.length === 0) return setLastAction("Adicione pelo menos um sabor antes de cadastrar este produto.");
 
-    const productId = Date.now();
+    const productId = makeUniqueNumericId();
     const productToInsert = buildProductInsertPayload({ ...newProduct, variants: cleanVariants }, productId);
+
+    const existingByBarcode = await findProductByBarcodeInSupabase(barcode);
+    if (existingByBarcode.error) {
+      console.error("Erro ao conferir código no Supabase:", existingByBarcode.error);
+      return setLastAction(`Produto não salvo: não consegui conferir o código no Supabase (${existingByBarcode.error.message || "verifique SELECT em products"}).`);
+    }
+
+    if (existingByBarcode.product) {
+      if (!existingByBarcode.product.deletedAt && existingByBarcode.product.active === true) {
+        return setLastAction("Código de barras já cadastrado em outro produto ativo.");
+      }
+
+      const productPatch = buildProductPatch({ ...newProduct, variants: cleanVariants, active: true }, { includeStock: true });
+      const { error, ignoredColumns = [] } = await restoreProductInSupabase(existingByBarcode.product.id, barcode, productPatch);
+      if (error) {
+        console.error("Erro ao restaurar produto excluído:", error);
+        return setLastAction(`Produto não restaurado no Supabase: ${error.message || "verifique UPDATE em products."}`);
+      }
+
+      setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+      await loadProducts();
+      setLastAction(ignoredColumns.length > 0 ? `Produto recadastrado e reativado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto recadastrado: o cadastro excluído foi reativado no Supabase.");
+      return;
+    }
 
     // Importante: não usamos .select().single() aqui.
     // Algumas policies permitem INSERT público, mas bloqueiam SELECT no retorno.
@@ -3496,6 +2373,7 @@ function App() {
 
     const savedProduct = mapProductFromDatabase(productToInsert);
 
+    setProductGroups((previousGroups) => mergeProductGroups(previousGroups, [savedProduct]));
     setProducts((previousProducts) => [...previousProducts, savedProduct]);
     setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
     await loadProducts();
@@ -3508,7 +2386,7 @@ function App() {
     if (!isValidBrazilMobilePhone(newClient.phone)) return setLastAction("Telefone inválido. Use DDD entre parênteses + número 9 obrigatório. Exemplo: (43) 98873-6791.");
     if (hasDuplicateClientRecord(clients, newClient)) return setLastAction("Cliente não salvo: já existe cadastro com esse telefone.");
 
-    const clientToInsert = mapClientToDatabase({ id: Date.now(), ...newClient });
+    const clientToInsert = mapClientToDatabase({ id: makeUniqueNumericId(), ...newClient });
     const { error, ignoredColumns } = await insertClientInSupabase(clientToInsert);
 
     if (error) {
@@ -3599,7 +2477,7 @@ function App() {
 
   async function addCourier() {
     const courierToInsert = mapCourierToDatabase({
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       name: newCourier.name,
       username: newCourier.username,
       password: newCourier.password || generateStrongPassword(),
@@ -3784,13 +2662,36 @@ function App() {
     }
 
     const productPatch = buildProductPatch({ ...product, variants: cleanVariants });
+    const desiredStock = Number(product.stock || 0);
+
+    const currentStockResult = await fetchProductStockFromSupabase(id);
+    if (currentStockResult.error) {
+      console.error("Erro ao consultar estoque atual do produto:", currentStockResult.error);
+      return setLastAction(`Produto não salvo: não consegui confirmar o estoque atual no Supabase (${currentStockResult.error.message || "verifique SELECT em products"}).`);
+    }
+
+    const stockDelta = desiredStock - Number(currentStockResult.stock || 0);
+    if (stockDelta !== 0) {
+      const stockResult = await applyProductStockDeltasInSupabase([{ productId: id, delta: stockDelta }]);
+      if (stockResult.error) {
+        console.error("Erro ao ajustar estoque durante edição do produto:", stockResult.error);
+        return setLastAction(`Produto não salvo: estoque não foi ajustado no Supabase (${stockResult.error.message || "verifique apply_product_stock_deltas"}).`);
+      }
+    }
 
     const { error, ignoredColumns } = await updateProductInSupabase(id, productPatch);
     if (error) {
       console.error("Erro ao salvar edição do produto:", error);
+      if (stockDelta !== 0) {
+        const rollbackResult = await applyProductStockDeltasInSupabase([{ productId: id, delta: -stockDelta }]);
+        if (rollbackResult.error) {
+          addNotification("estoque_edicao_rollback_falhou", "Conferir estoque do produto", `A edição de ${product.name} falhou e a reversão automática do estoque também falhou. Confira o saldo no Supabase.`, "loja");
+        }
+      }
       return setLastAction(`Produto não salvo no Supabase: ${error.message || "verifique policies de UPDATE em products."}`);
     }
 
+    setProductGroups((previousGroups) => mergeProductGroups(previousGroups, [product]));
     await loadProducts();
     setLastAction(ignoredColumns.length > 0 ? `Produto atualizado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto atualizado com sucesso no Supabase.");
     setEditingProductId(null);
@@ -4062,7 +2963,7 @@ function App() {
       const initialPaymentStatus = customerPayment === "Pix" ? PAYMENT_STATUS.PENDING : PAYMENT_STATUS.RECEIVABLE;
 
       const newDelivery = {
-        id: Date.now(),
+        id: makeUniqueNumericId(),
         cashSessionId: cashSession.id || "",
         originType: "delivery",
         orderType: ORDER_TYPE.DELIVERY,
@@ -4110,20 +3011,24 @@ function App() {
         launchedAt: new Date().toISOString(),
       };
 
+      const stockPersisted = await persistStockDeltasForItems(syncedItems, "sale");
+      if (!stockPersisted) {
+        addNotification("estoque_insuficiente_cliente", "Pedido bloqueado por estoque", `Pedido de ${normalizedCustomerName} não foi salvo porque o estoque não pôde ser reservado no Supabase.`, "loja");
+        return setCustomerError("Não foi possível reservar o estoque para este pedido. Atualize a página e tente novamente.");
+      }
+
       let savedDelivery;
       try {
         savedDelivery = await saveDeliveryToSupabase(newDelivery);
       } catch (error) {
+        await rollbackStockAfterSaveFailure(syncedItems, "Pedido do cliente");
+        await loadProducts({ silent: true });
         return setCustomerError(`Erro ao enviar pedido para a loja: ${error.message || "verifique Supabase."}`);
       }
 
       setCustomerForm((previousForm) => ({ ...previousForm, name: normalizedCustomerName, phone: normalizedCustomerPhone, cep: normalizedCustomerCep, state: String(previousForm.state || "").trim().toUpperCase().slice(0, 2) }));
       setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
-      setProducts((previousProducts) => {
-        const nextProducts = reduceProductStock(previousProducts, syncedItems);
-        persistProductStocks(nextProducts);
-        return nextProducts;
-      });
+      await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
       addNotification("novo_pedido", "Novo pedido recebido", `${normalizedCustomerName} enviou um pedido de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
       addNotification("pedido_recebido", "Pedido recebido pela loja", `Pedido #${savedDelivery.id} recebido. A loja vai aprovar e liberar para entrega.`, "customer", savedDelivery.id, { customerPhone: normalizedCustomerPhone });
       if (appliedCustomerCoupon) await registerCouponUsage(appliedCustomerCoupon);
@@ -4652,15 +3557,13 @@ function App() {
       movementType = "manual_correction";
     }
 
-    const { error } = await updateWithSchemaRetry("products", product.id, { stock: nextStock });
-    if (error) {
-      console.error("Erro ao ajustar estoque:", error);
-      return setLastAction(`Estoque não ajustado no Supabase: ${error.message || "verifique a tabela products."}`);
+    const stockResult = await applyProductStockDeltasInSupabase([{ productId: product.id, delta: nextStock - currentStock }]);
+    if (stockResult.error) {
+      console.error("Erro ao ajustar estoque:", stockResult.error);
+      return setLastAction(`Estoque não ajustado no Supabase: ${stockResult.error.message || "verifique a tabela products ou a função apply_product_stock_deltas."}`);
     }
 
-    setProducts((previousProducts) => previousProducts.map((currentProduct) => (
-      String(currentProduct.id) === String(product.id) ? { ...currentProduct, stock: nextStock } : currentProduct
-    )));
+    await loadProducts({ silent: true });
 
     const movementRow = {
       product_id: Number.isFinite(Number(product.id)) ? Number(product.id) : null,
@@ -4842,7 +3745,7 @@ function App() {
     }
 
     const newSale = {
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       cashSessionId: cashSession.id || "",
       originType: "counter",
       orderType: ORDER_TYPE.COUNTER,
@@ -4876,20 +3779,25 @@ function App() {
       launchedAt: new Date().toISOString(),
     };
 
+    const stockPersisted = await persistStockDeltasForItems(syncedItems, "sale");
+    if (!stockPersisted) {
+      preOpenedPrintWindow.close();
+      addNotification("estoque_balcao_bloqueado", "Venda bloqueada por estoque", "Venda de balcão não foi salva porque o estoque não pôde ser reservado no Supabase.", "loja");
+      return setLastAction("Venda não finalizada: não foi possível reservar o estoque no Supabase. Atualize os produtos e tente novamente.");
+    }
+
     let savedSale;
     try {
       savedSale = await saveDeliveryToSupabase(newSale);
     } catch (error) {
+      await rollbackStockAfterSaveFailure(syncedItems, "Venda de balcão");
+      await loadProducts({ silent: true });
       preOpenedPrintWindow.close();
       return setLastAction(`Venda não salva no Supabase: ${error.message || "verifique Supabase."}`);
     }
 
     setDeliveries((previousDeliveries) => [savedSale, ...previousDeliveries]);
-    setProducts((previousProducts) => {
-      const nextProducts = reduceProductStock(previousProducts, syncedItems);
-      persistProductStocks(nextProducts);
-      return nextProducts;
-    });
+    await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     printDeliveryReceipt(savedSale, 1, { printWindow: preOpenedPrintWindow });
     setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
     setCounterProductSearch("");
@@ -4912,7 +3820,7 @@ function App() {
     const estimatedDeliveryMinutes = buildEstimatedDeliveryMinutes(deliveries, true);
 
     const newDelivery = {
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       cashSessionId: cashSession.id || "",
       originType: "delivery",
       orderType: ORDER_TYPE.DELIVERY,
@@ -4955,19 +3863,23 @@ function App() {
       launchedAt: new Date().toISOString(),
     };
 
+    const stockPersisted = await persistStockDeltasForItems(syncedItems, "sale");
+    if (!stockPersisted) {
+      addNotification("estoque_entrega_bloqueado", "Entrega bloqueada por estoque", "Pedido do PDV Entregas não foi salvo porque o estoque não pôde ser reservado no Supabase.", "loja");
+      return setLastAction("Entrega não lançada: não foi possível reservar o estoque no Supabase. Atualize os produtos e tente novamente.");
+    }
+
     let savedDelivery;
     try {
       savedDelivery = await saveDeliveryToSupabase(newDelivery);
     } catch (error) {
+      await rollbackStockAfterSaveFailure(syncedItems, "Entrega do PDV");
+      await loadProducts({ silent: true });
       return setLastAction(`Entrega não salva no Supabase: ${error.message || "verifique Supabase."}`);
     }
 
     setDeliveries((previousDeliveries) => [savedDelivery, ...previousDeliveries]);
-    setProducts((previousProducts) => {
-      const nextProducts = reduceProductStock(previousProducts, syncedItems);
-      persistProductStocks(nextProducts);
-      return nextProducts;
-    });
+    await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     addNotification("pedido_pdv_entrega", "Pedido lançado no PDV Entregas", `Pedido #${savedDelivery.id} de ${selectedDeliveryClient.name} foi lançado com total de ${money(savedDelivery.value)}.`, "loja", savedDelivery.id);
     addNotification("nova_entrega", "Nova entrega disponível", `Pedido #${savedDelivery.id} liberado para retirada na loja.`, "courier", savedDelivery.id);
     registerDeliveryAsPrinted(savedDelivery.id);
@@ -5274,11 +4186,12 @@ function App() {
 
     await cancelExistingOrderPayments(id, `venda reaberta no PDV: ${reason}`);
     setOrderPayments((previous) => previous.map((payment) => String(payment.orderId) === String(id) ? { ...payment, status: "cancelled", notes: `Venda reaberta no PDV: ${reason}` } : payment));
-    setProducts((previousProducts) => {
-      const nextProducts = restoreProductStock(previousProducts, sale.items || []);
-      persistProductStocks(nextProducts);
-      return nextProducts;
-    });
+    const stockPersisted = await persistStockDeltasForItems(sale.items || [], "restore");
+    if (!stockPersisted) {
+      addNotification("estoque_nao_sincronizado", "Atenção: estoque não sincronizado", `Venda #${id} foi reaberta, mas o estoque não voltou no Supabase. Confira antes de finalizar novamente.`, "loja", id);
+      return setLastAction("Venda reaberta, mas o estoque não voltou no Supabase. Corrija a sincronização antes de finalizar novamente.");
+    }
+    await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     setCounterDraft({
       customerName: sale.client || "Cliente balcão",
       phone: normalizePhoneInput(sale.phone || ""),
@@ -5337,11 +4250,12 @@ function App() {
       return;
     }
 
-    setProducts((previousProducts) => {
-      const nextProducts = restoreProductStock(previousProducts, delivery.items || []);
-      persistProductStocks(nextProducts);
-      return nextProducts;
-    });
+    const stockPersisted = await persistStockDeltasForItems(delivery.items || [], "restore");
+    if (!stockPersisted) {
+      addNotification("estoque_nao_sincronizado", "Atenção: estoque não sincronizado", `${isCounterOrder(delivery) ? "Venda" : "Pedido"} #${id} foi cancelado, mas o estoque não voltou no Supabase. Ajuste manualmente antes de vender novamente.`, "loja", id);
+      return setLastAction(`${isCounterOrder(delivery) ? "Venda" : "Pedido"} cancelado, mas o estoque não voltou no Supabase. Ajuste manualmente antes de vender novamente.`);
+    }
+    await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     setDeliveries((previousDeliveries) =>
       previousDeliveries.map((item) =>
         item.id === id
@@ -5374,7 +4288,7 @@ function App() {
     const difference = countedCash - report.expectedDrawerCash;
     const closedAt = new Date().toISOString();
     const record = {
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       createdAt: closedAt,
       openedAt: cashSession.openedAt || "",
       closedAt,
@@ -5461,7 +4375,7 @@ function App() {
     const key = getTabCustomerKey({ customerName: name, phone });
     const creditLimit = toSafeNumber(tabDraft.creditLimit, toSafeNumber(tabCreditLimits[key], DEFAULT_TAB_CREDIT_LIMIT));
     if (creditLimit < 0) return setLastAction("Informe um limite válido para a comanda.");
-    const tab = { id: Date.now(), customerName: name, phone, creditLimit, payment: tabDraft.payment || "Dinheiro", items: [], openedAt: new Date().toISOString(), cashSessionId: cashSession.id || "", notes: "Comanda/fiado" };
+    const tab = { id: makeUniqueNumericId(), customerName: name, phone, creditLimit, payment: tabDraft.payment || "Dinheiro", items: [], openedAt: new Date().toISOString(), cashSessionId: cashSession.id || "", notes: "Comanda/fiado" };
     try { await persistTabAccount(tab, "open"); } catch (error) { return setLastAction(`Comanda não aberta no Supabase: ${error.message || "verifique tab_accounts."}`); }
     setTabCreditLimits((previous) => ({ ...previous, [key]: creditLimit }));
     setTabsAccounts((previous) => [tab, ...previous]);
@@ -5570,7 +4484,7 @@ function App() {
     const mixedPaymentDetails = tabClosingPayment === "Misto" ? getMixedPaymentDetails(tabClosingMixedPayment) : "";
     const paymentStatus = tabClosingPayment === "Fiado/anotado" ? PAYMENT_STATUS.STORE_CREDIT : PAYMENT_STATUS.PAID;
     const closedOrder = {
-      id: Date.now(),
+      id: makeUniqueNumericId(),
       cashSessionId: cashSession.id || "",
       originType: "counter",
       orderType: ORDER_TYPE.COUNTER,
@@ -5607,21 +4521,29 @@ function App() {
       closedAt: new Date().toISOString(),
     };
     const nextLimit = adjustTabCreditLimitAfterClose(tab, total, tabClosingPayment);
+    const stockPersisted = await persistStockDeltasForItems(syncedItems, "sale");
+    if (!stockPersisted) {
+      preOpenedPrintWindow.close();
+      addNotification("estoque_comanda_bloqueado", "Comanda bloqueada por estoque", `Comanda #${tabId} não foi fechada porque o estoque não pôde ser reservado no Supabase.`, "loja");
+      return setLastAction("Comanda não fechada: não foi possível reservar o estoque no Supabase. Atualize os produtos e tente novamente.");
+    }
+
     let savedClosedOrder;
     try {
       savedClosedOrder = await saveDeliveryToSupabase(closedOrder);
       await persistTabAccount({ ...tab, closedAt: closedOrder.closedAt, payment: tabClosingPayment, items: syncedItems }, "closed");
     } catch (error) {
+      if (savedClosedOrder?.id) {
+        await cleanupOrderAfterPartialSave(savedClosedOrder.id, "comanda com fechamento incompleto");
+      }
+      await rollbackStockAfterSaveFailure(syncedItems, "Fechamento de comanda");
+      await loadProducts({ silent: true });
       preOpenedPrintWindow.close();
       return setLastAction(`Comanda não salva no Supabase: ${error.message || "verifique Supabase/tab_accounts."}`);
     }
 
     setDeliveries((previous) => [savedClosedOrder, ...previous]);
-    setProducts((previousProducts) => {
-      const nextProducts = reduceProductStock(previousProducts, syncedItems);
-      persistProductStocks(nextProducts);
-      return nextProducts;
-    });
+    await loadProducts({ silent: true }); // estoque recarregado do Supabase após delta atômico
     setTabsAccounts((previous) => previous.filter((item) => item.id !== tabId));
     cancelClosingTab();
     printDeliveryReceipt(savedClosedOrder, 2, { printWindow: preOpenedPrintWindow });
@@ -6574,7 +5496,7 @@ function App() {
 
             {lastAction && <div className="bg-white border border-zinc-200 rounded-3xl px-5 py-4 flex items-center gap-3 shadow-sm"><Icon name="check" className="text-emerald-600" /><p className="text-sm text-zinc-700">{lastAction}</p></div>}
 
-            {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} attentionSummary={storeAttentionSummary} lastDailyBackupAt={lastDailyBackupAt} onDownloadBackup={exportOperationalBackup} onInactivateProduct={toggleProductStatus} />}
+            {activeTab === "dashboard" && <DashboardTab dayReport={dayReport} selfTests={selfTests} passedTests={passedTests} products={products} clients={clients} couriers={couriers} deliveries={deliveries} storeDeliverySummary={storeDeliverySummary} notifications={ownerNotifications} attentionSummary={storeAttentionSummary} lastDailyBackupAt={lastDailyBackupAt} nextOrderEstimatedDeliveryLabel={nextOrderEstimatedDeliveryLabel} onDownloadBackup={exportOperationalBackup} onInactivateProduct={toggleProductStatus} />}
 
             {activeTab === "audit" && (
               <AuditTab
@@ -8228,802 +7150,6 @@ function App() {
       {ownerPinOpen && <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"><Card className="max-w-sm w-full rounded-3xl"><CardContent className="p-6"><div className="flex items-center gap-3 mb-4"><Icon name="lock" /><h3 className="font-bold text-lg">Confirmação da loja</h3></div><p className="text-sm text-zinc-600 mb-4">Ações sensíveis devem ser confirmadas com a senha/PIN do usuário da loja quando necessário.</p><Input label="PIN de confirmação" type="password" placeholder="****" /><div className="flex gap-2 mt-5"><Button onClick={() => setOwnerPinOpen(false)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 flex-1">Confirmar</Button><Button onClick={() => setOwnerPinOpen(false)} variant="secondary" className="rounded-2xl flex-1">Fechar</Button></div></CardContent></Card></div>}
     </div>
   );
-
-
-function CustomerOrderStatusCard({ delivery, storeSettings, notifications = [], expanded, onToggleExpanded, onDismiss }) {
-  const statusInfo = getCustomerOrderStatusInfo(delivery);
-  const timeline = getCustomerOrderTimeline(delivery?.status);
-  const toneClasses = {
-    amber: "border-amber-200 bg-amber-50 text-amber-950",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-950",
-    blue: "border-blue-200 bg-blue-50 text-blue-950",
-    red: "border-red-200 bg-red-50 text-red-950",
-  };
-  const badgeClasses = {
-    amber: "bg-amber-100 text-amber-800",
-    emerald: "bg-emerald-100 text-emerald-800",
-    blue: "bg-blue-100 text-blue-800",
-    red: "bg-red-100 text-red-800",
-  };
-  const items = Array.isArray(delivery?.items) ? delivery.items : [];
-  const productsTotal = Number(delivery?.productsTotal ?? buildOrderTotal(items));
-  const deliveryFee = normalizeDeliveryFee(delivery?.deliveryFee);
-  const discount = Number(delivery?.discount || delivery?.couponDiscount || 0);
-  const total = Number(delivery?.value || buildDeliveryTotal(productsTotal, deliveryFee, discount));
-  const estimated = Number(delivery?.estimatedDeliveryMinutes || 0);
-  const lastUpdate = getLastCustomerOrderUpdate(delivery, notifications);
-  const canDismiss = statusInfo.final || statusInfo.important;
-  const whatsappUrl = buildWhatsAppUrl(storeSettings?.storePhone, `Olá, gostaria de saber sobre meu pedido #${delivery?.id}.`);
-
-  return (
-    <div className={`rounded-[2rem] border p-4 shadow-sm ${toneClasses[statusInfo.tone] || toneClasses.amber}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-black uppercase tracking-wide opacity-70">Pedido em andamento</p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <h3 className="text-2xl font-black leading-tight">#{delivery?.id}</h3>
-            <span className={`rounded-full px-3 py-1 text-[11px] font-black ${badgeClasses[statusInfo.tone] || badgeClasses.amber}`}>{statusInfo.title}</span>
-          </div>
-          <p className="mt-2 text-sm font-semibold">{statusInfo.description}</p>
-        </div>
-        {canDismiss && (
-          <button type="button" onClick={onDismiss} className="shrink-0 rounded-xl bg-white/90 px-3 py-2 text-[11px] font-black shadow-sm">
-            Entendi
-          </button>
-        )}
-      </div>
-
-      <div className="mt-4 grid grid-cols-5 gap-1">
-        {timeline.map((step) => (
-          <div key={step.key} className="text-center">
-            <div className={`mx-auto h-2 rounded-full ${step.cancelled ? "bg-red-200" : step.done || step.current ? "bg-current" : "bg-white/80"}`} />
-            <p className={`mt-1 text-[10px] font-black leading-tight ${step.current ? "opacity-100" : "opacity-60"}`}>{step.label}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-2xl bg-white/80 p-3">
-          <p className="font-black opacity-60">Total</p>
-          <p className="mt-1 text-base font-black">{money(total)}</p>
-        </div>
-        <div className="rounded-2xl bg-white/80 p-3">
-          <p className="font-black opacity-60">Previsão</p>
-          <p className="mt-1 text-base font-black">{estimated > 0 ? `cerca de ${formatEstimatedDeliveryTime(estimated)}` : "em breve"}</p>
-        </div>
-        <div className="rounded-2xl bg-white/80 p-3">
-          <p className="font-black opacity-60">Pagamento</p>
-          <p className="mt-1 font-black">{getPaymentLabel(delivery?.payment, delivery?.changeFor, delivery?.mixedPaymentDetails)}</p>
-        </div>
-        <div className="rounded-2xl bg-white/80 p-3">
-          <p className="font-black opacity-60">Itens</p>
-          <p className="mt-1 font-black">{getCustomerOrderItemsSummary(items)}</p>
-        </div>
-      </div>
-
-      {lastUpdate && <p className="mt-3 rounded-2xl bg-white/70 p-3 text-xs font-semibold">Última atualização: {lastUpdate}</p>}
-
-      {expanded && (
-        <div className="mt-3 rounded-2xl bg-white/80 p-3 text-sm text-zinc-900">
-          <p className="mb-2 text-xs font-black uppercase tracking-wide text-zinc-500">Itens do pedido</p>
-          {items.length === 0 ? (
-            <p className="text-xs text-zinc-500">Pedido sem itens detalhados.</p>
-          ) : items.map((item, index) => (
-            <div key={item.cartKey || `${item.id}-${index}`} className="flex items-start justify-between gap-3 border-b border-zinc-100 py-2 last:border-0">
-              <div className="min-w-0">
-                <p className="font-black leading-tight">{toPositiveInteger(item.quantity, 1)}x {item.name || item.productName || "Produto"}</p>
-                {item.variantName && <p className="text-xs font-bold text-purple-700">Sabor: {item.variantName}</p>}
-              </div>
-              <p className="shrink-0 font-black">{money(toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1))}</p>
-            </div>
-          ))}
-          <div className="mt-3 space-y-1 border-t border-zinc-100 pt-3 text-xs">
-            <p className="flex justify-between"><span>Produtos</span><strong>{money(productsTotal)}</strong></p>
-            {discount > 0 && <p className="flex justify-between text-emerald-700"><span>Desconto</span><strong>-{money(discount)}</strong></p>}
-            <p className="flex justify-between"><span>Entrega</span><strong>{money(deliveryFee)}</strong></p>
-            <p className="flex justify-between text-base"><span className="font-black">Total</span><strong>{money(total)}</strong></p>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <button type="button" onClick={onToggleExpanded} className="rounded-2xl bg-white px-3 py-3 text-xs font-black shadow-sm">
-          {expanded ? "Ocultar itens" : "Ver detalhes"}
-        </button>
-        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="rounded-2xl bg-zinc-950 px-3 py-3 text-center text-xs font-black text-white shadow-sm">
-          Falar com a loja
-        </a>
-      </div>
-
-      {!statusInfo.final && (
-        <p className="mt-3 text-[11px] font-semibold opacity-75">Para adicionar mais itens, faça um novo pedido ou fale com a loja.</p>
-      )}
-    </div>
-  );
-}
-
-function NotificationPanel({ title, notifications, onMarkRead }) {
-  const unreadCount = (notifications || []).filter((notification) => !notification.read).length;
-
-  return (
-    <Card className="rounded-3xl border-amber-200 bg-amber-50 shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2">
-            <Icon name="bell" />
-            <div>
-              <h3 className="font-bold text-lg">{title}</h3>
-              <p className="text-xs text-amber-800">{unreadCount > 0 ? `${unreadCount} não lida(s)` : "Tudo lido"}</p>
-            </div>
-          </div>
-          <Button onClick={onMarkRead} disabled={unreadCount === 0} variant="secondary" className="rounded-2xl">Marcar como lidas</Button>
-        </div>
-        <div className="grid gap-2">
-          {notifications.length === 0 ? (
-            <p className="rounded-2xl bg-white p-3 text-sm text-zinc-500">Nenhuma notificação registrada.</p>
-          ) : notifications.slice(0, 6).map((notification) => (
-            <div key={notification.id} className={`rounded-2xl border p-3 text-sm ${notification.read ? "bg-white border-zinc-100" : "bg-white border-amber-300 ring-1 ring-amber-200"}`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-bold">{notification.title}</p>
-                {!notification.read && <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-black text-amber-800">nova</span>}
-              </div>
-              <p className="text-zinc-600">{notification.message}</p>
-              <p className="text-xs text-zinc-400 mt-1">{new Date(notification.createdAt).toLocaleString("pt-BR")}</p>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function OwnerDeliveryCard({ delivery, storeRole = "admin", isPaymentProcessing = false, onPrint, onApprove, onManualConfirm, onCancel, onPaymentStatusChange, onReopenCounterSale, onOpenWhatsApp, onCopyWhatsApp, onMarkWhatsAppSent, onOpenStatusWhatsApp, onCopyStatusWhatsApp }) {
-  const isWaitingDeliveryApproval = delivery.status === DELIVERY_STATUS.WAITING_OWNER_APPROVAL;
-  const isWaitingOrderApproval = delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL;
-  const isCounterSale = isCounterOrder(delivery);
-  const actions = getOrderAllowedActions(delivery, storeRole);
-  const isFinalized = isOrderFinalized(delivery);
-  const canConfirmPayment = actions.confirmPayment && !isPaymentProcessing;
-  const canReopenPayment = actions.reopenPayment && !isPaymentProcessing;
-  const showSummary = () => window.alert(buildOrderSummaryText(delivery));
-
-  return (
-    <Card className="rounded-3xl border-zinc-200 shadow-sm">
-      <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2"><span className="font-bold text-lg">{isCounterOrder(delivery) ? "Venda" : "Pedido"} #{delivery.id}</span><span className={`text-xs px-3 py-1 rounded-full ${getStatusClass(delivery.status)}`}>{delivery.status}</span></div>
-          <p className="text-sm text-zinc-700"><b>Cliente:</b> {delivery.client}</p>
-          {delivery.phone && <p className="text-sm text-zinc-700 flex items-center gap-1"><Icon name="phone" /> {formatBrazilMobilePhone(delivery.phone)}</p>}
-          <p className="text-sm text-zinc-700 flex items-center gap-1"><Icon name="pin" /> {delivery.address}</p>
-          {delivery.reference && <p className="text-sm text-zinc-500">Referência: {delivery.reference}</p>}
-          <p className="text-sm text-zinc-500">{isCounterOrder(delivery) ? "Tipo: venda no balcão" : isWaitingOrderApproval ? "Pedido aguardando aprovação da loja antes de ir aos entregadores" : isFinalized ? "Pedido finalizado: somente consulta e impressão" : "Disponível para: todos os motoboys ativos"}</p>
-          {isDeliveryOrder(delivery) ? (
-            <p className="text-sm text-zinc-500">Taxa entrega: {money(normalizeDeliveryFee(delivery.deliveryFee))} • Motoboy: {money(delivery.courierFee ?? calculateCourierFee(delivery.deliveryFee, delivery.motorcycleType))} • Loja: {money(delivery.storeFee ?? calculateStoreFee(delivery.deliveryFee, delivery.motorcycleType))}</p>
-          ) : (
-            <p className="text-sm text-zinc-500">Venda balcão sem taxa de entrega</p>
-          )}
-          {delivery.motorcycleType && <p className="text-sm text-zinc-500">Moto usada: {delivery.motorcycleType}</p>}
-          {delivery.cancellationReason && <p className="text-sm text-red-700 font-semibold">Motivo do cancelamento: {delivery.cancellationReason}</p>}
-          {delivery.problemReason && <p className="text-sm text-amber-700 font-semibold">Problema informado: {delivery.problemReason}</p>}
-          {delivery.reopenReason && <p className="text-sm text-amber-700 font-semibold">Reabertura: {delivery.reopenReason}</p>}
-          {delivery.pickedUpByName && <p className="text-sm text-zinc-500">Retirado por: {delivery.pickedUpByName}</p>}
-          {isDeliveryOrder(delivery) && delivery.deliveredByName && !delivery.ownerApproved && <p className="text-sm text-blue-700 font-semibold">Aguardando aprovação: {delivery.deliveredByName}</p>}
-          {isDeliveryOrder(delivery) && delivery.ownerApproved && <p className="text-sm text-emerald-700 font-semibold">Confirmado pela loja para: {delivery.deliveredByName || "entregador"}</p>}
-          {delivery.items && <p className="text-xs text-zinc-500 mt-2">Itens: {delivery.items.map((item) => item.quantity + "x " + item.name).join(", ")}</p>}
-        </div>
-        <div className="flex flex-col items-start md:items-end gap-2">
-          <span className="font-bold text-xl">{money(delivery.value)}</span>
-          {actions.whatsapp && delivery.phone && (
-            <div className="w-full md:w-auto rounded-2xl border border-emerald-100 bg-emerald-50 p-3 space-y-2">
-              <p className="text-xs font-bold text-emerald-800">WhatsApp: {getWhatsAppStatusLabel(delivery.whatsappStatus)}</p>
-              {delivery.whatsappOpenedAt && <p className="text-[11px] text-emerald-700">Aberto em {new Date(delivery.whatsappOpenedAt).toLocaleString("pt-BR")}</p>}
-              {delivery.whatsappSentAt && <p className="text-[11px] text-emerald-700">Marcado em {new Date(delivery.whatsappSentAt).toLocaleString("pt-BR")}</p>}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <Button onClick={() => onOpenWhatsApp(delivery)} className="rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-xs">Enviar WhatsApp</Button>
-                <Button onClick={() => onCopyWhatsApp(delivery)} variant="secondary" className="rounded-2xl text-xs">Copiar mensagem</Button>
-                <Button onClick={() => onMarkWhatsAppSent(delivery)} disabled={delivery.whatsappStatus === "sent"} variant="secondary" className="rounded-2xl text-xs">Marcar enviado</Button>
-              </div>
-              {isDeliveryOrder(delivery) && (
-                <div className="border-t border-emerald-100 pt-2">
-                  <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-emerald-800">Mensagens rápidas por status</p>
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Aprovado</Button>
-                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "outForDelivery")} variant="secondary" className="rounded-2xl bg-white text-xs">Saiu para entrega</Button>
-                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "delivered")} variant="secondary" className="rounded-2xl bg-white text-xs">Entregue</Button>
-                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "cancelled")} variant="secondary" className="rounded-2xl bg-white text-xs">Cancelado</Button>
-                    <Button onClick={() => onOpenStatusWhatsApp?.(delivery, "paymentReminder")} variant="secondary" className="rounded-2xl bg-white text-xs">Cobrar pagamento</Button>
-                    <Button onClick={() => onCopyStatusWhatsApp?.(delivery, "approved")} variant="secondary" className="rounded-2xl bg-white text-xs">Copiar aprovado</Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          <span className="text-xs text-zinc-500">Produtos: {money(delivery.productsTotal ?? Number(delivery.value || 0) - (isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee)))} • Desconto: -{money(delivery.discount || 0)} • Entrega: {money(isCounterOrder(delivery) ? 0 : normalizeDeliveryFee(delivery.deliveryFee))}</span>
-          <span className="text-sm text-zinc-500">Pagamento: {getPaymentLabel(delivery.payment, delivery.changeFor, delivery.mixedPaymentDetails)}</span>
-          <span className={`rounded-2xl border px-3 py-2 text-xs font-bold ${getPaymentStatusClass(delivery.paymentStatus)}`}>{delivery.paymentStatus || PAYMENT_STATUS.PENDING}</span>
-          {delivery.paymentConfirmedAt && <span className="text-[11px] text-zinc-500">Recebido em {new Date(delivery.paymentConfirmedAt).toLocaleString("pt-BR")}{delivery.paymentConfirmedBy ? ` por ${delivery.paymentConfirmedBy}` : ""}</span>}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full md:w-auto">
-            {actions.print && <Button onClick={() => onPrint(delivery)} variant="secondary" className="rounded-2xl">Reimprimir</Button>}
-            {actions.summary && <Button onClick={showSummary} variant="secondary" className="rounded-2xl">Ver resumo</Button>}
-            {actions.reopenCounterSale && <Button onClick={() => onReopenCounterSale?.(delivery.id)} variant="secondary" className="rounded-2xl text-amber-700">Reabrir no PDV</Button>}
-            {actions.approve && <Button onClick={() => onApprove(delivery.id)} disabled={(!isWaitingOrderApproval && !isWaitingDeliveryApproval) || delivery.status === DELIVERY_STATUS.CANCELLED} className="rounded-2xl bg-emerald-700 hover:bg-emerald-800">{isWaitingOrderApproval ? "Aprovar pedido" : "Aprovar entrega"}</Button>}
-            {actions.confirmPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, PAYMENT_STATUS.PAID)} disabled={!canConfirmPayment} variant="secondary" className="rounded-2xl text-emerald-700">{isPaymentProcessing ? "Aguarde..." : "Confirmar pagamento"}</Button>}
-            {actions.reopenPayment && <Button onClick={() => onPaymentStatusChange(delivery.id, isDeliveryOrder(delivery) ? PAYMENT_STATUS.RECEIVABLE : PAYMENT_STATUS.PENDING)} disabled={!canReopenPayment} variant="secondary" className="rounded-2xl text-amber-700">Reabrir recebimento</Button>}
-            {actions.cancel && <Button onClick={() => onCancel(delivery.id)} variant="secondary" className="rounded-2xl text-red-600">{isCounterSale ? "Cancelar venda" : "Cancelar pedido"}</Button>}
-            {actions.manualFinish && <Button onClick={() => onManualConfirm(delivery.id)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Finalizar entrega</Button>}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-
-function AuditTab({ logs, allLogs, status, filters, actionOptions, onFiltersChange, onRefresh, onExportCsv }) {
-  const setFilter = (field, value) => onFiltersChange((previous) => ({ ...previous, [field]: value }));
-  const visibleLogs = (logs || []).slice(0, 120);
-  const todayLogs = (allLogs || []).filter((log) => isSameLocalDate(log.createdAt)).length;
-  const sensitiveActions = (allLogs || []).filter((log) => ["cancel_order", "reopen_counter_sale", "update_payment_status", "manual_stock_adjustment", "delete_promotion", "pdv_stock_override"].includes(log.action)).length;
-  const userCount = new Set((allLogs || []).map((log) => log.userName).filter(Boolean)).size;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <Title title="Auditoria operacional" subtitle="Histórico de ações importantes da loja, entregadores, caixa, estoque e pedidos." />
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button onClick={onRefresh} variant="secondary" className="rounded-2xl">Atualizar</Button>
-          <Button onClick={onExportCsv} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">CSV auditoria</Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Metric title="Registros carregados" value={(allLogs || []).length} icon="shield" />
-        <Metric title="Hoje" value={todayLogs} icon="calendar" />
-        <Metric title="Ações sensíveis" value={sensitiveActions} icon="alert" />
-        <Metric title="Usuários" value={userCount} icon="users" />
-      </div>
-
-      <CardBox>
-        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
-          <div className="flex-1">
-            <Input label="Buscar na auditoria" value={filters.search} onChange={(value) => setFilter("search", value)} placeholder="Pedido, usuário, ação, motivo..." />
-          </div>
-          <label className="block min-w-[190px]">
-            <span className="text-xs font-medium text-zinc-600">Tipo de usuário</span>
-            <select value={filters.userType} onChange={(event) => setFilter("userType", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
-              <option value="all">Todos</option>
-              <option value="store">Loja</option>
-              <option value="courier">Entregador</option>
-              <option value="customer">Cliente</option>
-              <option value="system">Sistema</option>
-            </select>
-          </label>
-          <label className="block min-w-[220px]">
-            <span className="text-xs font-medium text-zinc-600">Ação</span>
-            <select value={filters.action} onChange={(event) => setFilter("action", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
-              <option value="all">Todas</option>
-              {actionOptions.map((action) => <option key={action} value={action}>{getAuditActionLabel(action)}</option>)}
-            </select>
-          </label>
-        </div>
-        <p className="mt-3 text-xs text-zinc-500">{status}</p>
-      </CardBox>
-
-      <CardBox>
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 className="font-bold text-lg">Histórico recente</h3>
-            <p className="text-sm text-zinc-500">Mostrando {visibleLogs.length} de {logs.length} registro{logs.length === 1 ? "" : "s"} filtrado{logs.length === 1 ? "" : "s"}.</p>
-          </div>
-        </div>
-        {visibleLogs.length === 0 ? (
-          <p className="text-sm text-zinc-500">Nenhum registro encontrado. Faça uma ação operacional ou rode a migração da auditoria se a tabela ainda não existir.</p>
-        ) : (
-          <div className="space-y-3">
-            {visibleLogs.map((log) => (
-              <div key={log.id || `${log.action}-${log.entityId}-${log.createdAt}`} className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
-                  <div>
-                    <p className="font-black text-zinc-900">{getAuditActionLabel(log.action)}</p>
-                    <p className="text-sm text-zinc-600">{getAuditEntityLabel(log.entity)} {log.entityId ? `#${log.entityId}` : ""}</p>
-                  </div>
-                  <div className="text-left md:text-right text-xs text-zinc-500">
-                    <p>{formatShortDateTime(log.createdAt)}</p>
-                    <p>{log.userName || "sistema"} • {log.userType || "system"}</p>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm text-zinc-700">{buildAuditSummary(log)}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardBox>
-    </div>
-  );
-}
-
-function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, products, clients, couriers, deliveries, notifications, cashSession, coupons, kits, promotions, storeUsersStatus, selfTests, passedTests }) {
-  const isBrowser = typeof window !== "undefined";
-  const online = typeof navigator !== "undefined" ? navigator.onLine : false;
-  const localStorageOk = (() => {
-    if (!isBrowser) return false;
-    try {
-      const key = "barbosas_delivery_diag_test";
-      window.localStorage.setItem(key, "ok");
-      window.localStorage.removeItem(key);
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  const serviceWorkerSupported = typeof navigator !== "undefined" && "serviceWorker" in navigator;
-  const pwaMode = isBrowser && (window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator?.standalone === true);
-  const supabaseUrlConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL);
-  const supabaseKeyConfigured = Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
-  const supabaseClientReady = isSupabaseConfigured;
-  const activeProducts = (products || []).filter((product) => product.active !== false && !product.deletedAt).length;
-  const lowStockProducts = (products || []).filter((product) => product.active !== false && Number(product.stock || 0) <= Number(product.minStock || 0)).length;
-  const activeCouriers = (couriers || []).filter((courier) => courier.active !== false).length;
-  const activeOrders = (deliveries || []).filter((delivery) => ![DELIVERY_STATUS.CANCELLED, DELIVERY_STATUS.CONFIRMED_DELIVERED].includes(delivery.status)).length;
-  const unreadNotifications = (notifications || []).filter((notification) => !notification.read && !notification.readAt && !notification.resolvedAt).length;
-  const printMode = storeSettings?.printSettings?.mode === "local" ? "Serviço local" : "Navegador";
-  const localPrintUrl = storeSettings?.printSettings?.localServiceUrl || "Não configurada";
-  const whatsappReady = Boolean(onlyPhoneNumbers(storeSettings?.whatsapp || ""));
-  const operatingMode = getStoreOpenStatus(storeSettings?.schedule || initialStoreSettings.schedule, new Date()).isOpen ? "Aberta agora" : "Fechada agora";
-
-  const checks = [
-    { name: "Supabase URL configurada", ok: supabaseUrlConfigured, detail: supabaseUrlConfigured ? "VITE_SUPABASE_URL encontrada" : "Configure VITE_SUPABASE_URL no .env" },
-    { name: "Supabase chave configurada", ok: supabaseKeyConfigured, detail: supabaseKeyConfigured ? "VITE_SUPABASE_ANON_KEY encontrada" : "Configure VITE_SUPABASE_ANON_KEY no .env" },
-    { name: "Cliente Supabase ativo", ok: supabaseClientReady, detail: supabaseClientReady ? "Cliente pronto para sincronizar dados" : "Cliente Supabase desativado até configurar as variáveis" },
-    { name: "Navegador online", ok: online, detail: online ? "Conexão detectada" : "Sem conexão detectada pelo navegador" },
-    { name: "LocalStorage disponível", ok: localStorageOk, detail: localStorageOk ? "Backup/configurações locais podem ser usados" : "O navegador bloqueou armazenamento local" },
-    { name: "PWA disponível", ok: serviceWorkerSupported, detail: serviceWorkerSupported ? (pwaMode ? "Rodando como app instalado" : "Pode ser instalado/adicionado à tela inicial") : "Navegador sem suporte a Service Worker" },
-    { name: "WhatsApp da loja", ok: whatsappReady, detail: whatsappReady ? "Número configurado" : "Configure o WhatsApp nas configurações da loja" },
-    { name: "Testes internos", ok: passedTests === selfTests.length, detail: `${passedTests}/${selfTests.length} testes aprovados` },
-  ];
-
-  const exportDiagnostics = () => {
-    const payload = {
-      app: "Barbosa's Delivery",
-      version: appVersion,
-      generatedAt: new Date().toISOString(),
-      browser: isBrowser ? window.navigator.userAgent : "indisponível",
-      online,
-      pwaMode,
-      serviceWorkerSupported,
-      localStorageOk,
-      supabase: { urlConfigured: supabaseUrlConfigured, keyConfigured: supabaseKeyConfigured, clientReady: supabaseClientReady },
-      store: {
-        name: storeSettings?.storeName,
-        syncStatus: storeSettingsSyncStatus,
-        openStatus: operatingMode,
-        printMode,
-        localPrintUrl,
-        whatsappConfigured: whatsappReady,
-      },
-      counts: {
-        products: (products || []).length,
-        activeProducts,
-        lowStockProducts,
-        clients: (clients || []).length,
-        couriers: (couriers || []).length,
-        activeCouriers,
-        deliveries: (deliveries || []).length,
-        activeOrders,
-        notifications: (notifications || []).length,
-        unreadNotifications,
-        coupons: (coupons || []).length,
-        kits: (kits || []).length,
-        promotions: (promotions || []).length,
-      },
-      checks,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `diagnostico-barbosas-delivery-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <div className="space-y-6">
-      <Title title="Diagnóstico do sistema" subtitle="Conferência rápida de ambiente, Supabase, PWA, impressão, loja e dados carregados." />
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Metric title="Versão" value={appVersion || "Atual"} icon="shield" />
-        <Metric title="Supabase" value={supabaseClientReady ? "Configurado" : "Pendente"} icon="save" />
-        <Metric title="Loja" value={operatingMode} icon="calendar" />
-        <Metric title="Impressão" value={printMode} icon="tools" />
-        <Metric title="Produtos ativos" value={activeProducts} icon="package" />
-        <Metric title="Pedidos ativos" value={activeOrders} icon="truck" />
-        <Metric title="Entregadores ativos" value={activeCouriers} icon="users" />
-        <Metric title="Notificações novas" value={unreadNotifications} icon="bell" />
-      </div>
-
-      <CardBox>
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-          <div>
-            <h3 className="font-bold text-lg">Checklist técnico</h3>
-            <p className="text-sm text-zinc-500">Use esta área quando algo não carregar, não imprimir ou não sincronizar.</p>
-          </div>
-          <Button onClick={exportDiagnostics} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800">Baixar diagnóstico</Button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {checks.map((check) => (
-            <div key={check.name} className={`rounded-2xl border p-4 ${check.ok ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
-              <p className={`font-black ${check.ok ? "text-emerald-800" : "text-amber-800"}`}>{check.ok ? "✅" : "⚠️"} {check.name}</p>
-              <p className="mt-1 text-sm text-zinc-600">{check.detail}</p>
-            </div>
-          ))}
-        </div>
-      </CardBox>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <CardBox>
-          <h3 className="font-bold text-lg mb-4">Sincronização e configurações</h3>
-          <div className="space-y-2 text-sm text-zinc-700">
-            <p><b>Status:</b> {storeSettingsSyncStatus}</p>
-            <p><b>Usuários da loja:</b> {storeUsersStatus || "Sem leitura recente"}</p>
-            <p><b>Caixa:</b> {cashSession?.isOpen ? `Aberto desde ${new Date(cashSession.openedAt).toLocaleString("pt-BR")}` : "Fechado"}</p>
-            <p><b>WhatsApp:</b> {whatsappReady ? storeSettings.whatsapp : "Não configurado"}</p>
-            <p><b>Serviço local de impressão:</b> {localPrintUrl}</p>
-          </div>
-        </CardBox>
-
-        <CardBox>
-          <h3 className="font-bold text-lg mb-4">Dados carregados</h3>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <p className="rounded-2xl bg-zinc-50 p-3"><b>Produtos:</b><br />{(products || []).length}</p>
-            <p className="rounded-2xl bg-zinc-50 p-3"><b>Clientes:</b><br />{(clients || []).length}</p>
-            <p className="rounded-2xl bg-zinc-50 p-3"><b>Pedidos:</b><br />{(deliveries || []).length}</p>
-            <p className="rounded-2xl bg-zinc-50 p-3"><b>Entregadores:</b><br />{(couriers || []).length}</p>
-            <p className="rounded-2xl bg-zinc-50 p-3"><b>Cupons:</b><br />{(coupons || []).length}</p>
-            <p className="rounded-2xl bg-zinc-50 p-3"><b>Kits:</b><br />{(kits || []).length}</p>
-          </div>
-        </CardBox>
-      </div>
-    </div>
-  );
-}
-
-function DashboardTab({ dayReport, selfTests, passedTests, products, clients, couriers, deliveries, storeDeliverySummary, notifications = [], attentionSummary = {}, lastDailyBackupAt = "", onDownloadBackup, onInactivateProduct }) {
-  const latestDeliveries = [...deliveries].slice(0, 5);
-  const activeCouriers = couriers.filter((courier) => courier.active).length;
-  const blockedCouriers = couriers.length - activeCouriers;
-  const criticalProducts = products.filter((product) => Number(product.stock) <= Number(product.minStock));
-  const attentionItems = Array.isArray(attentionSummary.items) ? attentionSummary.items : [];
-  const topAttentionItems = attentionItems.slice(0, 10);
-  const criticalAttentionCount = attentionItems.filter((item) => item.severity === "critical").length;
-  const highAttentionCount = attentionItems.filter((item) => item.severity === "high").length;
-  const backupDue = Boolean(attentionSummary.backupDue);
-  const todayActiveDeliveries = deliveries.filter((delivery) => !isCounterOrder(delivery) && !isOrderFinalized(delivery));
-  const todayCounterSales = deliveries.filter((delivery) => isCounterOrder(delivery));
-  const todayPendingPayments = deliveries.filter((delivery) => !isOrderFinalized(delivery) && [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.RECEIVABLE, PAYMENT_STATUS.STORE_CREDIT].includes(delivery.paymentStatus));
-  const waitingStoreApproval = deliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.WAITING_STORE_APPROVAL);
-  const delayedDeliveries = Array.isArray(attentionSummary.delayedDeliveries) ? attentionSummary.delayedDeliveries : [];
-  const todayActionItems = [
-    waitingStoreApproval.length > 0 && { title: "Aprovar pedidos", value: waitingStoreApproval.length, description: "Pedidos aguardando confirmação da loja." },
-    delayedDeliveries.length > 0 && { title: "Resolver atrasos", value: delayedDeliveries.length, description: "Entregas passaram do limite operacional." },
-    todayPendingPayments.length > 0 && { title: "Receber pagamentos", value: todayPendingPayments.length, description: "Pedidos ainda pendentes, a receber ou fiados." },
-    criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length > 0 && { title: "Repor estoque zerado", value: criticalProducts.filter((product) => Number(product.stock || 0) <= 0).length, description: "Produtos sem estoque disponível." },
-    backupDue && { title: "Baixar backup", value: "Hoje", description: "Backup diário ainda não foi feito neste navegador." },
-  ].filter(Boolean);
-  const closingChecklist = [
-    {
-      title: "Entregas ativas",
-      pending: todayActiveDeliveries.length,
-      okText: "Nenhuma entrega aberta",
-      pendingText: `${todayActiveDeliveries.length} entrega${todayActiveDeliveries.length === 1 ? "" : "s"} em andamento`,
-    },
-    {
-      title: "Pagamentos pendentes",
-      pending: todayPendingPayments.length,
-      okText: "Nenhum pagamento pendente",
-      pendingText: `${todayPendingPayments.length} pagamento${todayPendingPayments.length === 1 ? "" : "s"} para conferir`,
-    },
-    {
-      title: "Pedidos aguardando aprovação",
-      pending: waitingStoreApproval.length,
-      okText: "Nenhum pedido aguardando",
-      pendingText: `${waitingStoreApproval.length} pedido${waitingStoreApproval.length === 1 ? "" : "s"} aguardando aprovação`,
-    },
-    {
-      title: "Backup diário",
-      pending: backupDue ? 1 : 0,
-      okText: "Backup do dia conferido",
-      pendingText: "Backup diário ainda não foi baixado",
-      action: backupDue ? onDownloadBackup : null,
-      actionLabel: "Baixar backup diário",
-    },
-  ];
-  const closingPendingCount = closingChecklist.reduce((total, item) => total + (item.pending > 0 ? 1 : 0), 0);
-  const priorityQueue = [...todayActiveDeliveries]
-    .sort((a, b) => {
-      const aDelayed = isDeliveryDelayed(a) ? 1 : 0;
-      const bDelayed = isDeliveryDelayed(b) ? 1 : 0;
-      if (aDelayed !== bDelayed) return bDelayed - aDelayed;
-      return new Date(a.launchedAt || a.createdAt || 0).getTime() - new Date(b.launchedAt || b.createdAt || 0).getTime();
-    })
-    .slice(0, 5);
-
-  return (
-    <div className="space-y-6">
-      <Title title="Painel geral da loja" subtitle="Visão geral da loja, entregas, estoque, clientes, entregadores, valores e notificações." />
-
-      <CardBox>
-        <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
-          <div>
-            <p className="text-sm font-black text-zinc-500 uppercase tracking-wide">Hoje na loja</p>
-            <h3 className="text-2xl font-black">Resumo rápido da operação</h3>
-            <p className="text-sm text-zinc-500 mt-1">Use este bloco para abrir o sistema e saber imediatamente o que precisa de ação.</p>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 min-w-full xl:min-w-[620px]">
-            <Metric title="Vendido hoje" value={money(dayReport.totalDelivery)} icon="money" />
-            <Metric title="Entregas ativas" value={todayActiveDeliveries.length} icon="truck" />
-            <Metric title="Vendas balcão" value={todayCounterSales.length} icon="money" />
-            <Metric title="A receber" value={todayPendingPayments.length} icon="alert" />
-          </div>
-        </div>
-        <div className="mt-4 rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
-            <div>
-              <h4 className="font-black text-lg">Fechamento do dia</h4>
-              <p className="text-sm text-zinc-500">Confira pendências antes de encerrar a loja.</p>
-            </div>
-            <span className={`w-fit rounded-full px-4 py-2 text-xs font-black ${closingPendingCount > 0 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
-              {closingPendingCount > 0 ? "Conferir pendências" : "Tudo certo"}
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {closingChecklist.map((item) => {
-              const hasPending = item.pending > 0;
-              return (
-                <div key={item.title} className={`rounded-2xl border p-3 text-sm ${hasPending ? "border-amber-200 bg-white" : "border-emerald-100 bg-white"}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-black">{item.title}</p>
-                      <p className={`mt-1 ${hasPending ? "text-amber-700" : "text-emerald-700"}`}>{hasPending ? item.pendingText : item.okText}</p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-[11px] font-black ${hasPending ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
-                      {hasPending ? "Conferir" : "OK"}
-                    </span>
-                  </div>
-                  {item.action && (
-                    <Button onClick={item.action} variant="secondary" className="mt-3 w-full rounded-xl bg-amber-50 text-xs">{item.actionLabel}</Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <h4 className="font-black">Próximas ações</h4>
-              <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-zinc-600">{todayActionItems.length} item{todayActionItems.length === 1 ? "" : "s"}</span>
-            </div>
-            {todayActionItems.length > 0 ? (
-              <div className="grid gap-2">
-                {todayActionItems.slice(0, 5).map((item) => (
-                  <div key={item.title} className="rounded-2xl bg-white border border-zinc-100 p-3 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-black">{item.title}</p>
-                      <span className="rounded-full bg-zinc-950 px-3 py-1 text-xs font-black text-white">{item.value}</span>
-                    </div>
-                    <p className="text-zinc-500 mt-1">{item.description}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 text-sm font-bold text-emerald-800">Nenhuma ação urgente neste momento.</p>
-            )}
-          </div>
-          <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <h4 className="font-black">Fila rápida de entregas</h4>
-              <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-zinc-600">Atrasadas primeiro</span>
-            </div>
-            {priorityQueue.length > 0 ? (
-              <div className="grid gap-2">
-                {priorityQueue.map((delivery) => {
-                  const delayed = isDeliveryDelayed(delivery);
-                  return (
-                    <div key={delivery.id} className={`rounded-2xl border p-3 text-sm ${delayed ? "border-red-200 bg-red-50" : "border-zinc-100 bg-white"}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-black">Pedido #{delivery.id} • {delivery.client}</p>
-                          <p className="text-zinc-500">{delivery.neighborhood || delivery.address || "Sem bairro informado"}</p>
-                          <p className="text-xs text-zinc-500 mt-1">{delivery.status} • {money(delivery.value)}</p>
-                        </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-black ${delayed ? "bg-red-600 text-white" : "bg-zinc-200 text-zinc-700"}`}>{delayed ? "Atrasada" : "Em dia"}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="rounded-2xl bg-white border border-zinc-100 p-3 text-sm text-zinc-500">Nenhuma entrega ativa agora.</p>
-            )}
-          </div>
-        </div>
-      </CardBox>
-
-      <CardBox>
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-          <div>
-            <p className="text-sm font-black text-red-700 uppercase tracking-wide">Atenção da loja</p>
-            <h3 className="text-xl font-black">{attentionItems.length > 0 ? `${attentionItems.length} ponto${attentionItems.length > 1 ? "s" : ""} para conferir agora` : "Tudo certo no momento"}</h3>
-            <p className="text-sm text-zinc-500 mt-1">Pedidos atrasados, problemas de entrega, pagamentos pendentes, WhatsApp, estoque baixo e backup diário em um só lugar.</p>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 min-w-full lg:min-w-[520px]">
-            <Metric title="Críticos" value={criticalAttentionCount} icon="alert" />
-            <Metric title="Alta prioridade" value={highAttentionCount} icon="alert" />
-            <Metric title="Atrasados" value={attentionSummary.delayedDeliveries?.length || 0} icon="truck" />
-            <Metric title="Estoque baixo" value={attentionSummary.lowStockProducts?.length || 0} icon="package" />
-          </div>
-        </div>
-
-        {backupDue && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <p className="font-black text-amber-900">Backup diário pendente</p>
-              <p className="text-sm text-amber-800">Último backup neste navegador: {formatBackupDate(lastDailyBackupAt)}.</p>
-            </div>
-            <Button onClick={onDownloadBackup} variant="secondary" className="rounded-2xl bg-white">Baixar backup agora</Button>
-          </div>
-        )}
-
-        {topAttentionItems.length > 0 ? (
-          <div className="mt-4 grid gap-3">
-            {topAttentionItems.map((item, index) => (
-              <div key={`${item.type}-${index}-${item.title}`} className={`rounded-2xl border p-4 ${item.severity === "critical" ? "border-red-200 bg-red-50" : item.severity === "high" ? "border-orange-200 bg-orange-50" : "border-amber-200 bg-amber-50"}`}>
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
-                  <div>
-                    <p className={`font-black ${item.severity === "critical" ? "text-red-800" : item.severity === "high" ? "text-orange-800" : "text-amber-800"}`}>{item.title}</p>
-                    <p className="text-sm text-zinc-700 mt-1">{item.description}</p>
-                    <p className="text-xs text-zinc-500 mt-1">{item.action}</p>
-                  </div>
-                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${item.severity === "critical" ? "bg-red-600 text-white" : item.severity === "high" ? "bg-orange-600 text-white" : "bg-amber-600 text-white"}`}>{item.severity === "critical" ? "Crítico" : item.severity === "high" ? "Prioridade" : "Atenção"}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800 font-bold">
-            Nenhum atraso, problema, pagamento pendente crítico, estoque baixo ou backup pendente encontrado agora.
-          </div>
-        )}
-      </CardBox>
-
-      {notifications.length > 0 && (
-        <CardBox>
-          <h3 className="font-bold text-lg mb-4">Últimas notificações</h3>
-          <div className="grid gap-2">
-            {notifications.slice(0, 4).map((notification) => (
-              <div key={notification.id} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3 text-sm">
-                <p className="font-bold">{notification.title}</p>
-                <p className="text-zinc-600">{notification.message}</p>
-                <p className="text-xs text-zinc-400 mt-1">{new Date(notification.createdAt).toLocaleString("pt-BR")}</p>
-              </div>
-            ))}
-          </div>
-        </CardBox>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Metric title="Total vendido" value={money(dayReport.totalDelivery)} icon="money" />
-        <Metric title="Pedidos lançados" value={deliveries.length} icon="truck" />
-        <Metric title="Tempo estimado" value={nextOrderEstimatedDeliveryLabel} icon="calendar" />
-        <Metric title="Vendas balcão" value={dayReport.counterOrders} icon="money" />
-        <Metric title="Clientes cadastrados" value={clients.length} icon="users" />
-        <Metric title="Entregadores ativos" value={activeCouriers} icon="truck" />
-      </div>
-
-      <CardBox>
-        <h3 className="font-bold text-lg mb-4">Entregas por status</h3>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <Metric title="Aguardando retirada" value={dayReport.waitingPickup} icon="calendar" />
-          <Metric title="Saiu para entrega" value={dayReport.outForDelivery} icon="truck" />
-          <Metric title="Aguardando aprovação" value={dayReport.waitingApproval} icon="alert" />
-          <Metric title="Confirmadas" value={dayReport.delivered} icon="check" />
-          <Metric title="Problemas" value={dayReport.deliveryProblem} icon="alert" />
-          <Metric title="Cancelados" value={dayReport.cancelled} icon="alert" />
-        </div>
-      </CardBox>
-
-      <CardBox>
-        <h3 className="font-bold text-lg mb-4">Resumo financeiro geral</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Metric title="Produtos vendidos" value={money(dayReport.productsTotal)} icon="package" />
-          <Metric title="Vendas entrega" value={money(dayReport.deliverySalesTotal)} icon="truck" />
-          <Metric title="Vendas balcão" value={money(dayReport.counterSalesTotal)} icon="money" />
-          <Metric title="Taxas de entrega" value={money(dayReport.deliveryFeesTotal)} icon="money" />
-          <Metric title="Descontos dados" value={money(dayReport.discountsTotal)} icon="percent" />
-          <Metric title="Parte da loja confirmada" value={money(storeDeliverySummary.storeAmount)} icon="chart" />
-        </div>
-      </CardBox>
-
-      <CardBox>
-        <h3 className="font-bold text-lg mb-4">Produtos e estoque</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Metric title="Produtos cadastrados" value={products.length} icon="package" />
-          <Metric title="Produtos ativos" value={dayReport.activeProducts} icon="check" />
-          <Metric title="Produtos inativos" value={dayReport.inactiveProducts} icon="alert" />
-          <Metric title="Estoque baixo" value={dayReport.lowStock} icon="alert" />
-          <Metric title="Sem estoque" value={dayReport.outOfStock} icon="alert" />
-        </div>
-        {criticalProducts.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4">
-            <p className="font-bold text-amber-800 mb-2">Produtos que precisam de atenção</p>
-            <div className="grid gap-2">
-              {criticalProducts.map((product) => (
-                <div key={product.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-1 text-sm text-amber-900">
-                  <span>{product.name}</span>
-                  <span>Estoque: {product.stock} • mínimo: {product.minStock} • status: {product.active ? "Ativo" : "Inativo"}</span>
-                  {Number(product.stock || 0) <= 0 && product.active && <button onClick={() => onInactivateProduct?.(product.id)} className="rounded-xl bg-red-600 px-3 py-1 text-xs font-bold text-white">Inativar sem estoque</button>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardBox>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <CardBox>
-          <h3 className="font-bold text-lg mb-4">Últimos pedidos e vendas lançados</h3>
-          <div className="grid gap-3">
-            {latestDeliveries.map((delivery) => (
-              <div key={delivery.id} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                  <div>
-                    <p className="font-bold">{isCounterOrder(delivery) ? "Venda" : "Pedido"} #{delivery.id} • {delivery.client}</p>
-                    <p className="text-sm text-zinc-500">{delivery.address}</p>
-                    <p className="text-xs text-zinc-500">Pagamento: {getPaymentLabel(delivery.payment, delivery.changeFor)} • Total: {money(delivery.value)}</p>
-                  </div>
-                  <span className={`text-xs px-3 py-1 rounded-full w-fit ${getStatusClass(delivery.status)}`}>{delivery.status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardBox>
-
-        <CardBox>
-          <h3 className="font-bold text-lg mb-4">Equipe de entrega</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <Metric title="Cadastrados" value={couriers.length} icon="users" />
-            <Metric title="Ativos" value={activeCouriers} icon="check" />
-            <Metric title="Bloqueados" value={blockedCouriers} icon="alert" />
-          </div>
-          <div className="grid gap-2">
-            {couriers.map((courier) => (
-              <div key={courier.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-1 rounded-2xl bg-zinc-50 border border-zinc-100 p-3 text-sm">
-                <span className="font-semibold">{courier.name} • {courier.username}</span>
-                <span className="text-zinc-500">{courier.active ? "Ativo" : "Bloqueado"} • {courier.motorcycleType || "Moto própria"}</span>
-              </div>
-            ))}
-          </div>
-        </CardBox>
-      </div>
-
-      <CardBox>
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-          <div>
-            <h3 className="font-bold text-lg">Testes internos do sistema</h3>
-            <p className="text-sm text-zinc-500">Esses testes ajudam a garantir que as regras básicas continuam funcionando.</p>
-          </div>
-          <span className="text-sm font-bold bg-zinc-950 text-white rounded-2xl px-4 py-2 w-fit">{passedTests}/{selfTests.length} aprovados</span>
-        </div>
-        <div className="grid md:grid-cols-2 gap-2">{selfTests.map((test) => <div key={test.name} className="flex items-center gap-2 rounded-2xl border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm"><span>{test.passed ? "✅" : "❌"}</span><span>{test.name}</span></div>)}</div>
-      </CardBox>
-    </div>
-  );
-}
 
 
 }

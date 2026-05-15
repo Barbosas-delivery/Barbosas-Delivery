@@ -22,6 +22,21 @@ function createDisabledQuery() {
   return query;
 }
 
+function createDisabledChannel() {
+  return {
+    on() {
+      return createDisabledChannel();
+    },
+    subscribe(callback) {
+      if (typeof callback === "function") callback("CLOSED");
+      return createDisabledChannel();
+    },
+    unsubscribe() {
+      return Promise.resolve("ok");
+    },
+  };
+}
+
 function createDisabledSupabaseClient() {
   return {
     from() {
@@ -29,6 +44,12 @@ function createDisabledSupabaseClient() {
     },
     rpc() {
       return createDisabledQuery();
+    },
+    channel() {
+      return createDisabledChannel();
+    },
+    removeChannel() {
+      return Promise.resolve("ok");
     },
     storage: {
       from() {

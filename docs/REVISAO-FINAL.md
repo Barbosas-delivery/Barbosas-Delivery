@@ -2,7 +2,7 @@
 
 ## Status da versão
 
-Versão final revisada: `6.0.18-fase-50-revisao-final-producao`.
+Versão final revisada: `6.0.22-fase-50-auditoria-linha-a-linha-final`.
 
 ## Validações obrigatórias
 

@@ -1,4 +1,5 @@
 import { toNonNegativeNumber } from "./numbers";
+import { isTruthyActive } from "./auth";
 
 export function calculatePromotionFromPercent(productPrice, percent) {
   const safePrice = toNonNegativeNumber(productPrice, 0);
@@ -127,7 +128,7 @@ export function isProductPaused(product, now = new Date()) {
 }
 
 export function getProductAvailabilityStatus(product, now = new Date()) {
-  if (!product || product.active !== true) return { available: false, label: "Inativo" };
+  if (!product || !isTruthyActive(product.active)) return { available: false, label: "Inativo" };
   if (isProductPaused(product, now)) {
     const until = new Date(product.pausedUntil || product.paused_until);
     const timeLabel = Number.isFinite(until.getTime()) ? until.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "em breve";

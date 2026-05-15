@@ -41,4 +41,4 @@ Se alguma delas estiver ausente, o app não quebra na tela inicial; ele mostra p
 
 A fase atualiza a versão para:
 
-`6.0.18-fase-50-revisao-final-producao`
+`6.0.22-fase-50-auditoria-linha-a-linha-final`

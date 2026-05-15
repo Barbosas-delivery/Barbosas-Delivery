@@ -2,12 +2,13 @@ import { supabase } from "../supabaseClient";
 import { insertWithSchemaRetry, updateWithSchemaRetry } from "./supabaseSchema";
 import { normalizeBarcode } from "../utils/formatters";
 import { toNonNegativeNumber } from "../utils/numbers";
+import { isTruthyActive } from "../utils/auth";
 
 export function normalizeProductVariants(variants) {
   const parsed = typeof variants === "string" ? (() => { try { return JSON.parse(variants); } catch { return []; } })() : variants;
   return (Array.isArray(parsed) ? parsed : [])
     .map((variant, index) => ({
-      id: variant.id || `${Date.now()}-${index}`,
+      id: variant.id || `variant-${Date.now()}-${Math.random().toString(36).slice(2)}-${index}`,
       name: String(variant.name || "").trim(),
       imageUrl: variant.imageUrl || variant.image_url || "",
       active: variant.active !== false,
@@ -32,7 +33,7 @@ export function mapProductFromDatabase(product) {
     imageUrl: product.image_url || "",
     hasVariants: product.has_variants === true || product.hasVariants === true,
     variants: normalizeProductVariants(product.variants || product.product_variants || []),
-    active: product.active === true,
+    active: isTruthyActive(product.active),
   };
 }
 
@@ -57,13 +58,13 @@ export function buildProductInsertPayload(newProduct, productId) {
   };
 }
 
-export function buildProductPatch(product) {
-  return {
+export function buildProductPatch(product, options = {}) {
+  const includeStock = options.includeStock === true;
+  const patch = {
     name: String(product.name || "").trim(),
     category: product.category,
     price: Number(product.price || 0),
     cost: Number(product.cost || 0),
-    stock: Number(product.stock || 0),
     min_stock: Number(product.minStock || 0),
     barcode: normalizeBarcode(product.barcode),
     expiration_date: product.expirationDate || null,
@@ -72,8 +73,27 @@ export function buildProductPatch(product) {
     variants: normalizeProductVariants(product.variants),
     paused_until: product.pausedUntil || null,
     pause_reason: product.pauseReason || "",
-    active: product.active === true,
+    active: isTruthyActive(product.active),
   };
+
+  // Em edição normal, estoque não pode ser gravado junto com nome/preço/categoria,
+  // porque isso pode sobrescrever uma venda feita em outro aparelho.
+  // Estoque só entra no payload de cadastro/restauração ou quando includeStock=true.
+  if (includeStock) patch.stock = Number(product.stock || 0);
+
+  return patch;
+}
+
+export async function fetchProductStockFromSupabase(id) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("stock")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) return { stock: null, error };
+  if (!data) return { stock: null, error: new Error("Produto não encontrado no Supabase.") };
+  return { stock: Number(data.stock || 0), error: null };
 }
 
 export async function loadProductsFromSupabase() {
@@ -107,4 +127,70 @@ export async function updateProductImageInSupabase(id, imageUrl) {
 
 export async function softDeleteProductInSupabase(id) {
   return updateWithSchemaRetry("products", id, { active: false, deleted_at: new Date().toISOString() });
+}
+
+export async function findProductByBarcodeInSupabase(barcode) {
+  const normalizedBarcode = normalizeBarcode(barcode);
+  if (!normalizedBarcode) return { product: null, matches: [], error: null };
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("barcode", normalizedBarcode)
+    .limit(25);
+
+  const matches = (Array.isArray(data) ? data : []).map(mapProductFromDatabase);
+  const activeProduct = matches.find((product) => isTruthyActive(product.active) && !product.deletedAt);
+  const reusableProduct = matches.find((product) => product.deletedAt || product.active !== true);
+  const product = activeProduct || reusableProduct || matches[0] || null;
+
+  return { product, matches, error };
+}
+
+export async function restoreProductInSupabase(productId, barcode, productPatch) {
+  const normalizedBarcode = normalizeBarcode(barcode);
+  const patch = {
+    ...productPatch,
+    barcode: normalizedBarcode,
+    active: true,
+    deleted_at: null,
+  };
+
+  return updateWithSchemaRetry("products", productId, patch);
+}
+
+export async function applyProductStockDeltasInSupabase(stockDeltas = []) {
+  const deltas = (Array.isArray(stockDeltas) ? stockDeltas : [])
+    .map((item) => ({
+      product_id: Number(item.productId ?? item.product_id),
+      delta: Number(item.delta || 0),
+    }))
+    .filter((item) => Number.isFinite(item.product_id) && item.delta !== 0);
+
+  if (deltas.length === 0) return { error: null, fallbackUsed: false, data: { success: true, failures: [] } };
+
+  const { data, error } = await supabase.rpc("apply_product_stock_deltas", { p_deltas: deltas });
+  if (error) {
+    const rpcMissing = /function|schema cache|apply_product_stock_deltas|could not find/i.test(String(error.message || error));
+    const message = rpcMissing
+      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-35.sql antes de operar vendas."
+      : (error.message || "Falha ao aplicar movimento de estoque no Supabase.");
+    return { error: new Error(message), fallbackUsed: false, data: null };
+  }
+
+  const failed = Array.isArray(data?.failures) ? data.failures : [];
+  if (data?.success === false || failed.length > 0) {
+    const insufficient = failed.filter((item) => item?.error === "insufficient_stock");
+    const notFound = failed.filter((item) => item?.error === "not_found");
+    const reasons = [];
+    if (insufficient.length) reasons.push(`${insufficient.length} produto(s) sem estoque suficiente`);
+    if (notFound.length) reasons.push(`${notFound.length} produto(s) não encontrado(s)`);
+    return {
+      error: new Error(`Estoque não atualizado: ${reasons.join("; ") || "verifique produtos e quantidades"}.`),
+      fallbackUsed: false,
+      data,
+    };
+  }
+
+  return { error: null, fallbackUsed: false, data };
 }

@@ -263,3 +263,35 @@ O sistema só deve ser considerado pronto para clientes quando todos os itens es
 - entregador;
 - pagamento;
 - notificações.
+
+
+## Revisão 6.0.24 — auditoria final kit Supabase
+
+- Edição de kits agora salva dados principais e itens no Supabase.
+- A tela recarrega os kits do Supabase após salvar.
+- Teste de fumaça ampliado para impedir edição de kit apenas local.
+
+## Revisão 6.0.25 — auditoria final de produção real
+
+- Estoque sincronizado com Supabase usando `await` antes de atualizar a tela.
+- Pedido salvo sem itens agora tenta rollback automático.
+- Kit salvo sem itens agora tenta rollback automático.
+- Adicionado SQL consolidado `supabase/migracao-final-producao-6-0-30.sql` para banco novo ou antigo.
+- Documentação: `docs/AUDITORIA-FINAL-PRODUCAO-REAL.md`.
+
+## Revisão 6.0.30 — auditoria de estoque atômico
+
+- Estoque de vendas, pedidos, cancelamentos, reabertura e comanda agora usa delta atômico no Supabase.
+- Após movimentar estoque, o app recarrega produtos do Supabase para mostrar o valor real do banco.
+- Ajuste manual de entrada/saída também usa delta; correção manual pode definir valor absoluto.
+- Adicionada migração `supabase/migracao-final-producao-6-0-30.sql` com a função `apply_product_stock_deltas`.
+- Falhas de estoque não são mais encobertas por mensagens de sucesso.
+- Documentação: `docs/AUDITORIA-ESTOQUE-ATOMICO.md`.
+
+
+## Revisão 6.0.30 — reserva de estoque antes de salvar pedido
+
+- Pedidos do cliente, vendas de balcão, PDV Entregas e fechamento de comandas agora aplicam delta atômico de estoque antes de gravar a operação final.
+- Se o pedido/venda não for salvo depois da reserva, o sistema tenta devolver o estoque automaticamente.
+- O sistema não mantém pedido como sucesso quando a reserva de estoque no Supabase falha.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-30.sql`.

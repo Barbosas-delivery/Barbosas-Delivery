@@ -230,7 +230,14 @@ export async function insertOrderWithItemsInSupabase(delivery, cashSessionId = n
   const itemsPayload = mapOrderItemsToDatabase(delivery.id, delivery.items || [], cashSessionId);
   if (itemsPayload.length > 0) {
     const { error: itemsError, ignoredColumns: ignoredItemColumns } = await insertWithSchemaRetry("order_items", itemsPayload, false);
-    if (itemsError) return { error: itemsError, ignoredOrderColumns, ignoredItemColumns };
+    if (itemsError) {
+      const { error: cleanupError } = await supabase.from("orders").delete().eq("id", delivery.id);
+      if (cleanupError) console.warn("Pedido salvo sem itens e não removido automaticamente:", cleanupError);
+      const message = cleanupError
+        ? `${itemsError.message || "Itens do pedido não foram salvos."} Pedido principal também pode ter ficado salvo sem itens; verifique a tabela orders.`
+        : `${itemsError.message || "Itens do pedido não foram salvos."} Pedido principal removido para evitar venda incompleta.`;
+      return { error: { ...itemsError, message }, ignoredOrderColumns, ignoredItemColumns };
+    }
     return { error: null, ignoredOrderColumns, ignoredItemColumns };
   }
 

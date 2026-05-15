@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.18-fase-50-revisao-final-producao";
+export const APP_VERSION = "6.0.35-fase-50-revisao-schema-e-kits";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

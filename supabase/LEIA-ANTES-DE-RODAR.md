@@ -23,3 +23,13 @@ Ele consolida as colunas adicionadas nas fases anteriores para evitar que algum 
 - Campos extras de status de pedido, aprovação, cancelamento e finalização.
 
 O script usa `IF NOT EXISTS`, então pode ser rodado mais de uma vez sem recriar colunas já existentes.
+
+## Migração final de produção
+
+Para a versão 6.0.35, rode também o arquivo:
+
+```sql
+supabase/migracao-final-producao-6-0-35.sql
+```
+
+Ele reforça as tabelas principais e cria/atualiza a função `apply_product_stock_deltas`, usada para movimentação atômica de estoque em vendas, pedidos, comandas, cancelamentos e ajustes manuais.

@@ -87,3 +87,27 @@ export async function updateWithSchemaRetry(tableName, id, patch) {
     ignoredColumns,
   };
 }
+
+export async function updateWithFilterSchemaRetry(tableName, patch, filterColumn, filterValue) {
+  let currentPatch = { ...(patch || {}) };
+  const ignoredColumns = [];
+
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const { error } = await supabase.from(tableName).update(currentPatch).eq(filterColumn, filterValue);
+    if (!error) return { error: null, ignoredColumns };
+
+    const missingColumn = getMissingColumnName(error);
+    if (!missingColumn || !payloadHasColumn(currentPatch, missingColumn)) {
+      return { error, ignoredColumns };
+    }
+
+    console.warn(`Coluna ${missingColumn} não existe em ${tableName}. Atualizando novamente sem essa coluna.`);
+    ignoredColumns.push(missingColumn);
+    currentPatch = removeColumnFromPayload(currentPatch, missingColumn);
+  }
+
+  return {
+    error: new Error(`Não foi possível atualizar ${tableName}: muitas colunas incompatíveis com o Supabase.`),
+    ignoredColumns,
+  };
+}
