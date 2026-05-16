@@ -2,6 +2,7 @@ import { supabase } from "../supabaseClient";
 import { ORDER_TYPE, PRINT_JOB_SOURCE, PRINT_JOB_STATUS, PRINT_JOB_TYPE } from "../constants/appConstants";
 import { normalizeDeliveryFee } from "../utils/delivery";
 import { toSafeMoneyNumber } from "../utils/numbers";
+import { buildPrintTicket } from "../utils/printJobTemplates";
 
 function normalizeText(value, fallback = "") {
   const text = String(value ?? "").trim();
@@ -45,19 +46,21 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const deliveryFee = isCounter ? 0 : normalizeDeliveryFee(delivery.deliveryFee);
   const discount = toSafeMoneyNumber(delivery.discount, 0);
   const total = toSafeMoneyNumber(delivery.value, productsTotal + deliveryFee - discount);
-
-  return {
-    schemaVersion: 1,
+  const source = getPrintJobSource(delivery);
+  const createdAt = new Date().toISOString();
+  const payload = {
+    schemaVersion: 2,
+    templateVersion: "6.0.40",
     printType,
-    source: getPrintJobSource(delivery),
-    createdAt: new Date().toISOString(),
+    source,
+    createdAt,
     order: {
       id: String(delivery.id || ""),
       orderType: delivery.orderType || ORDER_TYPE.DELIVERY,
       origin: delivery.origin || "store",
       originType: delivery.originType || delivery.origin || "",
       status: delivery.status || "",
-      launchedAt: delivery.launchedAt || delivery.createdAt || new Date().toISOString(),
+      launchedAt: delivery.launchedAt || delivery.createdAt || createdAt,
       notes: normalizeText(delivery.notes),
       reference: normalizeText(delivery.reference),
     },
@@ -84,6 +87,11 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
       discount,
       total,
     },
+  };
+
+  return {
+    ...payload,
+    ticket: buildPrintTicket(payload, printType),
   };
 }
 

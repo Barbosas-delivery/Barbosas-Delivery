@@ -14,6 +14,7 @@ const serviceWorkerSource = readFileSync(new URL("../public/service-worker.js", 
 const mainSource = readFileSync(new URL("../src/main.jsx", import.meta.url), "utf8");
 const supabaseClientSource = readFileSync(new URL("../src/supabaseClient.js", import.meta.url), "utf8");
 const printJobsServiceSource = readFileSync(new URL("../src/services/supabasePrintJobs.js", import.meta.url), "utf8");
+const printTemplatesSource = readFileSync(new URL("../src/utils/printJobTemplates.js", import.meta.url), "utf8");
 
 function test(name, fn) {
   try {
@@ -51,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.39-fase-52-fila-impressao-supabase"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-39-fase-52-fila-impressao-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.40-fase-53-modelos-cupom-impressao"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-40-fase-53-modelos-cupom-sem-cache/);
   assert.match(serviceWorkerSource, /cache: "no-store"/);
   assert.doesNotMatch(serviceWorkerSource, /cache\.addAll|caches\.match|cache\.put/);
 
@@ -65,7 +66,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-39.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-40.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -104,6 +105,10 @@ test("versão final consistente", () => {
   assert.match(stockMigrationSource, /create or replace function mark_print_job_printed/i, "migração final precisa permitir marcar impressão como concluída");
   assert.match(stockMigrationSource, /create or replace function mark_print_job_failed/i, "migração final precisa registrar falha de impressão");
   assert.ok(printJobsServiceSource.includes('PRINT_JOB_TYPE.KITCHEN') && printJobsServiceSource.includes('PRINT_JOB_TYPE.DELIVERY') && printJobsServiceSource.includes('PRINT_JOB_TYPE.COUNTER'), "serviço precisa criar vias cozinha, entrega e balcão");
+  assert.ok(printJobsServiceSource.includes("schemaVersion: 2") && printJobsServiceSource.includes("ticket: buildPrintTicket"), "payload de impressão precisa sair com modelo de cupom padronizado");
+  assert.ok(printTemplatesSource.includes('title: "COZINHA"') && printTemplatesSource.includes('title: "ENTREGA"') && printTemplatesSource.includes('title: "BALCÃO"'), "modelos de cupom precisam existir para cozinha, entrega e balcão");
+  assert.ok(printTemplatesSource.includes("Via de preparo") && printTemplatesSource.includes("Via do entregador") && printTemplatesSource.includes("Via do caixa"), "cada cupom precisa ter finalidade operacional clara");
+  assert.ok(printTemplatesSource.includes("buildItemsHtml") && printTemplatesSource.includes("buildHtmlTicket"), "Electron precisa receber HTML pronto para impressão térmica");
   assert.ok(appSource.includes("createPrintJobsForOrder(savedDelivery)"), "pedido/venda salvo deve criar jobs de impressão no Supabase");
   assert.ok(appSource.includes("impressão pendente criada") || appSource.includes("impressões pendentes criadas"), "fluxos de PDV devem informar fila de impressão, não pop-up do navegador");
   assert.doesNotMatch(appSource, /printDeliveryReceipt\(savedSale|printDeliveryReceipt\(savedDelivery|preOpenedPrintWindow/, "criação de pedido/venda não deve depender de janela de impressão do navegador");
@@ -183,7 +188,8 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-39.sql",
+    "supabase/migracao-final-producao-6-0-40.sql",
+    "src/utils/printJobTemplates.js",
   ];
   for (const file of requiredFiles) {
     assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), true, `Arquivo ausente: ${file}`);

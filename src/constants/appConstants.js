@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.39-fase-52-fila-impressao-supabase";
+export const APP_VERSION = "6.0.40-fase-53-modelos-cupom-impressao";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

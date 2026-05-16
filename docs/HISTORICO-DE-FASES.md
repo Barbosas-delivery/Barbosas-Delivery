@@ -361,11 +361,22 @@ Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
 
 ## Fase 52 — Fila de impressão no Supabase
 
-Versão: `6.0.39-fase-52-fila-impressao-supabase`
+Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 
 - Adicionada tabela `print_jobs` para separar pedido/venda da execução da impressão.
 - Pedido do aplicativo e PDV Entregas criam automaticamente uma via de cozinha e uma via de entrega.
 - PDV Balcão cria automaticamente uma via de balcão.
 - Adicionadas funções SQL para o Electron reservar jobs pendentes, marcar como impresso e registrar falha.
 - Removida a dependência de impressão automática por janela do navegador nos fluxos de criação.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-39.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-40.sql`.
+
+## Fase 53 — Modelos de cupom para impressão
+
+Versão: `6.0.40-fase-53-modelos-cupom-impressao`
+
+- Criados modelos padronizados de cupom para **cozinha**, **entrega** e **balcão**.
+- Cada `print_job` agora recebe `payload.ticket` com título, finalidade, linhas de texto, HTML térmico e seções estruturadas.
+- Pedido do app e PDV Entregas continuam gerando 2 vias: cozinha e entrega.
+- PDV Balcão continua gerando 1 via: balcão.
+- A via de cozinha foca preparo e observações; a via de entrega foca cliente, telefone, endereço, pagamento e itens; a via de balcão foca venda, itens, pagamento e total.
+- A migração obrigatória mais recente é `supabase/migracao-final-producao-6-0-40.sql`.

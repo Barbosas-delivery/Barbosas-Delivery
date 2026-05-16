@@ -961,7 +961,7 @@ function App() {
     const printJobResult = await createPrintJobsForOrder(savedDelivery);
     if (printJobResult.error) {
       console.error("Erro ao criar fila de impressão:", printJobResult.error);
-      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.39 e verifique a tabela print_jobs.`, "loja", orderId);
+      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.40 e verifique a tabela print_jobs.`, "loja", orderId);
     }
     await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "", printJobsQueued: printJobResult.jobs?.length || 0, printJobQueueError: printJobResult.error?.message || "" });
 

@@ -1,6 +1,6 @@
 # Fase 52 — Fila de impressão no Supabase
 
-Versão: `6.0.39-fase-52-fila-impressao-supabase`
+Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 
 ## Objetivo
 
@@ -29,5 +29,5 @@ O Electron da loja, na próxima fase, vai consumir essa fila e imprimir na impre
 Rode no Supabase:
 
 ```sql
-supabase/migracao-final-producao-6-0-39.sql
+supabase/migracao-final-producao-6-0-40.sql
 ```
