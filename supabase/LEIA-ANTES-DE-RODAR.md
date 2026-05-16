@@ -26,10 +26,10 @@ O script usa `IF NOT EXISTS`, então pode ser rodado mais de uma vez sem recriar
 
 ## Migração final de produção
 
-Para a versão 6.0.40 ou superior, rode também o arquivo mais recente:
+Para a versão 6.0.41 ou superior, rode também o arquivo mais recente:
 
 ```sql
-supabase/migracao-final-producao-6-0-40.sql
+supabase/migracao-final-producao-6-0-41.sql
 ```
 
 Ele reforça as tabelas principais e cria/atualiza as funções:

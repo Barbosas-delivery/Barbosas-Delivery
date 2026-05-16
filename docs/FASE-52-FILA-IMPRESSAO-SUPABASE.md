@@ -1,6 +1,6 @@
 # Fase 52 — Fila de impressão no Supabase
 
-Versão: `6.0.40-fase-53-modelos-cupom-impressao`
+Versão: `6.0.39-fase-52-fila-impressao-supabase`
 
 ## Objetivo
 

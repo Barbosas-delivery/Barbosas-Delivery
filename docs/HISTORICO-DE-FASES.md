@@ -380,3 +380,14 @@ Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 - PDV Balcão continua gerando 1 via: balcão.
 - A via de cozinha foca preparo e observações; a via de entrega foca cliente, telefone, endereço, pagamento e itens; a via de balcão foca venda, itens, pagamento e total.
 - A migração obrigatória mais recente é `supabase/migracao-final-producao-6-0-40.sql`.
+
+## Fase 54 — Aplicativo Electron básico
+
+Versão: `6.0.41-fase-54-electron-basico`
+
+- Criada a estrutura inicial do aplicativo desktop com Electron.
+- Adicionado painel local de impressão para configurar Supabase e impressora.
+- Adicionada listagem de impressoras locais e teste de impressão.
+- Configurações locais salvas no computador, sem substituir o Supabase como banco principal.
+- Preparados scripts `npm run desktop` e `npm run desktop:build`.
+- Adicionado teste de fumaça para validar a estrutura Electron.

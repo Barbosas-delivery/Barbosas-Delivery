@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Impressão automática - Barbosa's Delivery</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+    body { margin: 0; padding: 24px; background: linear-gradient(135deg, #0f172a, #111827); }
+    main { max-width: 980px; margin: 0 auto; display: grid; gap: 16px; }
+    .card { background: rgba(15, 23, 42, .88); border: 1px solid rgba(148, 163, 184, .2); border-radius: 18px; padding: 18px; box-shadow: 0 12px 35px rgba(0,0,0,.28); }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    h2 { margin: 0 0 12px; font-size: 17px; color: #f8fafc; }
+    p { margin: 0 0 12px; color: #cbd5e1; line-height: 1.45; }
+    label { display: grid; gap: 6px; margin: 10px 0; font-size: 13px; color: #cbd5e1; }
+    input, select { width: 100%; box-sizing: border-box; border-radius: 12px; border: 1px solid #334155; background: #020617; color: #f8fafc; padding: 10px 12px; font-size: 14px; }
+    input[type="checkbox"] { width: auto; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button { border: 0; border-radius: 12px; background: #22c55e; color: #052e16; padding: 10px 14px; font-weight: 800; cursor: pointer; }
+    button.secondary { background: #334155; color: #e5e7eb; }
+    button.warn { background: #f59e0b; color: #451a03; }
+    pre { white-space: pre-wrap; background: #020617; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; max-height: 180px; overflow: auto; }
+    .ok { color: #86efac; }
+    .bad { color: #fca5a5; }
+    .muted { color: #94a3b8; font-size: 12px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>Barbosa's Delivery Desktop</h1>
+      <p>Painel local da loja para configurar Supabase, impressora e teste de impressão automática.</p>
+      <div id="appInfo" class="muted">Carregando informações...</div>
+    </section>
+
+    <section class="card">
+      <h2>1. Conexão com Supabase</h2>
+      <div class="grid">
+        <label>Supabase URL
+          <input id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label>Supabase anon key
+          <input id="supabaseAnonKey" placeholder="eyJ..." type="password" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="saveConfig">Salvar configuração</button>
+        <button id="testSupabase" class="secondary">Testar conexão</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. Impressora local</h2>
+      <div class="grid">
+        <label>Impressora
+          <select id="printerName"></select>
+        </label>
+        <label>Largura do papel
+          <select id="paperWidthMm">
+            <option value="80">80mm</option>
+            <option value="58">58mm</option>
+          </select>
+        </label>
+      </div>
+      <label class="row"><input id="silentPrint" type="checkbox" /> Imprimir silenciosamente quando possível</label>
+      <div class="row">
+        <button id="reloadPrinters" class="secondary">Atualizar impressoras</button>
+        <button id="testPrint" class="warn">Testar impressão</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Regras preparadas para a próxima fase</h2>
+      <p>Essas regras já ficam salvas no computador. Na Fase 55 o Electron vai ler os <code>print_jobs</code> pendentes e imprimir automaticamente.</p>
+      <label class="row"><input id="autoEnabled" type="checkbox" /> Ativar impressão automática quando a Fase 55 estiver pronta</label>
+      <label class="row"><input id="customerApp" type="checkbox" /> Pedido do app: 1 via cozinha + 1 via entrega</label>
+      <label class="row"><input id="pdvDelivery" type="checkbox" /> PDV Entregas: 1 via cozinha + 1 via entrega</label>
+      <label class="row"><input id="pdvCounter" type="checkbox" /> PDV Balcão: 1 via balcão</label>
+    </section>
+
+    <section class="card">
+      <h2>Resultado</h2>
+      <pre id="result">Aguardando ação...</pre>
+    </section>
+  </main>
+
+  <script>
+    const api = window.barbosasDesktop;
+    const fields = {
+      supabaseUrl: document.querySelector("#supabaseUrl"),
+      supabaseAnonKey: document.querySelector("#supabaseAnonKey"),
+      printerName: document.querySelector("#printerName"),
+      paperWidthMm: document.querySelector("#paperWidthMm"),
+      silentPrint: document.querySelector("#silentPrint"),
+      autoEnabled: document.querySelector("#autoEnabled"),
+      customerApp: document.querySelector("#customerApp"),
+      pdvDelivery: document.querySelector("#pdvDelivery"),
+      pdvCounter: document.querySelector("#pdvCounter"),
+      result: document.querySelector("#result"),
+      appInfo: document.querySelector("#appInfo"),
+    };
+
+    function show(value) {
+      fields.result.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    function collectConfig() {
+      return {
+        supabaseUrl: fields.supabaseUrl.value,
+        supabaseAnonKey: fields.supabaseAnonKey.value,
+        printerName: fields.printerName.value,
+        paperWidthMm: Number(fields.paperWidthMm.value),
+        silentPrint: fields.silentPrint.checked,
+        autoPrint: {
+          enabled: fields.autoEnabled.checked,
+          customerApp: fields.customerApp.checked,
+          pdvDelivery: fields.pdvDelivery.checked,
+          pdvCounter: fields.pdvCounter.checked,
+        },
+      };
+    }
+
+    async function loadPrinters(selectedName = "") {
+      const printers = await api.getPrinters();
+      fields.printerName.innerHTML = '<option value="">Impressora padrão do sistema</option>';
+      for (const printer of printers) {
+        const option = document.createElement("option");
+        option.value = printer.name;
+        option.textContent = `${printer.displayName || printer.name}${printer.isDefault ? " (padrão)" : ""}`;
+        fields.printerName.appendChild(option);
+      }
+      fields.printerName.value = selectedName || "";
+      return printers;
+    }
+
+    async function loadConfig() {
+      const [info, config] = await Promise.all([api.getAppInfo(), api.getConfig()]);
+      fields.appInfo.textContent = `${info.name} ${info.version} • Configuração local: ${info.userDataPath}`;
+      fields.supabaseUrl.value = config.supabaseUrl || "";
+      fields.supabaseAnonKey.value = config.supabaseAnonKey || "";
+      fields.paperWidthMm.value = String(config.paperWidthMm || 80);
+      fields.silentPrint.checked = config.silentPrint !== false;
+      fields.autoEnabled.checked = Boolean(config.autoPrint?.enabled);
+      fields.customerApp.checked = config.autoPrint?.customerApp !== false;
+      fields.pdvDelivery.checked = config.autoPrint?.pdvDelivery !== false;
+      fields.pdvCounter.checked = config.autoPrint?.pdvCounter !== false;
+      await loadPrinters(config.printerName || "");
+    }
+
+    document.querySelector("#saveConfig").addEventListener("click", async () => {
+      const saved = await api.saveConfig(collectConfig());
+      show({ ok: true, message: "Configuração salva no computador.", saved: { ...saved, supabaseAnonKey: saved.supabaseAnonKey ? "***" : "" } });
+    });
+
+    document.querySelector("#testSupabase").addEventListener("click", async () => {
+      const result = await api.validateSupabase(collectConfig());
+      show(result);
+    });
+
+    document.querySelector("#reloadPrinters").addEventListener("click", async () => {
+      const printers = await loadPrinters(fields.printerName.value);
+      show({ impressorasEncontradas: printers.length, printers });
+    });
+
+    document.querySelector("#testPrint").addEventListener("click", async () => {
+      await api.saveConfig(collectConfig());
+      const result = await api.testPrint({ printerName: fields.printerName.value, silentPrint: fields.silentPrint.checked });
+      show(result);
+    });
+
+    loadConfig().catch((error) => show({ ok: false, error: error.message }));
+  </script>
+</body>
+</html>

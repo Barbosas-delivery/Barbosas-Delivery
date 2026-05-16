@@ -1,14 +1,17 @@
 {
   "name": "barbosas-delivery",
   "private": true,
-  "version": "6.0.40",
+  "version": "6.0.41",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint src scripts public/*.js eslint.config.js",
     "preview": "vite preview",
-    "test": "node scripts/smoke-test.mjs"
+    "test": "node scripts/smoke-test.mjs && node scripts/desktop-smoke-test.mjs",
+    "desktop": "electron .",
+    "desktop:dev": "echo \"Abra outro terminal com npm run dev e rode: BARBOSAS_DESKTOP_DEV_URL=http://localhost:5173 npm run desktop\" && electron .",
+    "desktop:build": "npm run build && electron-builder --win nsis --publish=never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
@@ -24,10 +27,38 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.8.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "vite": "^8.0.10"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "br.com.barbosas.delivery.desktop",
+    "productName": "Barbosa's Delivery Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Barbosas-Delivery-Desktop-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

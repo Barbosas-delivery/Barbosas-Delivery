@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.36-fase-50-comandas-transacionais`
+`6.0.41-fase-54-electron-basico`
 
 ## Revisão final
 
@@ -144,19 +144,19 @@ Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
 - Removida a necessidade de aprovação manual da loja para pedido novo.
 - Estoque continua sendo reservado antes de salvar o pedido.
 - Pedidos antigos aguardando aprovação são liberados pela migração final.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-40.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-41.sql`.
 
 
 ## Fase 52 — Fila de impressão no Supabase
 
-Versão: `6.0.40-fase-53-modelos-cupom-impressao`
+Versão: `6.0.39-fase-52-fila-impressao-supabase`
 
 - Cria a tabela `print_jobs` para o aplicativo Electron consumir impressões pendentes.
 - Pedido do app gera 2 jobs: `kitchen` e `delivery`.
 - PDV Entregas gera 2 jobs: `kitchen` e `delivery`.
 - PDV Balcão gera 1 job: `counter`.
 - A impressão automática do navegador fica desativada como solução principal para evitar pop-ups, duplicidade e perda por atualização de página.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-40.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-41.sql`.
 
 ## Fase 53 — Modelos de cupom para impressão
 
@@ -165,4 +165,16 @@ Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 - `print_jobs` agora inclui `payload.ticket` com HTML e linhas prontas para impressão.
 - Pedido do app e PDV Entregas geram cupom de cozinha e entrega.
 - PDV Balcão gera cupom de balcão.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-40.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-41.sql`.
+
+
+## Fase 54 — Aplicativo Electron básico
+
+Versão: `6.0.41-fase-54-electron-basico`
+
+- Criada a base do aplicativo desktop instalado no computador da loja.
+- O Electron carrega o app web e adiciona um painel local de impressão.
+- O painel local permite configurar Supabase, listar impressoras, escolher papel 58mm/80mm e testar impressão.
+- Configurações locais ficam no computador; produtos, pedidos, estoque e caixa continuam no Supabase.
+- Scripts adicionados: `npm run desktop` e `npm run desktop:build`.
+- Documentação: `docs/FASE-54-ELECTRON-BASICO.md`.
