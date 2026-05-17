@@ -29,7 +29,7 @@ O script usa `IF NOT EXISTS`, então pode ser rodado mais de uma vez sem recriar
 Para a versão 6.0.41 ou superior, rode também o arquivo mais recente:
 
 ```sql
-supabase/migracao-final-producao-6-0-41.sql
+supabase/migracao-final-producao-6-0-42.sql
 ```
 
 Ele reforça as tabelas principais e cria/atualiza as funções:

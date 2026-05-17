@@ -383,7 +383,7 @@ Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 
 ## Fase 54 — Aplicativo Electron básico
 
-Versão: `6.0.41-fase-54-electron-basico`
+Versão: `6.0.42-fase-54-corrige-assets-electron`
 
 - Criada a estrutura inicial do aplicativo desktop com Electron.
 - Adicionado painel local de impressão para configurar Supabase e impressora.
