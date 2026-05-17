@@ -391,3 +391,14 @@ Versão: `6.0.42-fase-54-corrige-assets-electron`
 - Configurações locais salvas no computador, sem substituir o Supabase como banco principal.
 - Preparados scripts `npm run desktop` e `npm run desktop:build`.
 - Adicionado teste de fumaça para validar a estrutura Electron.
+
+## Fase 55 — Consumidor automático de impressão
+
+Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
+
+- O Electron Desktop agora consome a fila `print_jobs` automaticamente.
+- Jobs pendentes são reservados com `claim_pending_print_jobs`.
+- Impressões concluídas são marcadas com `mark_print_job_printed`.
+- Falhas de impressão são registradas com `mark_print_job_failed`.
+- Painel local ganhou iniciar/parar automático, processar fila agora, logs e status.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.

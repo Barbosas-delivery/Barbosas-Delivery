@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.42-fase-54-corrige-assets-electron`
+`6.0.43-fase-55-consumidor-impressao-automatico`
 
 ## Revisão final
 
@@ -144,7 +144,7 @@ Versão: `6.0.38-fase-51-pedido-direto-sem-aprovacao`
 - Removida a necessidade de aprovação manual da loja para pedido novo.
 - Estoque continua sendo reservado antes de salvar o pedido.
 - Pedidos antigos aguardando aprovação são liberados pela migração final.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-42.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.
 
 
 ## Fase 52 — Fila de impressão no Supabase
@@ -156,7 +156,7 @@ Versão: `6.0.39-fase-52-fila-impressao-supabase`
 - PDV Entregas gera 2 jobs: `kitchen` e `delivery`.
 - PDV Balcão gera 1 job: `counter`.
 - A impressão automática do navegador fica desativada como solução principal para evitar pop-ups, duplicidade e perda por atualização de página.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-42.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.
 
 ## Fase 53 — Modelos de cupom para impressão
 
@@ -165,12 +165,12 @@ Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 - `print_jobs` agora inclui `payload.ticket` com HTML e linhas prontas para impressão.
 - Pedido do app e PDV Entregas geram cupom de cozinha e entrega.
 - PDV Balcão gera cupom de balcão.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-42.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.
 
 
 ## Fase 54 — Aplicativo Electron básico
 
-Versão: `6.0.42-fase-54-corrige-assets-electron`
+Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
 
 - Criada a base do aplicativo desktop instalado no computador da loja.
 - O Electron carrega o app web e adiciona um painel local de impressão.
@@ -178,3 +178,14 @@ Versão: `6.0.42-fase-54-corrige-assets-electron`
 - Configurações locais ficam no computador; produtos, pedidos, estoque e caixa continuam no Supabase.
 - Scripts adicionados: `npm run desktop` e `npm run desktop:build`.
 - Documentação: `docs/FASE-54-ELECTRON-BASICO.md`.
+
+## Fase 55 — Consumidor automático de impressão
+
+Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
+
+- O Electron Desktop agora busca `print_jobs` pendentes no Supabase.
+- Ao imprimir, marca o job como `printed`.
+- Em erro de impressora, marca como `failed` e registra a mensagem.
+- Painel local permite iniciar/parar automático, processar fila manualmente e acompanhar logs.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.
+- Documentação: `docs/FASE-55-CONSUMIDOR-IMPRESSAO-AUTOMATICO.md`.

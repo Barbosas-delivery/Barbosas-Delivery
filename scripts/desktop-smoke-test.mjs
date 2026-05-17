@@ -27,12 +27,22 @@ assert.match(mainSource, /BrowserWindow/, "main precisa criar janelas Electron")
 assert.match(mainSource, /getPrintersAsync/, "Electron precisa listar impressoras locais");
 assert.match(mainSource, /webContents\.print/, "Electron precisa ter teste de impressão local");
 assert.match(mainSource, /print_jobs\?select=id&limit=1/, "painel desktop precisa validar a tabela print_jobs no Supabase");
+assert.match(mainSource, /claim_pending_print_jobs/, "Electron precisa reservar jobs pendentes no Supabase");
+assert.match(mainSource, /mark_print_job_printed/, "Electron precisa marcar jobs como impressos");
+assert.match(mainSource, /mark_print_job_failed/, "Electron precisa registrar falhas de impressão");
+assert.match(mainSource, /setInterval\(\(\) => \{\n    void processPrintJobsOnce\(\);/, "Electron precisa consumir a fila automaticamente por intervalo");
+assert.match(mainSource, /p_sources/, "Electron precisa respeitar fontes de impressão habilitadas");
+assert.match(mainSource, /getJobCopies/, "Electron precisa respeitar a quantidade de vias por tipo de cupom");
 assert.match(mainSource, /desktop-config\.json/, "configurações locais precisam ficar salvas no computador");
 assert.match(mainSource, /contextIsolation:\s*true/, "janela Electron precisa manter contextIsolation ativo");
 assert.match(mainSource, /nodeIntegration:\s*false/, "janela Electron não deve expor Node diretamente ao app web");
 assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("barbosasDesktop"/, "preload precisa expor bridge segura");
+assert.match(preloadSource, /startPrintWorker/, "preload precisa expor início da impressão automática");
+assert.match(preloadSource, /processPrintJobsOnce/, "preload precisa permitir processar a fila sob demanda");
 assert.match(panelSource, /Pedido do app: 1 via cozinha \+ 1 via entrega/, "painel precisa refletir regra operacional do app");
 assert.match(panelSource, /PDV Entregas: 1 via cozinha \+ 1 via entrega/, "painel precisa refletir regra do PDV Entregas");
 assert.match(panelSource, /PDV Balcão: 1 via balcão/, "painel precisa refletir regra do PDV Balcão");
+assert.match(panelSource, /Ativar impressão automática neste computador/, "painel precisa permitir ligar impressão automática real");
+assert.match(panelSource, /Processar fila agora/, "painel precisa permitir processar a fila manualmente");
 
 console.log("✓ Estrutura Electron validada.");

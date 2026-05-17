@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.42-fase-54-corrige-assets-electron"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-42-fase-54-corrige-assets-electron-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.43-fase-55-consumidor-impressao-automatico"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-43-fase-55-consumidor-impressao-automatico-sem-cache/);
 
   const viteConfigSource = readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
   assert.match(viteConfigSource, /base:\s*["']\.\/["']/, "vite.config.js precisa usar base './' para o Electron carregar assets via file://.");
@@ -69,7 +69,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-42.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-43.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -105,6 +105,8 @@ test("versão final consistente", () => {
   assert.match(stockMigrationSource, /alter table order_items add column if not exists is_kit/i, "migração final precisa reforçar colunas de order_items em bancos antigos");
   assert.match(stockMigrationSource, /create table if not exists print_jobs/i, "migração final precisa criar a fila de impressão");
   assert.match(stockMigrationSource, /create or replace function claim_pending_print_jobs/i, "migração final precisa permitir o Electron reservar jobs de impressão com segurança");
+  assert.match(stockMigrationSource, /p_sources text\[\] default null/i, "função de reserva precisa aceitar filtro de origem para o Electron respeitar configuração local");
+  assert.match(stockMigrationSource, /source = any\(p_sources\)/i, "reserva de impressão precisa filtrar origem habilitada");
   assert.match(stockMigrationSource, /create or replace function mark_print_job_printed/i, "migração final precisa permitir marcar impressão como concluída");
   assert.match(stockMigrationSource, /create or replace function mark_print_job_failed/i, "migração final precisa registrar falha de impressão");
   assert.ok(printJobsServiceSource.includes('PRINT_JOB_TYPE.KITCHEN') && printJobsServiceSource.includes('PRINT_JOB_TYPE.DELIVERY') && printJobsServiceSource.includes('PRINT_JOB_TYPE.COUNTER'), "serviço precisa criar vias cozinha, entrega e balcão");
@@ -191,7 +193,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-42.sql",
+    "supabase/migracao-final-producao-6-0-43.sql",
     "src/utils/printJobTemplates.js",
     "electron/main.cjs",
     "electron/preload.cjs",

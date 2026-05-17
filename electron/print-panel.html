@@ -20,10 +20,13 @@
     button { border: 0; border-radius: 12px; background: #22c55e; color: #052e16; padding: 10px 14px; font-weight: 800; cursor: pointer; }
     button.secondary { background: #334155; color: #e5e7eb; }
     button.warn { background: #f59e0b; color: #451a03; }
-    pre { white-space: pre-wrap; background: #020617; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; max-height: 180px; overflow: auto; }
+    pre { white-space: pre-wrap; background: #020617; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; max-height: 260px; overflow: auto; }
     .ok { color: #86efac; }
     .bad { color: #fca5a5; }
     .muted { color: #94a3b8; font-size: 12px; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 800; background: #1f2937; color: #e5e7eb; }
+    .pill.on { background: rgba(34,197,94,.18); color: #86efac; }
+    .pill.off { background: rgba(248,113,113,.15); color: #fca5a5; }
     @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -31,7 +34,7 @@
   <main>
     <section class="card">
       <h1>Barbosa's Delivery Desktop</h1>
-      <p>Painel local da loja para configurar Supabase, impressora e teste de impressão automática.</p>
+      <p>Painel local da loja para configurar Supabase, impressora e impressão automática real pela fila <code>print_jobs</code>.</p>
       <div id="appInfo" class="muted">Carregando informações...</div>
     </section>
 
@@ -72,16 +75,34 @@
     </section>
 
     <section class="card">
-      <h2>3. Regras preparadas para a próxima fase</h2>
-      <p>Essas regras já ficam salvas no computador. Na Fase 55 o Electron vai ler os <code>print_jobs</code> pendentes e imprimir automaticamente.</p>
-      <label class="row"><input id="autoEnabled" type="checkbox" /> Ativar impressão automática quando a Fase 55 estiver pronta</label>
+      <h2>3. Impressão automática</h2>
+      <p>Com essa opção ligada, o Electron reserva jobs pendentes no Supabase, imprime na impressora local e marca como impresso ou falha.</p>
+      <label class="row"><input id="autoEnabled" type="checkbox" /> Ativar impressão automática neste computador</label>
       <label class="row"><input id="customerApp" type="checkbox" /> Pedido do app: 1 via cozinha + 1 via entrega</label>
       <label class="row"><input id="pdvDelivery" type="checkbox" /> PDV Entregas: 1 via cozinha + 1 via entrega</label>
       <label class="row"><input id="pdvCounter" type="checkbox" /> PDV Balcão: 1 via balcão</label>
+      <label>Intervalo de busca da fila
+        <input id="pollIntervalSeconds" type="number" min="3" step="1" />
+      </label>
+      <div class="row">
+        <button id="startWorker">Iniciar automático</button>
+        <button id="stopWorker" class="secondary">Parar automático</button>
+        <button id="processNow" class="warn">Processar fila agora</button>
+      </div>
     </section>
 
     <section class="card">
-      <h2>Resultado</h2>
+      <h2>4. Status da fila</h2>
+      <div class="row">
+        <span id="workerRunning" class="pill off">Parado</span>
+        <span id="workerProcessing" class="pill">Aguardando</span>
+        <span id="workerCounts" class="muted">0 impressos • 0 falhas</span>
+      </div>
+      <p id="workerDetails" class="muted">Aguardando status...</p>
+    </section>
+
+    <section class="card">
+      <h2>Resultado / logs</h2>
       <pre id="result">Aguardando ação...</pre>
     </section>
   </main>
@@ -98,6 +119,11 @@
       customerApp: document.querySelector("#customerApp"),
       pdvDelivery: document.querySelector("#pdvDelivery"),
       pdvCounter: document.querySelector("#pdvCounter"),
+      pollIntervalSeconds: document.querySelector("#pollIntervalSeconds"),
+      workerRunning: document.querySelector("#workerRunning"),
+      workerProcessing: document.querySelector("#workerProcessing"),
+      workerCounts: document.querySelector("#workerCounts"),
+      workerDetails: document.querySelector("#workerDetails"),
       result: document.querySelector("#result"),
       appInfo: document.querySelector("#appInfo"),
     };
@@ -119,6 +145,7 @@
           pdvDelivery: fields.pdvDelivery.checked,
           pdvCounter: fields.pdvCounter.checked,
         },
+        pollIntervalSeconds: Number(fields.pollIntervalSeconds.value || 5),
       };
     }
 
@@ -146,7 +173,9 @@
       fields.customerApp.checked = config.autoPrint?.customerApp !== false;
       fields.pdvDelivery.checked = config.autoPrint?.pdvDelivery !== false;
       fields.pdvCounter.checked = config.autoPrint?.pdvCounter !== false;
+      fields.pollIntervalSeconds.value = String(config.pollIntervalSeconds || 5);
       await loadPrinters(config.printerName || "");
+      await refreshWorkerStatus();
     }
 
     document.querySelector("#saveConfig").addEventListener("click", async () => {
@@ -166,10 +195,49 @@
 
     document.querySelector("#testPrint").addEventListener("click", async () => {
       await api.saveConfig(collectConfig());
-      const result = await api.testPrint({ printerName: fields.printerName.value, silentPrint: fields.silentPrint.checked });
+      const result = await api.testPrint({ printerName: fields.printerName.value, silentPrint: fields.silentPrint.checked, paperWidthMm: Number(fields.paperWidthMm.value) });
       show(result);
+      await refreshWorkerStatus();
     });
 
+    async function refreshWorkerStatus() {
+      const status = await api.getPrintWorkerStatus();
+      fields.workerRunning.textContent = status.running ? "Automático ligado" : "Automático parado";
+      fields.workerRunning.className = `pill ${status.running ? "on" : "off"}`;
+      fields.workerProcessing.textContent = status.processing ? "Imprimindo/processando" : "Aguardando fila";
+      fields.workerCounts.textContent = `${status.printedCount || 0} impressos • ${status.failedCount || 0} falhas`;
+      fields.workerDetails.textContent = `Worker: ${status.workerId} • Última busca: ${status.lastRunAt || "nunca"}${status.lastError ? ` • Erro: ${status.lastError}` : ""}`;
+      if (Array.isArray(status.logs) && status.logs.length) {
+        fields.result.textContent = status.logs.map((log) => `[${new Date(log.at).toLocaleTimeString("pt-BR")}] ${log.level.toUpperCase()} - ${log.message}`).join("\n");
+      }
+      return status;
+    }
+
+    document.querySelector("#startWorker").addEventListener("click", async () => {
+      await api.saveConfig(collectConfig());
+      const status = await api.startPrintWorker();
+      show(status);
+      await refreshWorkerStatus();
+    });
+
+    document.querySelector("#stopWorker").addEventListener("click", async () => {
+      const status = await api.stopPrintWorker();
+      show(status);
+      await refreshWorkerStatus();
+    });
+
+    document.querySelector("#processNow").addEventListener("click", async () => {
+      await api.saveConfig(collectConfig());
+      const status = await api.processPrintJobsOnce();
+      show(status);
+      await refreshWorkerStatus();
+    });
+
+    if (api.onPrintWorkerLog) {
+      api.onPrintWorkerLog(() => refreshWorkerStatus().catch(() => {}));
+    }
+
+    setInterval(() => refreshWorkerStatus().catch(() => {}), 5000);
     loadConfig().catch((error) => show({ ok: false, error: error.message }));
   </script>
 </body>

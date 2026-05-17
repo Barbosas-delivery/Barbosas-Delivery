@@ -2,9 +2,11 @@ const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
+const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
 const CONFIG_FILE = "desktop-config.json";
+const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {
   supabaseUrl: "",
   supabaseAnonKey: "",
@@ -23,6 +25,19 @@ const DEFAULT_CONFIG = {
     pdvCounter: true,
   },
   pollIntervalSeconds: 5,
+};
+
+const printWorker = {
+  timer: null,
+  running: false,
+  processing: false,
+  workerId: `barbosas-desktop-${crypto.randomUUID()}`,
+  lastRunAt: "",
+  lastError: "",
+  lastClaimCount: 0,
+  printedCount: 0,
+  failedCount: 0,
+  logs: [],
 };
 
 let mainWindow = null;
@@ -66,7 +81,30 @@ async function writeConfig(config) {
   const nextConfig = sanitizeConfig(config);
   await fs.mkdir(path.dirname(getConfigPath()), { recursive: true });
   await fs.writeFile(getConfigPath(), JSON.stringify(nextConfig, null, 2), "utf8");
+  if (nextConfig.autoPrint.enabled) {
+    try {
+      await startPrintWorker();
+    } catch (error) {
+      addPrintLog("error", `Configuração salva, mas a impressão automática não iniciou: ${error?.message || error}`);
+    }
+  } else {
+    stopPrintWorker();
+  }
   return nextConfig;
+}
+
+function addPrintLog(level, message, details = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    level,
+    message,
+    details,
+  };
+  printWorker.logs.unshift(entry);
+  printWorker.logs = printWorker.logs.slice(0, MAX_PRINT_LOGS);
+  if (printPanelWindow && !printPanelWindow.isDestroyed()) {
+    printPanelWindow.webContents.send("desktop:print-worker-log", entry);
+  }
 }
 
 function getAssetPath(...segments) {
@@ -122,10 +160,10 @@ function createPrintPanelWindow() {
   }
 
   printPanelWindow = new BrowserWindow({
-    width: 920,
-    height: 720,
-    minWidth: 760,
-    minHeight: 560,
+    width: 980,
+    height: 780,
+    minWidth: 820,
+    minHeight: 620,
     title: "Impressão automática - Barbosa's Delivery",
     backgroundColor: "#111827",
     parent: mainWindow || undefined,
@@ -162,6 +200,10 @@ function buildMenu() {
       label: "Impressão",
       submenu: [
         { label: "Configurar impressora", click: () => createPrintPanelWindow() },
+        { label: "Processar fila agora", click: () => void processPrintJobsOnce() },
+        { label: "Iniciar impressão automática", click: () => void startPrintWorker() },
+        { label: "Parar impressão automática", click: () => stopPrintWorker() },
+        { type: "separator" },
         { label: "Teste de impressão", click: () => createPrintPanelWindow() },
       ],
     },
@@ -174,18 +216,19 @@ function buildMenu() {
   ]);
 }
 
-function normalizeHtmlForPrinting(html = "") {
+function normalizeHtmlForPrinting(html = "", paperWidthMm = 80) {
   const body = String(html || "").trim() || "<h1>Barbosa's Delivery</h1><p>Teste de impressão.</p>";
+  const width = Number(paperWidthMm) === 58 ? 50 : 72;
   if (/<!doctype html>|<html/i.test(body)) return body;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Impressão</title><style>
     body { font-family: Arial, sans-serif; margin: 0; padding: 12px; color: #111; }
-    .ticket { width: 72mm; max-width: 72mm; }
+    .ticket { width: ${width}mm; max-width: ${width}mm; }
     h1,h2,h3,p { margin: 0 0 6px; }
     hr { border: 0; border-top: 1px dashed #333; margin: 8px 0; }
   </style></head><body><div class="ticket">${body}</div></body></html>`;
 }
 
-async function printHtml({ html, printerName, silentPrint = true } = {}) {
+async function printHtml({ html, printerName, silentPrint = true, paperWidthMm = 80 } = {}) {
   const config = await readConfig();
   const targetPrinter = String(printerName || config.printerName || "").trim();
   const printWindow = new BrowserWindow({
@@ -200,7 +243,7 @@ async function printHtml({ html, printerName, silentPrint = true } = {}) {
   });
 
   try {
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(normalizeHtmlForPrinting(html))}`);
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(normalizeHtmlForPrinting(html, paperWidthMm || config.paperWidthMm))}`);
     const result = await new Promise((resolve) => {
       printWindow.webContents.print(
         {
@@ -215,6 +258,45 @@ async function printHtml({ html, printerName, silentPrint = true } = {}) {
   } finally {
     if (!printWindow.isDestroyed()) printWindow.close();
   }
+}
+
+function requireSupabaseConfig(config) {
+  if (!config.supabaseUrl || !config.supabaseAnonKey) {
+    throw new Error("Configure a URL e a anon key do Supabase no painel desktop.");
+  }
+}
+
+async function supabaseRpc(config, functionName, body = {}) {
+  requireSupabaseConfig(config);
+  const baseUrl = config.supabaseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/rest/v1/rpc/${functionName}`, {
+    method: "POST",
+    headers: {
+      apikey: config.supabaseAnonKey,
+      authorization: `Bearer ${config.supabaseAnonKey}`,
+      "content-type": "application/json",
+      prefer: "return=representation",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+
+  if (!response.ok) {
+    const message = typeof payload === "object" && payload?.message ? payload.message : text || `Supabase respondeu ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
 }
 
 async function validateSupabaseConnection(configInput) {
@@ -244,10 +326,195 @@ async function validateSupabaseConnection(configInput) {
   return { ok: true, message: "Conexão com Supabase e tabela print_jobs confirmadas." };
 }
 
-app.whenReady().then(() => {
+function getEnabledSources(config) {
+  const sources = [];
+  if (config.autoPrint.customerApp !== false) sources.push("customer_app");
+  if (config.autoPrint.pdvDelivery !== false) sources.push("pdv_entregas");
+  if (config.autoPrint.pdvCounter !== false) sources.push("pdv_balcao");
+  return sources;
+}
+
+function ticketLinesToHtml(lines = []) {
+  const escapedLines = Array.isArray(lines) ? lines : [];
+  const escapeHtml = (value) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  return `<pre style="font-family: Consolas, monospace; white-space: pre-wrap; font-size: 12px; line-height: 1.28;">${escapedLines.map(escapeHtml).join("\n")}</pre>`;
+}
+
+function getJobHtml(job) {
+  const payload = job?.payload || {};
+  const ticket = payload.ticket || {};
+  if (ticket.html) return ticket.html;
+  if (Array.isArray(ticket.lines)) return ticketLinesToHtml(ticket.lines);
+  return `<h2>BARBOSA'S DELIVERY</h2><hr><p><strong>${String(job.print_type || "Impressão").toUpperCase()}</strong></p><p>Job: ${String(job.id || "")}</p>`;
+}
+
+function getJobCopies(job, config) {
+  const printType = String(job.print_type || "");
+  const payloadCopies = Number(job?.payload?.ticket?.copies || 0);
+  const jobCopies = Number(job?.copies || 0);
+  const configCopies = Number(config?.copies?.[printType] || 0);
+  return Math.max(1, Math.min(5, payloadCopies || jobCopies || configCopies || 1));
+}
+
+async function claimPendingPrintJobs(config, limit = 5) {
+  const sources = getEnabledSources(config);
+  if (!sources.length) return [];
+  const body = {
+    p_worker_id: printWorker.workerId,
+    p_limit: limit,
+    p_sources: sources,
+    p_print_types: ["kitchen", "delivery", "counter"],
+  };
+  return await supabaseRpc(config, "claim_pending_print_jobs", body) || [];
+}
+
+async function markPrintJobPrinted(config, job, printerName) {
+  return supabaseRpc(config, "mark_print_job_printed", {
+    p_job_id: job.id,
+    p_printer_name: printerName || "",
+  });
+}
+
+async function markPrintJobFailed(config, job, errorMessage) {
+  return supabaseRpc(config, "mark_print_job_failed", {
+    p_job_id: job.id,
+    p_error_message: String(errorMessage || "Falha de impressão").slice(0, 1000),
+  });
+}
+
+async function printJob(config, job) {
+  const html = getJobHtml(job);
+  const copies = getJobCopies(job, config);
+  const targetPrinter = String(job.printer_name || config.printerName || "").trim();
+  for (let copy = 1; copy <= copies; copy += 1) {
+    const result = await printHtml({
+      html,
+      printerName: targetPrinter,
+      silentPrint: config.silentPrint,
+      paperWidthMm: config.paperWidthMm,
+    });
+    if (!result.success) {
+      throw new Error(result.failureReason || `A impressora recusou o job ${job.id}.`);
+    }
+  }
+  await markPrintJobPrinted(config, job, targetPrinter);
+  printWorker.printedCount += 1;
+  addPrintLog("ok", `Job impresso: ${job.print_type} • ${job.source} • ${job.source_id}`, {
+    id: job.id,
+    copies,
+    printerName: targetPrinter || "padrão do sistema",
+  });
+}
+
+async function processPrintJobsOnce() {
+  if (printWorker.processing) {
+    return getPrintWorkerStatus();
+  }
+  printWorker.processing = true;
+  printWorker.lastRunAt = new Date().toISOString();
+  printWorker.lastError = "";
+
+  try {
+    const config = await readConfig();
+    if (!config.autoPrint.enabled) {
+      addPrintLog("info", "Impressão automática desativada. Nenhum job foi consumido.");
+      return getPrintWorkerStatus();
+    }
+    requireSupabaseConfig(config);
+    const jobs = await claimPendingPrintJobs(config, 5);
+    printWorker.lastClaimCount = Array.isArray(jobs) ? jobs.length : 0;
+    if (!jobs.length) return getPrintWorkerStatus();
+
+    for (const job of jobs) {
+      try {
+        await printJob(config, job);
+      } catch (error) {
+        printWorker.failedCount += 1;
+        const message = error?.message || "Falha de impressão";
+        addPrintLog("error", `Falha ao imprimir job ${job.id}: ${message}`, { id: job.id, error: message });
+        try {
+          await markPrintJobFailed(config, job, message);
+        } catch (markError) {
+          addPrintLog("error", `Falha também ao registrar erro do job ${job.id}: ${markError?.message || markError}`, { id: job.id });
+        }
+      }
+    }
+  } catch (error) {
+    printWorker.lastError = error?.message || String(error);
+    addPrintLog("error", `Erro no consumidor de impressão: ${printWorker.lastError}`);
+  } finally {
+    printWorker.processing = false;
+  }
+
+  return getPrintWorkerStatus();
+}
+
+function schedulePrintWorker(config) {
+  if (printWorker.timer) clearInterval(printWorker.timer);
+  const intervalMs = Math.max(3, Number(config.pollIntervalSeconds || DEFAULT_CONFIG.pollIntervalSeconds)) * 1000;
+  printWorker.timer = setInterval(() => {
+    void processPrintJobsOnce();
+  }, intervalMs);
+}
+
+async function startPrintWorker() {
+  const config = await readConfig();
+  if (!config.autoPrint.enabled) {
+    return { ...getPrintWorkerStatus(), running: false, message: "Ative a impressão automática no painel antes de iniciar." };
+  }
+  try {
+    requireSupabaseConfig(config);
+  } catch (error) {
+    printWorker.lastError = error?.message || String(error);
+    addPrintLog("error", printWorker.lastError);
+    return { ...getPrintWorkerStatus(), running: false, message: printWorker.lastError };
+  }
+  if (!printWorker.running) addPrintLog("info", "Consumidor automático de impressão iniciado.");
+  printWorker.running = true;
+  schedulePrintWorker(config);
+  void processPrintJobsOnce();
+  return getPrintWorkerStatus();
+}
+
+function stopPrintWorker() {
+  if (printWorker.timer) clearInterval(printWorker.timer);
+  printWorker.timer = null;
+  if (printWorker.running) addPrintLog("info", "Consumidor automático de impressão parado.");
+  printWorker.running = false;
+  return getPrintWorkerStatus();
+}
+
+function getPrintWorkerStatus() {
+  return {
+    running: printWorker.running,
+    processing: printWorker.processing,
+    workerId: printWorker.workerId,
+    lastRunAt: printWorker.lastRunAt,
+    lastError: printWorker.lastError,
+    lastClaimCount: printWorker.lastClaimCount,
+    printedCount: printWorker.printedCount,
+    failedCount: printWorker.failedCount,
+    logs: printWorker.logs,
+  };
+}
+
+app.whenReady().then(async () => {
   app.setName(APP_NAME);
   Menu.setApplicationMenu(buildMenu());
   createMainWindow();
+  const config = await readConfig();
+  if (config.autoPrint.enabled && config.supabaseUrl && config.supabaseAnonKey) {
+    try {
+      await startPrintWorker();
+    } catch (error) {
+      addPrintLog("error", `Não foi possível iniciar impressão automática: ${error?.message || error}`);
+    }
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -255,6 +522,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopPrintWorker();
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -288,7 +556,11 @@ ipcMain.handle("desktop:test-print", async (_event, options = {}) => {
   const now = new Date().toLocaleString("pt-BR");
   const config = await readConfig();
   const html = options.html || `<h2>BARBOSA'S DELIVERY</h2><hr><p><strong>Teste de impressão</strong></p><p>${now}</p><p>Impressora: ${String(options.printerName || config.printerName || "padrão do sistema")}</p>`;
-  return printHtml({ html, printerName: options.printerName, silentPrint: options.silentPrint ?? config.silentPrint });
+  return printHtml({ html, printerName: options.printerName, silentPrint: options.silentPrint ?? config.silentPrint, paperWidthMm: options.paperWidthMm || config.paperWidthMm });
 });
 
 ipcMain.handle("desktop:validate-supabase", (_event, config) => validateSupabaseConnection(config));
+ipcMain.handle("desktop:get-print-worker-status", () => getPrintWorkerStatus());
+ipcMain.handle("desktop:start-print-worker", () => startPrintWorker());
+ipcMain.handle("desktop:stop-print-worker", () => stopPrintWorker());
+ipcMain.handle("desktop:process-print-jobs-once", () => processPrintJobsOnce());
