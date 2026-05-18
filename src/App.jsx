@@ -518,7 +518,14 @@ function App() {
   async function loadCoupons() {
     const { data, error } = await supabase.from("coupons").select("*").order("created_at", { ascending: false });
     if (error) {
-      console.error("Erro ao carregar cupons:", error);
+      const message = error.message || String(error);
+      const missingCouponsTable = error.code === "PGRST205" || /coupons.*schema cache|Could not find the table/i.test(message);
+      if (missingCouponsTable) {
+        console.warn("Tabela public.coupons ausente. Rode a migração 6.0.46 para habilitar cupons.", error);
+        setLastAction("Cupons indisponíveis: rode a migração 6.0.46 no Supabase para criar public.coupons.");
+      } else {
+        console.error("Erro ao carregar cupons:", error);
+      }
       setCoupons([]);
       return;
     }

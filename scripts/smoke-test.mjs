@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.45-fase-57-central-impressao"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-45-fase-57-central-impressao-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.46-fase-58-estabilidade-producao"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-46-fase-58-estabilidade-producao-sem-cache/);
 
   const viteConfigSource = readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
   assert.match(viteConfigSource, /base:\s*["']\.\/["']/, "vite.config.js precisa usar base './' para o Electron carregar assets via file://.");
@@ -69,12 +69,15 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-45.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-46.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
   assert.match(stockMigrationSource, /if jsonb_array_length\(failures\) > 0[\s\S]*return jsonb_build_object\('success', false/i, "função de estoque precisa validar tudo antes de alterar qualquer produto");
   assert.match(stockMigrationSource, /insufficient_stock/i, "função de estoque precisa recusar baixa sem saldo suficiente");
+  assert.match(stockMigrationSource, /create table if not exists public\.coupons/i, "migração final precisa criar public.coupons para o checkout carregar cupons");
+  assert.match(stockMigrationSource, /truncate table tmp_product_stock_deltas/i, "função de estoque não pode usar DELETE sem WHERE em tabela temporária");
+  assert.doesNotMatch(stockMigrationSource, /delete from tmp_product_stock_deltas/i, "função de estoque não pode usar DELETE sem WHERE em ambientes com safe update");
   assert.doesNotMatch(stockMigrationSource, /greatest\(0/i, "função de estoque não pode zerar saldo insuficiente e fingir sucesso");
   assert.doesNotMatch(stockMigrationSource, /total_sold numeric default 0,\s*total_sold numeric default 0/i, "migração final não pode ter coluna duplicada em cash_sessions");
   assert.match(appSource, /Grupo não criado: não foi possível salvar no Supabase/, "categoria não deve aparecer como criada quando falhar store_settings");
@@ -196,7 +199,9 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-45.sql",
+    "supabase/migracao-final-producao-6-0-46.sql",
+    "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
+    "vercel.json",
     "src/utils/printJobTemplates.js",
     "electron/main.cjs",
     "electron/preload.cjs",

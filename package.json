@@ -1,7 +1,7 @@
 {
   "name": "barbosas-delivery",
   "private": true,
-  "version": "6.0.45",
+  "version": "6.0.46",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,10 +10,10 @@
     "preview": "vite preview",
     "test": "node scripts/smoke-test.mjs && node scripts/desktop-smoke-test.mjs",
     "desktop": "electron .",
-    "desktop:dev": "echo \"Abra outro terminal com npm run dev e rode: BARBOSAS_DESKTOP_DEV_URL=http://localhost:5173 npm run desktop\" && electron .",
-    "desktop:build": "npm run desktop:installer",
-    "desktop:pack": "npm run build && electron-builder --dir --publish=never",
-    "desktop:installer": "npm run build && electron-builder --win nsis --publish=never",
+    "desktop:dev": "echo \"Abra outro terminal com pnpm run dev e rode: BARBOSAS_DESKTOP_DEV_URL=http://localhost:5173 pnpm run desktop\" && electron .",
+    "desktop:build": "pnpm run desktop:installer",
+    "desktop:pack": "pnpm run build && electron-builder --dir --publish=never",
+    "desktop:installer": "pnpm run build && electron-builder --win nsis --publish=never",
     "desktop:doctor": "node scripts/desktop-smoke-test.mjs"
   },
   "dependencies": {
@@ -82,5 +82,6 @@
     }
   },
   "description": "Sistema Barbosa’s Delivery com app web, Electron Desktop e impressão automática local.",
-  "author": "Barbosa’s Delivery"
+  "author": "Barbosa’s Delivery",
+  "packageManager": "pnpm@11.1.2"
 }

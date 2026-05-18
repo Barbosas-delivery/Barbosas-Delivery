@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.45-fase-57-central-impressao`
+`6.0.46-fase-58-estabilidade-producao`
 
 ## Revisão final
 
@@ -214,10 +214,17 @@ A Fase 56 não exige alteração nova de schema. A migração `supabase/migracao
 
 ## Fase 57 — Central de impressão no sistema
 
-Versão: `6.0.45-fase-57-central-impressao`
+Versão: `6.0.46-fase-58-estabilidade-producao`
 
 - Painel desktop ganhou **Central de impressão** com resumo de jobs pendentes, imprimindo, impressos e falhas.
 - Adicionada listagem dos últimos `print_jobs` com origem, via, status, tentativas, worker e erro.
 - Adicionados botões para reimprimir job, cancelar job, reprocessar falhas, liberar jobs travados e limpar impressos antigos.
 - Adicionada tabela `print_workers` para heartbeat do computador de impressão.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-45.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-46.sql`.
+
+
+### Fase 58 — estabilidade de produção
+
+Correções principais: tabela `public.coupons`, função `public.apply_product_stock_deltas(jsonb)` segura contra `DELETE` sem `WHERE`, deploy padronizado com pnpm e scripts desktop usando pnpm.
+
+SQL obrigatório: `supabase/migracao-final-producao-6-0-46.sql`.

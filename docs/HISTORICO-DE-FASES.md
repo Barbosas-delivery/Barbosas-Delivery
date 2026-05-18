@@ -425,3 +425,15 @@ Versão: `6.0.45-fase-57-central-impressao`
 - Adicionada tabela `print_workers` para registrar heartbeat do computador de impressão.
 - Adicionada função `reset_stale_print_jobs` para recuperar jobs travados em `printing`.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-45.sql`.
+
+
+## Fase 58 — Estabilidade de produção: cupons e estoque seguro
+
+Versão: `6.0.46-fase-58-estabilidade-producao`
+
+- Corrigida ausência da tabela `public.coupons` no Supabase.
+- Reforçada função `public.apply_product_stock_deltas(jsonb)` para estoque atômico, tudo-ou-nada e compatível com ambientes que bloqueiam `DELETE` sem `WHERE`.
+- Melhorada mensagem operacional quando cupons ainda não foram migrados.
+- Adicionado `vercel.json` para deploy com pnpm.
+- Scripts Electron ajustados para pnpm.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-46.sql`.
