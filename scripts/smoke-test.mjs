@@ -52,16 +52,21 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.48-fase-60-conversao-lanchonete"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-48-fase-60-conversao-lanchonete-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.49-fase-61-personalizacao-lanches"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-49-fase-61-personalizacao-lanches-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-48.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-49.sql", import.meta.url), "utf8");
   assert.ok(appSource.includes("Barbosa's Lanches") || readFileSync(new URL("../src/constants/initialData.js", import.meta.url), "utf8").includes("Barbosa's Lanches"), "fase 60 deve converter a identidade para lanchonete");
   assert.ok(appSource.includes("Cardápio da lanchonete"), "cadastro deve orientar operação de lanchonete");
   assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
   assert.ok(stockServiceSource.includes("product_type"), "produtos precisam estar preparados para tipo de cardápio de lanchonete");
   assert.match(stockMigrationSource, /create table if not exists public\.menu_addons/i, "migração precisa preparar adicionais globais para lanchonete");
   assert.match(stockMigrationSource, /alter table public\.products add column if not exists removable_ingredients/i, "migração precisa preparar ingredientes removíveis por produto");
+  assert.match(stockMigrationSource, /alter table public\.order_items add column if not exists selected_addons/i, "migração precisa salvar adicionais escolhidos por item");
+  assert.match(stockMigrationSource, /alter table public\.order_items add column if not exists removed_ingredients/i, "migração precisa salvar ingredientes removidos por item");
+  assert.match(stockMigrationSource, /alter table public\.order_items add column if not exists item_note/i, "migração precisa salvar observação por item");
+  assert.ok(appSource.includes("Personalize seu lanche"), "cliente precisa ter modal de personalização de lanche");
+  assert.ok(appSource.includes("selectedAddons") && appSource.includes("removedIngredients") && appSource.includes("itemNote"), "carrinho precisa carregar adicionais, removidos e observação por item");
 
   const viteConfigSource = readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
   assert.match(viteConfigSource, /base:\s*["']\.\/["']/, "vite.config.js precisa usar base './' para o Electron carregar assets via file://.");
@@ -207,7 +212,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-48.sql",
+    "supabase/migracao-final-producao-6-0-49.sql",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "docs/FASE-60-CONVERSAO-LANCHONETE.md",
     "vercel.json",

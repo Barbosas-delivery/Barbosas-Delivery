@@ -363,6 +363,7 @@ function App() {
   const [customerProductSearch, setCustomerProductSearch] = useState("");
   const [customerCart, setCustomerCart] = useState([]);
   const [customerVariantPicker, setCustomerVariantPicker] = useState({ open: false, product: null, quantities: {} });
+  const [customerItemCustomizer, setCustomerItemCustomizer] = useState({ open: false, product: null, selectedAddons: [], removedIngredients: [], itemNote: "" });
   const [showCustomerCheckout, setShowCustomerCheckout] = useState(false);
   const [showCustomerNeedMoreMessage, setShowCustomerNeedMoreMessage] = useState(false);
   const [customerPayment, setCustomerPayment] = useState("Pix");
@@ -2765,6 +2766,147 @@ function App() {
     }
   }
 
+  function normalizeCustomizationList(value) {
+    if (Array.isArray(value)) return value.map((item) => String(item?.name || item || "").trim()).filter(Boolean);
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return normalizeCustomizationList(parsed);
+      } catch {
+        // Se não for JSON, tratamos como lista em texto.
+      }
+      return value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean);
+    }
+    return [];
+  }
+
+  function normalizeAddonOptions(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map((addon, index) => ({
+          id: String(addon?.id || addon?.name || addon || `addon-${index}`),
+          name: String(addon?.name || addon || "").trim(),
+          price: toSafeMoneyNumber(addon?.price, 0),
+          active: addon?.active !== false,
+        }))
+        .filter((addon) => addon.name && addon.active !== false);
+    }
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return normalizeAddonOptions(parsed);
+      } catch {
+        // Se não for JSON, tratamos cada linha como adicional.
+      }
+      return value.split(/[\n;]+/).map((line, index) => {
+        const [namePart, pricePart] = String(line || "").split("|");
+        return { id: `addon-${index}`, name: String(namePart || "").trim(), price: toSafeMoneyNumber(pricePart, 0), active: true };
+      }).filter((addon) => addon.name);
+    }
+    return [];
+  }
+
+  function shouldCustomizeCustomerProduct(product) {
+    const type = String(product?.productType || product?.product_type || "").toLowerCase();
+    return ["lanche", "porção", "porcao", "combo", "adicional/molho"].some((keyword) => type.includes(keyword))
+      || normalizeAddonOptions(product?.defaultAddons).length > 0
+      || normalizeCustomizationList(product?.removableIngredients).length > 0
+      || normalizeCustomizationList(product?.ingredients).length > 0
+      || product?.allowItemNotes === true;
+  }
+
+  function openCustomerItemCustomizer(product) {
+    setShowCustomerCheckout(false);
+    setShowCustomerNeedMoreMessage(false);
+    setCustomerOrderConfirmation(null);
+    setCustomerItemCustomizer({ open: true, product, selectedAddons: [], removedIngredients: [], itemNote: "" });
+    setCustomerError("");
+  }
+
+  function closeCustomerItemCustomizer() {
+    setCustomerItemCustomizer({ open: false, product: null, selectedAddons: [], removedIngredients: [], itemNote: "" });
+  }
+
+  function toggleCustomerAddon(addon) {
+    setCustomerItemCustomizer((previous) => {
+      const addonId = String(addon.id || addon.name || "");
+      const exists = previous.selectedAddons.some((current) => String(current.id || current.name) === addonId);
+      return {
+        ...previous,
+        selectedAddons: exists
+          ? previous.selectedAddons.filter((current) => String(current.id || current.name) !== addonId)
+          : [...previous.selectedAddons, { id: addonId, name: addon.name, price: toSafeMoneyNumber(addon.price, 0) }],
+      };
+    });
+  }
+
+  function toggleCustomerRemovedIngredient(ingredient) {
+    setCustomerItemCustomizer((previous) => {
+      const value = String(ingredient || "").trim();
+      const exists = previous.removedIngredients.includes(value);
+      return {
+        ...previous,
+        removedIngredients: exists ? previous.removedIngredients.filter((item) => item !== value) : [...previous.removedIngredients, value],
+      };
+    });
+  }
+
+  function buildCustomizedCartItem(product, customizer) {
+    const selectedAddons = Array.isArray(customizer.selectedAddons) ? customizer.selectedAddons : [];
+    const removedIngredients = Array.isArray(customizer.removedIngredients) ? customizer.removedIngredients : [];
+    const basePrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0));
+    const addonsTotal = selectedAddons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0);
+    return {
+      id: product.id,
+      productId: product.id,
+      name: String(product.name || "Produto"),
+      productName: String(product.name || "Produto"),
+      price: basePrice + addonsTotal,
+      basePrice,
+      addonsTotal,
+      originalPrice: toSafeMoneyNumber(product.price, 0),
+      promotionId: getProductActivePromotion(product, promotions)?.id || null,
+      quantity: 1,
+      barcode: product.barcode || "",
+      imageUrl: product.imageUrl || "",
+      isKit: false,
+      selectedAddons,
+      removedIngredients,
+      itemNote: String(customizer.itemNote || "").trim(),
+      cartKey: `prod-${product.id}-custom-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    };
+  }
+
+  function addCustomizedProductToCustomerCart() {
+    const product = customerItemCustomizer.product;
+    if (!product) return closeCustomerItemCustomizer();
+    const availableStock = Math.max(0, Number(product.stock || 0));
+    const customizedItem = buildCustomizedCartItem(product, customerItemCustomizer);
+
+    setCustomerCart((previousCart) => {
+      const currentCart = sanitizeCustomerCart(previousCart);
+      const existingQuantity = currentCart
+        .filter((item) => item.isKit !== true && Number(item.id) === Number(product.id))
+        .reduce((sum, item) => sum + toPositiveInteger(item.quantity, 1), 0);
+
+      if (existingQuantity + 1 > availableStock) {
+        setCustomerError(`Estoque insuficiente para ${product.name || "produto"}. Disponível: ${availableStock}.`);
+        return currentCart;
+      }
+
+      const nextCart = mergeCustomerCartItems([...currentCart, customizedItem]);
+      const validation = validateOrderItems(nextCart, products);
+      if (!validation.valid) {
+        setCustomerError(validation.message);
+        return currentCart;
+      }
+
+      setCustomerError(`${product.name || "Produto"} personalizado e adicionado ao pedido.`);
+      closeCustomerItemCustomizer();
+      return nextCart;
+    });
+  }
+
   function addProductToCustomerCart(product) {
     setShowCustomerCheckout(false);
     setShowCustomerNeedMoreMessage(false);
@@ -2785,6 +2927,11 @@ function App() {
     if (productHasActiveVariants(product)) {
       setCustomerVariantPicker({ open: true, product, quantities: {} });
       setCustomerError("");
+      return;
+    }
+
+    if (shouldCustomizeCustomerProduct(product)) {
+      openCustomerItemCustomizer(product);
       return;
     }
 
@@ -5013,7 +5160,7 @@ function App() {
 
               {entryMode === "customer" && !customerSubmitted && (
                 <form onSubmit={submitCustomerForm} className="space-y-4">
-                  <div className="rounded-2xl bg-zinc-800 border border-zinc-700 p-4 text-sm text-zinc-300">Monte seu pedido de lanches, porções e bebidas. Na próxima etapa, cada lanche poderá receber adicionais, ingredientes removidos e observação própria.</div>
+                  <div className="rounded-2xl bg-zinc-800 border border-zinc-700 p-4 text-sm text-zinc-300">Monte seu pedido de lanches, porções e bebidas. Personalize cada lanche com adicionais, ingredientes removidos e observação própria.</div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <DarkInput label="Nome completo" value={customerForm.name} onChange={(value) => setCustomerForm({ ...customerForm, name: value })} placeholder="Seu nome" />
                     <DarkInput label="Telefone" value={customerForm.phone} onChange={(value) => setCustomerForm({ ...customerForm, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
@@ -5047,7 +5194,7 @@ function App() {
                   <div className="rounded-[2rem] border border-amber-300/30 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 p-5 text-zinc-950 shadow-2xl">
                     <p className="text-xs font-black uppercase tracking-[0.2em]">Barbosa's Lanches</p>
                     <h2 className="mt-1 text-2xl md:text-3xl font-black leading-tight">Lanches, porções e combos preparados na hora.</h2>
-                    <p className="mt-2 text-sm font-bold text-zinc-900/80">Escolha seus itens no cardápio. A personalização completa por lanche entra na próxima fase.</p>
+                    <p className="mt-2 text-sm font-bold text-zinc-900/80">Escolha seus itens no cardápio e personalize cada lanche do seu jeito.</p>
                   </div>
 
                   {showCustomerPromo && activeCustomerPromotions.length > 0 && (
@@ -5231,6 +5378,7 @@ function App() {
                                     <div className="min-w-0 flex-1">
                                       <p className="font-black text-base leading-tight break-words">{product.name}</p>
                                       <p className="text-[11px] text-zinc-500 mt-1">{product.category} • estoque {product.stock}</p>
+                                      {shouldCustomizeCustomerProduct(product) && !productHasActiveVariants(product) && <p className="text-[11px] font-bold text-orange-700 mt-1">Personalizar: adicionais, remover ingredientes e observação</p>}
                                       {productHasActiveVariants(product) && <p className="text-[11px] font-bold text-purple-700 mt-1">Escolha os sabores</p>}
                                       {hasProductInCart && (
                                         <div className="mt-2 rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-800">
@@ -5253,7 +5401,7 @@ function App() {
                                       </div>
                                     ) : (
                                       <Button onClick={() => addProductToCustomerCart(product)} className="mt-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 px-3 py-3 h-auto text-xs touch-manipulation">
-                                        {productHasActiveVariants(product) ? (hasProductInCart ? "Adicionar sabores" : "Escolher") : "Adicionar"}
+                                        {productHasActiveVariants(product) ? (hasProductInCart ? "Adicionar sabores" : "Escolher") : shouldCustomizeCustomerProduct(product) ? "Personalizar" : "Adicionar"}
                                       </Button>
                                     )}
                                   </div>
@@ -5267,6 +5415,83 @@ function App() {
                     </div>
                   )}
 
+
+
+                  {customerItemCustomizer.open && customerItemCustomizer.product && (() => {
+                    const product = customerItemCustomizer.product;
+                    const addonOptions = normalizeAddonOptions(product.defaultAddons);
+                    const removableIngredients = normalizeCustomizationList(product.removableIngredients);
+                    const ingredients = normalizeCustomizationList(product.ingredients);
+                    const selectedAddonsTotal = customerItemCustomizer.selectedAddons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0);
+                    const finalUnitPrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0)) + selectedAddonsTotal;
+                    return (
+                      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 md:items-center md:p-4">
+                        <div className="w-full max-w-lg max-h-[88vh] overflow-auto rounded-[2rem] bg-white text-zinc-950 p-5 space-y-4 shadow-2xl border border-zinc-200">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-black uppercase tracking-[0.18em] text-orange-700">Personalize seu lanche</p>
+                              <h3 className="mt-1 text-2xl font-black leading-tight">{product.name}</h3>
+                              <p className="mt-1 text-sm text-zinc-600">Escolha adicionais, remova ingredientes e envie uma observação só deste item.</p>
+                            </div>
+                            <button type="button" onClick={closeCustomerItemCustomizer} className="h-9 w-9 shrink-0 rounded-full bg-zinc-100 text-xl font-black text-zinc-950">×</button>
+                          </div>
+
+                          {ingredients.length > 0 && (
+                            <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Ingredientes padrão</p>
+                              <p className="mt-1 text-sm font-semibold text-zinc-800">{ingredients.join(", ")}</p>
+                            </div>
+                          )}
+
+                          {addonOptions.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Adicionais</p>
+                              <div className="grid gap-2">
+                                {addonOptions.map((addon) => {
+                                  const checked = customerItemCustomizer.selectedAddons.some((current) => String(current.id || current.name) === String(addon.id || addon.name));
+                                  return (
+                                    <button key={addon.id || addon.name} type="button" onClick={() => toggleCustomerAddon(addon)} className={`flex items-center justify-between gap-3 rounded-2xl border p-3 text-left ${checked ? "border-emerald-300 bg-emerald-50" : "border-zinc-100 bg-zinc-50"}`}>
+                                      <span className="font-black text-sm">{checked ? "✓ " : "+ "}{addon.name}</span>
+                                      <span className="text-sm font-black text-emerald-700">+ {money(addon.price)}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {removableIngredients.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Remover ingredientes</p>
+                              <div className="flex flex-wrap gap-2">
+                                {removableIngredients.map((ingredient) => {
+                                  const checked = customerItemCustomizer.removedIngredients.includes(ingredient);
+                                  return <button key={ingredient} type="button" onClick={() => toggleCustomerRemovedIngredient(ingredient)} className={`rounded-2xl border px-3 py-2 text-xs font-black ${checked ? "border-red-200 bg-red-50 text-red-700" : "border-zinc-200 bg-zinc-50 text-zinc-700"}`}>{checked ? "Sem " : "Remover "}{ingredient}</button>;
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {product.allowItemNotes !== false && (
+                            <label className="block">
+                              <span className="text-xs font-black uppercase tracking-wide text-zinc-500">Observação deste item</span>
+                              <textarea value={customerItemCustomizer.itemNote} onChange={(event) => setCustomerItemCustomizer((previous) => ({ ...previous, itemNote: event.target.value.slice(0, 240) }))} placeholder="Ex: carne bem passada, pouco molho, cortar ao meio..." className="mt-1 min-h-[84px] w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
+                            </label>
+                          )}
+
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm">
+                            <div className="flex items-center justify-between gap-3"><span className="font-bold text-emerald-900">Valor do item</span><span className="font-black text-emerald-800">{money(finalUnitPrice)}</span></div>
+                            {selectedAddonsTotal > 0 && <p className="mt-1 text-xs font-semibold text-emerald-800">Inclui adicionais: + {money(selectedAddonsTotal)}</p>}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 pt-2">
+                            <Button type="button" variant="secondary" onClick={closeCustomerItemCustomizer} className="rounded-2xl py-4 !bg-zinc-100 !text-zinc-950 hover:!bg-zinc-200">Voltar</Button>
+                            <Button type="button" onClick={addCustomizedProductToCustomerCart} className="rounded-2xl py-4 bg-zinc-950 text-white hover:bg-zinc-800">Adicionar</Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {customerVariantPicker.open && customerVariantPicker.product && (
                     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 md:items-center md:p-4">
@@ -5357,6 +5582,9 @@ function App() {
                           <div className="min-w-0 flex-1">
                             <p className="font-black leading-tight text-sm break-words">{item.name}</p>
                             {item.variantName && <p className="mt-0.5 text-xs font-bold text-purple-700">Sabor: {item.variantName}</p>}
+                            {Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0 && <p className="mt-1 text-xs font-bold text-emerald-700">Adicionais: {item.selectedAddons.map((addon) => `${addon.name}${Number(addon.price || 0) > 0 ? ` (+${money(addon.price)})` : ""}`).join(", ")}</p>}
+                            {Array.isArray(item.removedIngredients) && item.removedIngredients.length > 0 && <p className="mt-1 text-xs font-bold text-red-700">Remover: {item.removedIngredients.map((ingredient) => `sem ${ingredient}`).join(", ")}</p>}
+                            {item.itemNote && <p className="mt-1 text-xs font-bold text-zinc-700">Obs: {item.itemNote}</p>}
                             <p className="mt-1 text-xs text-zinc-500">{money(item.price)} cada</p>
                           </div>
                           <p className="shrink-0 text-right text-sm font-black">{money(toSafeMoneyNumber(item.price, 0) * toPositiveInteger(item.quantity, 1))}</p>

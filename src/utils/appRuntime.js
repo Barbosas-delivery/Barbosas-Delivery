@@ -954,11 +954,29 @@ function getCartMatchKey(item) {
   return String(item.cartKey || item.id || item.productId || "");
 }
 
+function getCustomerCartCustomizationIdentity(item) {
+  if (!item || typeof item !== "object") return "";
+  const selectedAddons = Array.isArray(item.selectedAddons) ? item.selectedAddons : [];
+  const removedIngredients = Array.isArray(item.removedIngredients) ? item.removedIngredients : [];
+  const addonIdentity = selectedAddons
+    .map((addon) => `${String(addon.name || addon.id || "").trim().toLowerCase()}:${Number(addon.price || 0)}`)
+    .sort()
+    .join("|");
+  const removedIdentity = removedIngredients
+    .map((ingredient) => String(ingredient || "").trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join("|");
+  const noteIdentity = String(item.itemNote || item.notes || "").trim().toLowerCase();
+  return [addonIdentity, removedIdentity, noteIdentity].join("::");
+}
+
 function getCustomerCartLineIdentity(item) {
   if (!item || typeof item !== "object") return "";
-  if (item.isKit === true) return `kit-${item.kitId || item.id || ""}`;
-  if (item.variantId) return `product-${item.id || item.productId || ""}-variant-${item.variantId}`;
-  return `product-${item.id || item.productId || ""}`;
+  const customizationIdentity = getCustomerCartCustomizationIdentity(item);
+  if (item.isKit === true) return `kit-${item.kitId || item.id || ""}-${customizationIdentity}`;
+  if (item.variantId) return `product-${item.id || item.productId || ""}-variant-${item.variantId}-${customizationIdentity}`;
+  return `product-${item.id || item.productId || ""}-${customizationIdentity}`;
 }
 
 function mergeCustomerCartItems(cart) {

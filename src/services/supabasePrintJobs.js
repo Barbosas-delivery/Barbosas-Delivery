@@ -19,6 +19,11 @@ function normalizePrintItem(item = {}) {
     unitPrice,
     total: unitPrice * quantity,
     barcode: normalizeText(item.barcode),
+    selectedAddons: Array.isArray(item.selectedAddons) ? item.selectedAddons : [],
+    removedIngredients: Array.isArray(item.removedIngredients) ? item.removedIngredients : [],
+    itemNote: normalizeText(item.itemNote || item.notes || item.observation),
+    basePrice: toSafeMoneyNumber(item.basePrice, unitPrice),
+    addonsTotal: toSafeMoneyNumber(item.addonsTotal, 0),
     isKit: item.isKit === true,
     kitId: item.kitId || null,
   };
@@ -50,7 +55,7 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const createdAt = new Date().toISOString();
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.48",
+    templateVersion: "6.0.49",
     printType,
     source,
     createdAt,

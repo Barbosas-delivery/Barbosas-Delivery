@@ -456,3 +456,14 @@ Versão: `6.0.48-fase-60-conversao-lanchonete`
 - Remoção da aba Fiados/Comandas da navegação operacional.
 - Preparação de produtos para tipo de cardápio, ingredientes, ingredientes removíveis e adicionais sugeridos.
 - SQL obrigatório: `supabase/migracao-final-producao-6-0-48.sql`.
+
+## Fase 61 — Personalização de lanches
+
+Versão: `6.0.49-fase-61-personalizacao-lanches`
+
+- Adicionada personalização do item no cardápio do cliente.
+- Cliente pode escolher adicionais, remover ingredientes e escrever observação por lanche.
+- Carrinho mostra personalizações e separa itens iguais com preparos diferentes.
+- `order_items` passa a suportar `selected_addons`, `removed_ingredients`, `item_note` e `customization`.
+- Impressão da cozinha/entrega passa a receber adicionais, removidos e observações.
+- SQL obrigatório: `supabase/migracao-final-producao-6-0-49.sql`.

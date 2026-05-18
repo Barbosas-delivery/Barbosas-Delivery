@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.48-fase-60-conversao-lanchonete`
+`6.0.49-fase-61-personalizacao-lanches`
 
 ## Revisão final
 
@@ -214,29 +214,37 @@ A Fase 56 não exige alteração nova de schema. A migração `supabase/migracao
 
 ## Fase 57 — Central de impressão no sistema
 
-Versão: `6.0.48-fase-60-conversao-lanchonete`
+Versão: `6.0.49-fase-61-personalizacao-lanches`
 
 - Painel desktop ganhou **Central de impressão** com resumo de jobs pendentes, imprimindo, impressos e falhas.
 - Adicionada listagem dos últimos `print_jobs` com origem, via, status, tentativas, worker e erro.
 - Adicionados botões para reimprimir job, cancelar job, reprocessar falhas, liberar jobs travados e limpar impressos antigos.
 - Adicionada tabela `print_workers` para heartbeat do computador de impressão.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-48.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-49.sql`.
 
 
 ### Fase 58 — estabilidade de produção
 
 Correções principais: tabela `public.coupons`, função `public.apply_product_stock_deltas(jsonb)` segura contra `DELETE` sem `WHERE`, deploy padronizado com pnpm e scripts desktop usando pnpm.
 
-SQL obrigatório: `supabase/migracao-final-producao-6-0-48.sql`.
+SQL obrigatório: `supabase/migracao-final-producao-6-0-49.sql`.
 
 
 ## Fase 60 — Impressão automática definitiva para pedidos do app
 
-Versão: `6.0.48-fase-60-conversao-lanchonete`
+Versão: `6.0.49-fase-61-personalizacao-lanches`
 
 Correção oficial para pedidos do aplicativo criarem automaticamente as vias de impressão:
 
 - `customer_app + kitchen`
 - `customer_app + delivery`
 
-SQL obrigatório: `supabase/migracao-final-producao-6-0-48.sql`.
+SQL obrigatório: `supabase/migracao-final-producao-6-0-49.sql`.
+
+## Fase 61 — Personalização de lanches
+
+Versão: `6.0.49-fase-61-personalizacao-lanches`
+
+O cliente agora pode personalizar lanches, porções e combos com adicionais, ingredientes removidos e observação individual por item. O carrinho separa preparos diferentes e a impressão leva essas informações para a cozinha.
+
+SQL obrigatório: `supabase/migracao-final-producao-6-0-49.sql`.

@@ -29,7 +29,9 @@ function normalizeItems(items = []) {
     quantity: Math.max(1, Number(item.quantity || 1)),
     unitPrice: toSafeMoneyNumber(item.unitPrice ?? item.price, 0),
     total: toSafeMoneyNumber(item.total, toSafeMoneyNumber(item.unitPrice ?? item.price, 0) * Math.max(1, Number(item.quantity || 1))),
-    notes: safeText(item.notes || item.observation || item.note),
+    notes: safeText(item.itemNote || item.notes || item.observation || item.note),
+    selectedAddons: Array.isArray(item.selectedAddons) ? item.selectedAddons : [],
+    removedIngredients: Array.isArray(item.removedIngredients) ? item.removedIngredients : [],
   })) : [];
 }
 
@@ -38,6 +40,8 @@ function buildItemsText(items = [], { showPrices = false } = {}) {
     showPrices
       ? `${item.quantity}x ${item.name} - ${money(item.total)}`
       : `${item.quantity}x ${item.name}`,
+    item.selectedAddons.length > 0 ? `   + ${item.selectedAddons.map((addon) => `${addon.name}${Number(addon.price || 0) > 0 ? ` (${money(addon.price)})` : ""}`).join(", ")}` : "",
+    item.removedIngredients.length > 0 ? `   SEM: ${item.removedIngredients.join(", ")}` : "",
     item.notes ? `   Obs: ${item.notes}` : "",
     item.isKit ? `   Kit${item.kitId ? ` #${item.kitId}` : ""}` : "",
   ]));
@@ -47,7 +51,9 @@ function buildItemsHtml(items = [], { showPrices = false } = {}) {
   return normalizeItems(items).map((item) => `
     <div class="item">
       <div><b>${escapeHtml(`${item.quantity}x ${item.name}`)}</b>${showPrices ? `<span>${escapeHtml(money(item.total))}</span>` : ""}</div>
-      ${item.notes ? `<small>Obs: ${escapeHtml(item.notes)}</small>` : ""}
+      ${item.selectedAddons.length > 0 ? `<small><b>Adicionais:</b> ${escapeHtml(item.selectedAddons.map((addon) => `${addon.name}${Number(addon.price || 0) > 0 ? ` (+${money(addon.price)})` : ""}`).join(", "))}</small>` : ""}
+      ${item.removedIngredients.length > 0 ? `<small><b>Remover:</b> ${escapeHtml(item.removedIngredients.map((ingredient) => `sem ${ingredient}`).join(", "))}</small>` : ""}
+      ${item.notes ? `<small><b>Obs:</b> ${escapeHtml(item.notes)}</small>` : ""}
       ${item.isKit ? `<small>Kit${item.kitId ? ` #${escapeHtml(String(item.kitId))}` : ""}</small>` : ""}
     </div>
   `).join("");
@@ -81,7 +87,7 @@ function buildHtmlTicket(title, sections = []) {
   </style>
 </head>
 <body>
-  <h1>BARBOSA'S DELIVERY</h1>
+  <h1>BARBOSA'S LANCHES</h1>
   <p class="center big">${escapeHtml(title)}</p>
   ${sectionsHtml}
 </body>
