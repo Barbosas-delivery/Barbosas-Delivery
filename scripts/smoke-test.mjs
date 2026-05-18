@@ -52,8 +52,16 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.47-fase-59-impressao-automatica-app"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-47-fase-59-impressao-automatica-app-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.48-fase-60-conversao-lanchonete"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-48-fase-60-conversao-lanchonete-sem-cache/);
+  const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-48.sql", import.meta.url), "utf8");
+  assert.ok(appSource.includes("Barbosa's Lanches") || readFileSync(new URL("../src/constants/initialData.js", import.meta.url), "utf8").includes("Barbosa's Lanches"), "fase 60 deve converter a identidade para lanchonete");
+  assert.ok(appSource.includes("Cardápio da lanchonete"), "cadastro deve orientar operação de lanchonete");
+  assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
+  assert.ok(stockServiceSource.includes("product_type"), "produtos precisam estar preparados para tipo de cardápio de lanchonete");
+  assert.match(stockMigrationSource, /create table if not exists public\.menu_addons/i, "migração precisa preparar adicionais globais para lanchonete");
+  assert.match(stockMigrationSource, /alter table public\.products add column if not exists removable_ingredients/i, "migração precisa preparar ingredientes removíveis por produto");
 
   const viteConfigSource = readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
   assert.match(viteConfigSource, /base:\s*["']\.\/["']/, "vite.config.js precisa usar base './' para o Electron carregar assets via file://.");
@@ -68,8 +76,6 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("buildStockDeltasFromItems"), "persistência de estoque deve calcular deltas dos produtos alterados");
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
-  const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-47.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -201,8 +207,9 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-47.sql",
+    "supabase/migracao-final-producao-6-0-48.sql",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
+    "docs/FASE-60-CONVERSAO-LANCHONETE.md",
     "vercel.json",
     "src/utils/printJobTemplates.js",
     "electron/main.cjs",

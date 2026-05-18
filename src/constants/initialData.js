@@ -1,7 +1,7 @@
 import { DELIVERY_FEE, PAYMENT_STATUS, DELIVERY_STATUS } from "./appConstants";
 
 export const initialStoreSettings = {
-  storeName: "Barbosas Delivery",
+  storeName: "Barbosa's Lanches",
   storePhone: "(43) 98873-6791",
   defaultDeliveryFee: DELIVERY_FEE,
   minimumOrderValue: 20,
@@ -11,7 +11,7 @@ export const initialStoreSettings = {
     { id: 1, district: "Centro", fee: DELIVERY_FEE, minimumOrderValue: 20, active: true },
     { id: 2, district: "Zona 7", fee: 7, minimumOrderValue: 25, active: true },
   ],
-  whatsappMessage: "Olá, seu pedido da Barbosa's está em andamento.",
+  whatsappMessage: "Olá, seu pedido do Barbosa's Lanches está em preparo.",
   statusWhatsappMessages: {
     approved: "Olá, {cliente}! Seu pedido #{pedido} foi aprovado pela {loja}.\n\nPrevisão: {previsao}.\nTotal: {total}.\n\nObrigado pela preferência!",
     outForDelivery: "Olá, {cliente}! Seu pedido #{pedido} saiu para entrega.\n\nO entregador já está a caminho. Total: {total}.\n\nObrigado pela preferência!",
@@ -29,7 +29,7 @@ export const initialStoreSettings = {
   localPrintTimeoutMs: 5000,
   storePausedUntil: "",
   storePauseReason: "",
-  openingHours: "Segunda a quinta das 09:00 às 00:00 • Sexta e sábado das 09:00 às 03:00 • Domingo das 13:00 às 00:00",
+  openingHours: "Terça a quinta das 18:00 às 23:30 • Sexta e sábado das 18:00 às 00:30 • Domingo das 18:00 às 23:30",
   isOpen: true,
   schedule: [
     { day: 1, label: "Segunda", closed: false, open: "09:00", close: "00:00" },
@@ -42,18 +42,18 @@ export const initialStoreSettings = {
   ],
 };
 
-export const initialProductGroups = ["Bebidas", "Refrigerantes", "Energéticos", "Salgadinhos", "Copões"];
+export const initialProductGroups = ["Lanches", "Combos", "Porções", "Bebidas", "Sobremesas", "Molhos e adicionais"];
 
 export const initialPromotions = [
   {
     id: 1,
-    title: "COPÃO GELADO",
-    description: "Copão de Vodka nos sabores Maracujá e Frutas Vermelhas.",
+    title: "COMBO DA CASA",
+    description: "Lanche principal, batata e bebida com preço especial.",
     productId: 1,
-    badge: "Promoção da loja",
+    badge: "Mais pedido",
     imageUrl: "",
     discountPercent: 10,
-    promotionalPrice: 15.3,
+    promotionalPrice: 31.5,
     startDate: "",
     endDate: "",
     active: true,
@@ -63,13 +63,13 @@ export const initialPromotions = [
 export const initialKits = [
   {
     id: 1,
-    name: "Kit Balada",
-    description: "2 vodka, 2 energéticos, 2 gelos e 2 copos.",
+    name: "Combo X-Salada",
+    description: "X-Salada, batata pequena e refrigerante lata.",
     items: [
-      { productId: 1, quantity: 2 },
-      { productId: 2, quantity: 2 },
+      { productId: 1, quantity: 1 },
+      { productId: 2, quantity: 1 },
     ],
-    price: 44,
+    price: 35,
     endDate: "",
     active: true,
   },
@@ -78,26 +78,44 @@ export const initialKits = [
 export const initialProducts = [
   {
     id: 1,
-    name: "Copão de Vodka",
-    category: "Bebidas",
-    price: 17,
-    cost: 8,
-    stock: 42,
+    name: "X-Salada",
+    category: "Lanches",
+    productType: "lanche",
+    price: 28,
+    cost: 13,
+    stock: 50,
     minStock: 10,
-    barcode: "7890000000011",
+    barcode: "7898172662170",
+    ingredients: ["Pão", "Hambúrguer", "Queijo", "Alface", "Tomate", "Milho", "Batata palha", "Molho da casa"],
+    removableIngredients: ["Alface", "Tomate", "Milho", "Batata palha", "Molho da casa"],
+    defaultAddons: [
+      { id: "bacon-extra", name: "Bacon extra", price: 5, active: true },
+      { id: "cheddar", name: "Cheddar", price: 4, active: true },
+      { id: "ovo", name: "Ovo", price: 3, active: true },
+      { id: "hamburguer-extra", name: "Hambúrguer extra", price: 8, active: true }
+    ],
+    allowItemNotes: true,
     pausedUntil: "",
     pauseReason: "",
     active: true,
   },
   {
     id: 2,
-    name: "Coca-Cola Lata",
-    category: "Refrigerantes",
-    price: 5,
-    cost: 3.1,
-    stock: 8,
-    minStock: 12,
-    barcode: "7894900011517",
+    name: "Batata frita pequena",
+    category: "Porções",
+    productType: "porcao",
+    price: 12,
+    cost: 5.5,
+    stock: 40,
+    minStock: 10,
+    barcode: "7898172662171",
+    ingredients: ["Batata", "Sal"],
+    removableIngredients: ["Sal"],
+    defaultAddons: [
+      { id: "cheddar", name: "Cheddar", price: 4, active: true },
+      { id: "bacon", name: "Bacon", price: 5, active: true }
+    ],
+    allowItemNotes: true,
     pausedUntil: "",
     pauseReason: "",
     active: true,

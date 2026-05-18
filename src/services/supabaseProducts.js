@@ -16,6 +16,25 @@ export function normalizeProductVariants(variants) {
     .filter((variant) => variant.name);
 }
 
+export function normalizeProductListField(value) {
+  const parsed = typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return value.split(/[\n,;]+/); } })() : value;
+  return (Array.isArray(parsed) ? parsed : [])
+    .map((item) => String(item?.name || item || "").trim())
+    .filter(Boolean);
+}
+
+export function normalizeProductAddons(value) {
+  const parsed = typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return value.split(/[\n,;]+/).map((name) => ({ name })); } })() : value;
+  return (Array.isArray(parsed) ? parsed : [])
+    .map((addon, index) => ({
+      id: addon.id || `addon-${Date.now()}-${Math.random().toString(36).slice(2)}-${index}`,
+      name: String(addon.name || addon || "").trim(),
+      price: Number(addon.price || 0),
+      active: addon.active !== false,
+    }))
+    .filter((addon) => addon.name);
+}
+
 export function mapProductFromDatabase(product) {
   return {
     id: product.id,
@@ -31,6 +50,11 @@ export function mapProductFromDatabase(product) {
     barcode: product.barcode || "",
     expirationDate: product.expiration_date || "",
     imageUrl: product.image_url || "",
+    productType: product.product_type || product.productType || "produto",
+    ingredients: normalizeProductListField(product.ingredients || product.product_ingredients || []),
+    removableIngredients: normalizeProductListField(product.removable_ingredients || product.removableIngredients || []),
+    defaultAddons: normalizeProductAddons(product.default_addons || product.defaultAddons || []),
+    allowItemNotes: product.allow_item_notes !== false,
     hasVariants: product.has_variants === true || product.hasVariants === true,
     variants: normalizeProductVariants(product.variants || product.product_variants || []),
     active: isTruthyActive(product.active),
@@ -50,6 +74,11 @@ export function buildProductInsertPayload(newProduct, productId) {
     barcode,
     expiration_date: newProduct.expirationDate || null,
     image_url: newProduct.imageUrl || "",
+    product_type: newProduct.productType || "produto",
+    ingredients: normalizeProductListField(newProduct.ingredients),
+    removable_ingredients: normalizeProductListField(newProduct.removableIngredients),
+    default_addons: normalizeProductAddons(newProduct.defaultAddons),
+    allow_item_notes: newProduct.allowItemNotes !== false,
     has_variants: newProduct.hasVariants === true,
     variants: normalizeProductVariants(newProduct.variants),
     paused_until: newProduct.pausedUntil || null,
@@ -69,6 +98,11 @@ export function buildProductPatch(product, options = {}) {
     barcode: normalizeBarcode(product.barcode),
     expiration_date: product.expirationDate || null,
     image_url: product.imageUrl || "",
+    product_type: product.productType || "produto",
+    ingredients: normalizeProductListField(product.ingredients),
+    removable_ingredients: normalizeProductListField(product.removableIngredients),
+    default_addons: normalizeProductAddons(product.defaultAddons),
+    allow_item_notes: product.allowItemNotes !== false,
     has_variants: product.hasVariants === true,
     variants: normalizeProductVariants(product.variants),
     paused_until: product.pausedUntil || null,
@@ -173,7 +207,7 @@ export async function applyProductStockDeltasInSupabase(stockDeltas = []) {
   if (error) {
     const rpcMissing = /function|schema cache|apply_product_stock_deltas|could not find/i.test(String(error.message || error));
     const message = rpcMissing
-      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-47.sql antes de operar vendas."
+      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-48.sql antes de operar vendas."
       : (error.message || "Falha ao aplicar movimento de estoque no Supabase.");
     return { error: new Error(message), fallbackUsed: false, data: null };
   }

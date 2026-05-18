@@ -108,8 +108,8 @@ export function canAccessStoreTab(role, tabId) {
   const normalizedRole = normalizeStoreRole(role);
   if (normalizedRole === "admin") return true;
   const permissions = {
-    gerente: ["dashboard", "products", "kits", "promos", "deliveries", "counter", "cash", "tabs", "settings", "clients", "couriers", "audit", "diagnostics"],
-    caixa: ["dashboard", "deliveries", "counter", "cash", "tabs", "clients"],
+    gerente: ["dashboard", "products", "kits", "promos", "deliveries", "counter", "cash", "settings", "clients", "couriers", "audit", "diagnostics"],
+    caixa: ["dashboard", "deliveries", "counter", "cash", "clients"],
     operador: ["dashboard", "deliveries", "counter", "clients"],
   };
   return (permissions[normalizedRole] || permissions.operador).includes(tabId);

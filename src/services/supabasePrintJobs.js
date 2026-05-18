@@ -50,7 +50,7 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const createdAt = new Date().toISOString();
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.47",
+    templateVersion: "6.0.48",
     printType,
     source,
     createdAt,

@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.47-fase-59-impressao-automatica-app";
+export const APP_VERSION = "6.0.48-fase-60-conversao-lanchonete";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

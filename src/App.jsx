@@ -521,8 +521,8 @@ function App() {
       const message = error.message || String(error);
       const missingCouponsTable = error.code === "PGRST205" || /coupons.*schema cache|Could not find the table/i.test(message);
       if (missingCouponsTable) {
-        console.warn("Tabela public.coupons ausente. Rode a migração 6.0.47 para habilitar cupons.", error);
-        setLastAction("Cupons indisponíveis: rode a migração 6.0.47 no Supabase para criar public.coupons.");
+        console.warn("Tabela public.coupons ausente. Rode a migração 6.0.48 para habilitar cupons.", error);
+        setLastAction("Cupons indisponíveis: rode a migração 6.0.48 no Supabase para criar public.coupons.");
       } else {
         console.error("Erro ao carregar cupons:", error);
       }
@@ -968,7 +968,7 @@ function App() {
     const printJobResult = await createPrintJobsForOrder(savedDelivery);
     if (printJobResult.error) {
       console.error("Erro ao criar fila de impressão:", printJobResult.error);
-      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.47 e verifique a tabela print_jobs.`, "loja", orderId);
+      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.48 e verifique a tabela print_jobs.`, "loja", orderId);
     }
     await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "", printJobsQueued: printJobResult.jobs?.length || 0, printJobQueueError: printJobResult.error?.message || "" });
 
@@ -1191,7 +1191,7 @@ function App() {
     loadCoupons();
     loadKits();
     loadDeliveries();
-    loadTabsAccounts();
+    // Fase 60: Fiados/Comandas removidos da operação da lanchonete.
     loadCashData();
     loadOrderPayments();
     loadNotifications();
@@ -1231,10 +1231,8 @@ function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "coupons" }, () => { if (isMounted) loadCoupons(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "kits" }, () => { if (isMounted) loadKits(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "kit_items" }, () => { if (isMounted) loadKits(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "tab_accounts" }, () => { if (isMounted) loadTabsAccounts(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "cash_movements" }, () => { if (isMounted) loadCashData(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "cash_sessions" }, () => { if (isMounted) loadCashData(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "tab_account_items" }, () => { if (isMounted) loadTabsAccounts(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, () => { if (isMounted) loadNotifications(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "order_payments" }, () => { if (isMounted) loadOrderPayments(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "audit_logs" }, () => { if (isMounted) loadAuditLogs(); })
@@ -1263,7 +1261,7 @@ function App() {
   const [counterDraft, setCounterDraft] = useState({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
   const [newCourier, setNewCourier] = useState({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
   const todayInput = getDateInputValue(new Date());
-  const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+  const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
   const [stockAdjustmentDraft, setStockAdjustmentDraft] = useState({ productId: "", mode: "entrada", quantity: "", targetStock: "", reason: "Reposição de estoque" });
   const [productGroups, setProductGroups] = useState(() => normalizeProductGroups(initialProductGroups));
   const [newProductGroup, setNewProductGroup] = useState("");
@@ -2368,7 +2366,7 @@ function App() {
         return setLastAction(`Produto não restaurado no Supabase: ${error.message || "verifique UPDATE em products."}`);
       }
 
-      setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+      setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
       await loadProducts();
       setLastAction(ignoredColumns.length > 0 ? `Produto recadastrado e reativado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto recadastrado: o cadastro excluído foi reativado no Supabase.");
       return;
@@ -2388,7 +2386,7 @@ function App() {
 
     setProductGroups((previousGroups) => mergeProductGroups(previousGroups, [savedProduct]));
     setProducts((previousProducts) => [...previousProducts, savedProduct]);
-    setNewProduct({ name: "", category: productGroups[0] || "", price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+    setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
     await loadProducts();
     setLastAction(ignoredColumns.length > 0 ? `Produto cadastrado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto cadastrado com sucesso no Supabase.");
   }
@@ -3243,7 +3241,7 @@ function App() {
         <tbody>
           <tr><td>Total vendido</td><td class="right"><b>${escapeHtml(money(report.totalSold))}</b></td></tr>
           <tr><td>Total recebido</td><td class="right"><b>${escapeHtml(money(report.totalReceived))}</b></td></tr>
-          <tr><td>Pendente/fiado</td><td class="right">${escapeHtml(money(report.pendingAmount))}</td></tr>
+          <tr><td>A receber</td><td class="right">${escapeHtml(money(report.pendingAmount))}</td></tr>
           <tr><td>Cancelados</td><td class="right">${escapeHtml(String(report.cancelledOrders || 0))} • ${escapeHtml(money(report.cancelledAmount || 0))}</td></tr>
         </tbody>
       </table>
@@ -3265,7 +3263,7 @@ function App() {
       <div class="line"></div>
       <h2>Operação</h2>
       <p><b>Entregas:</b> ${escapeHtml(String(report.deliveryOrders || 0))} • ${escapeHtml(money(report.deliverySold || 0))}</p>
-      <p><b>Balcão/comandas:</b> ${escapeHtml(String(report.counterOrders || 0))} • ${escapeHtml(money(report.counterSold || 0))}</p>
+      <p><b>Balcão:</b> ${escapeHtml(String(report.counterOrders || 0))} • ${escapeHtml(money(report.counterSold || 0))}</p>
       <p><b>Pedidos pagos:</b> ${escapeHtml(String(report.paidOrders || 0))}</p>
       <p><b>Pedidos pendentes:</b> ${escapeHtml(String(report.pendingOrders || 0))}</p>
       <div class="line"></div>
@@ -3294,10 +3292,10 @@ function App() {
       <table><tbody>
         <tr><td>Total vendido</td><td class="right"><b>${escapeHtml(money(periodSalesReport.totalSold))}</b></td></tr>
         <tr><td>Total recebido</td><td class="right"><b>${escapeHtml(money(periodSalesReport.totalPaid))}</b></td></tr>
-        <tr><td>Pendente/fiado</td><td class="right">${escapeHtml(money(periodSalesReport.pendingAmount))}</td></tr>
+        <tr><td>A receber</td><td class="right">${escapeHtml(money(periodSalesReport.pendingAmount))}</td></tr>
         <tr><td>Cancelados</td><td class="right">${escapeHtml(String(periodSalesReport.cancelledOrders.length))}</td></tr>
         <tr><td>Entregas</td><td class="right">${escapeHtml(String(periodSalesReport.deliveryOrders || 0))}</td></tr>
-        <tr><td>Balcão/comandas</td><td class="right">${escapeHtml(String(periodSalesReport.counterOrders || 0))}</td></tr>
+        <tr><td>Balcão</td><td class="right">${escapeHtml(String(periodSalesReport.counterOrders || 0))}</td></tr>
       </tbody></table>
       <div class="line"></div>
       <h2>Formas de pagamento</h2>
@@ -4840,7 +4838,6 @@ function App() {
     { id: "deliveries", label: "PDV Entregas", icon: "truck" },
     { id: "counter", label: "PDV Balcão", icon: "money" },
     { id: "cash", label: "Fechamento", icon: "money" },
-    { id: "tabs", label: "Fiados/Comandas", icon: "users" },
     { id: "settings", label: "Configurações", icon: "save" },
     { id: "clients", label: "Clientes", icon: "users" },
     { id: "couriers", label: "Entregadores", icon: "truck" },
@@ -5004,7 +5001,7 @@ function App() {
           <Card className="bg-zinc-900 border-zinc-800 shadow-2xl rounded-3xl">
             <CardContent className="p-4 sm:p-6 md:p-8">
               <div className={customerSubmitted ? "flex flex-col md:flex-row md:items-center gap-4 mb-8 justify-center" : "flex flex-col md:flex-row md:items-center gap-4 mb-8 md:justify-between"}>
-                <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-2xl font-bold text-white">{storeSettings.storeName || "Barbosas Delivery"}</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Informe seus dados para continuar"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
+                <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-2xl font-bold text-white">{storeSettings.storeName || "Barbosas Delivery"}</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Monte seu lanche e peça pelo delivery"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
                 {!customerSubmitted && (
                   <div className="grid grid-cols-3 w-full md:w-auto rounded-2xl bg-zinc-800 p-1 border border-zinc-700">
                     <button type="button" onClick={() => setEntryMode("customer")} className={`px-4 py-2 rounded-xl text-sm font-semibold ${entryMode === "customer" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>Cliente</button>
@@ -5016,7 +5013,7 @@ function App() {
 
               {entryMode === "customer" && !customerSubmitted && (
                 <form onSubmit={submitCustomerForm} className="space-y-4">
-                  <div className="rounded-2xl bg-zinc-800 border border-zinc-700 p-4 text-sm text-zinc-300">Clientes não precisam criar conta. Toda vez que abrir o link do aplicativo, preencha o formulário para identificarmos a entrega.</div>
+                  <div className="rounded-2xl bg-zinc-800 border border-zinc-700 p-4 text-sm text-zinc-300">Monte seu pedido de lanches, porções e bebidas. Na próxima etapa, cada lanche poderá receber adicionais, ingredientes removidos e observação própria.</div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <DarkInput label="Nome completo" value={customerForm.name} onChange={(value) => setCustomerForm({ ...customerForm, name: value })} placeholder="Seu nome" />
                     <DarkInput label="Telefone" value={customerForm.phone} onChange={(value) => setCustomerForm({ ...customerForm, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
@@ -5046,6 +5043,12 @@ function App() {
                       <span className="block text-xs font-semibold opacity-95">Produtos: {money(customerCartTotal)}{appliedCustomerCouponDiscount > 0 ? ` • Cupom: -${money(appliedCustomerCouponDiscount)}` : ""} • Entrega: {money(customerDeliveryFee)} • tocar para conferir pedido</span>
                     </button>
                   )}
+
+                  <div className="rounded-[2rem] border border-amber-300/30 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 p-5 text-zinc-950 shadow-2xl">
+                    <p className="text-xs font-black uppercase tracking-[0.2em]">Barbosa's Lanches</p>
+                    <h2 className="mt-1 text-2xl md:text-3xl font-black leading-tight">Lanches, porções e combos preparados na hora.</h2>
+                    <p className="mt-2 text-sm font-bold text-zinc-900/80">Escolha seus itens no cardápio. A personalização completa por lanche entra na próxima fase.</p>
+                  </div>
 
                   {showCustomerPromo && activeCustomerPromotions.length > 0 && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -5082,7 +5085,7 @@ function App() {
                           ) : (
                             <div className="p-6 text-center">
                               <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-950 text-2xl shadow-lg">
-                                🍻
+                                🍔
                               </div>
                               <p className="text-xs font-black uppercase tracking-[0.25em] text-zinc-800">{activeCustomerPromotions[0].badge}</p>
                               <h2 className="mt-2 text-3xl font-black leading-none">{activeCustomerPromotions[0].title}</h2>
@@ -5315,7 +5318,7 @@ function App() {
                           <div>
                             <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">Antes de finalizar</p>
                             <h3 className="mt-1 text-2xl font-black leading-tight">Precisa de algo mais?</h3>
-                            <p className="mt-2 text-sm text-zinc-600">Confira se não faltou gelo, refrigerante, salgadinho ou mais algum item.</p>
+                            <p className="mt-2 text-sm text-zinc-600">Confira se não faltou gelo, refrigerante, batata, bebida, molho extra ou mais algum item.</p>
                           </div>
                           <button type="button" onClick={() => setShowCustomerNeedMoreMessage(false)} className="h-9 w-9 shrink-0 rounded-full bg-zinc-100 text-xl font-black text-zinc-950">×</button>
                         </div>
@@ -5523,11 +5526,11 @@ function App() {
 
             {activeTab === "products" && (
               <div className="space-y-6">
-                <Title title="Cadastro de produtos" subtitle="Cadastre produtos, pesquise registros e edite somente quando precisar." />
+                <Title title="Cardápio da lanchonete" subtitle="Cadastre lanches, porções, bebidas e deixe os itens prontos para adicionais e observações por lanche." />
                 <CardBox>
                   <h3 className="font-bold text-lg mb-4">Grupos de produtos</h3>
                   <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 mb-4">
-                    <Input label="Novo grupo" value={newProductGroup} onChange={setNewProductGroup} placeholder="Ex: Cervejas, Destilados, Refrigerantes..." />
+                    <Input label="Novo grupo" value={newProductGroup} onChange={setNewProductGroup} placeholder="Ex: Lanches, Combos, Porções, Bebidas..." />
                     <div className="flex items-end"><Button onClick={addProductGroup} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 w-full md:w-auto">Adicionar grupo</Button></div>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -5545,6 +5548,17 @@ function App() {
                       <span className="text-xs font-medium text-zinc-600">Grupo</span>
                       <select value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
                         {productGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-zinc-600">Tipo para cardápio</span>
+                      <select value={newProduct.productType || "lanche"} onChange={(event) => setNewProduct({ ...newProduct, productType: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                        <option value="lanche">Lanche</option>
+                        <option value="porcao">Porção</option>
+                        <option value="bebida">Bebida</option>
+                        <option value="combo">Combo</option>
+                        <option value="sobremesa">Sobremesa</option>
+                        <option value="adicional">Adicional/molho</option>
                       </select>
                     </label>
                     <Input label="Preço venda" type="number" value={newProduct.price} onChange={(value) => setNewProduct({ ...newProduct, price: value })} />
@@ -5569,6 +5583,25 @@ function App() {
                         <Button onClick={() => setNewProduct({ ...newProduct, imageUrl: "" })} variant="secondary" className="rounded-2xl">Remover imagem</Button>
                       </div>
                     )}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <label className="block md:col-span-1">
+                      <span className="text-xs font-medium text-zinc-600">Ingredientes padrão</span>
+                      <textarea value={newProduct.ingredients || ""} onChange={(event) => setNewProduct({ ...newProduct, ingredients: event.target.value })} placeholder="Ex: pão, hambúrguer, queijo, alface, tomate" className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
+                    </label>
+                    <label className="block md:col-span-1">
+                      <span className="text-xs font-medium text-zinc-600">Ingredientes removíveis</span>
+                      <textarea value={newProduct.removableIngredients || ""} onChange={(event) => setNewProduct({ ...newProduct, removableIngredients: event.target.value })} placeholder="Ex: sem cebola, sem tomate, sem milho" className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
+                    </label>
+                    <label className="block md:col-span-1">
+                      <span className="text-xs font-medium text-zinc-600">Adicionais sugeridos</span>
+                      <textarea value={newProduct.defaultAddons || ""} onChange={(event) => setNewProduct({ ...newProduct, defaultAddons: event.target.value })} placeholder="Ex: bacon extra, cheddar, ovo, hambúrguer extra" className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
+                    </label>
+                    <label className="md:col-span-3 flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-emerald-800">
+                      <input type="checkbox" checked={newProduct.allowItemNotes !== false} onChange={(event) => setNewProduct({ ...newProduct, allowItemNotes: event.target.checked })} />
+                      Permitir observação por item quando a personalização do cliente for ativada na próxima fase.
+                    </label>
                   </div>
 
                   <div className="mt-4 rounded-3xl border border-zinc-100 bg-zinc-50 p-4 space-y-3">
@@ -5676,6 +5709,8 @@ function App() {
                                 <p className={`text-sm font-semibold ${productAvailability.available ? "text-emerald-700" : "text-red-600"}`}>Status: {productAvailability.label}</p>
                                   {product.pauseReason && isProductPaused(product, currentStoreDate) && <p className="text-xs font-bold text-amber-700">Motivo: {product.pauseReason}</p>}
                                   {product.hasVariants && <p className="text-sm text-purple-700 font-semibold">Sabores: {getActiveProductVariants(product).length}</p>}
+                                  {product.productType && <p className="text-sm text-emerald-700 font-semibold">Tipo: {product.productType}</p>}
+                                  {Array.isArray(product.ingredients) && product.ingredients.length > 0 && <p className="text-xs text-zinc-500">Ingredientes: {product.ingredients.slice(0, 6).join(", ")}{product.ingredients.length > 6 ? "..." : ""}</p>}
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-2">
@@ -5699,6 +5734,18 @@ function App() {
                                     {productGroups.map((group) => <option key={group} value={group}>{group}</option>)}
                                   </select>
                                 </label>
+                                <label className="block">
+                                  <span className="text-xs font-medium text-zinc-600">Tipo</span>
+                                  <select value={product.productType || "produto"} onChange={(event) => updateProductField(product.id, "productType", event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                                    <option value="lanche">Lanche</option>
+                                    <option value="porcao">Porção</option>
+                                    <option value="bebida">Bebida</option>
+                                    <option value="combo">Combo</option>
+                                    <option value="sobremesa">Sobremesa</option>
+                                    <option value="adicional">Adicional/molho</option>
+                                    <option value="produto">Produto simples</option>
+                                  </select>
+                                </label>
                                 <Input label="Preço venda" type="number" value={product.price} onChange={(value) => updateProductField(product.id, "price", value)} />
                                 <Input label="Preço custo" type="number" value={product.cost} onChange={(value) => updateProductField(product.id, "cost", value)} />
                                 <Input label="Estoque" type="number" value={product.stock} onChange={(value) => updateProductField(product.id, "stock", value)} />
@@ -5719,6 +5766,21 @@ function App() {
                                   </div>
                                 </div>
                               </div>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-3xl border border-zinc-100 bg-white p-4">
+                                <label className="block">
+                                  <span className="text-xs font-medium text-zinc-600">Ingredientes padrão</span>
+                                  <textarea value={Array.isArray(product.ingredients) ? product.ingredients.join(", ") : (product.ingredients || "")} onChange={(event) => updateProductField(product.id, "ingredients", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
+                                </label>
+                                <label className="block">
+                                  <span className="text-xs font-medium text-zinc-600">Ingredientes removíveis</span>
+                                  <textarea value={Array.isArray(product.removableIngredients) ? product.removableIngredients.join(", ") : (product.removableIngredients || "")} onChange={(event) => updateProductField(product.id, "removableIngredients", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
+                                </label>
+                                <label className="block">
+                                  <span className="text-xs font-medium text-zinc-600">Adicionais sugeridos</span>
+                                  <textarea value={Array.isArray(product.defaultAddons) ? product.defaultAddons.map((addon) => addon.name || addon).join(", ") : (product.defaultAddons || "")} onChange={(event) => updateProductField(product.id, "defaultAddons", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
+                                </label>
+                              </div>
+
                               <div className="rounded-3xl border border-zinc-100 bg-white p-4 space-y-3">
                                 <label className="flex items-center gap-3 text-sm font-bold text-zinc-700">
                                   <input type="checkbox" checked={product.hasVariants === true} onChange={(event) => updateProductField(product.id, "hasVariants", event.target.checked)} />
@@ -6300,7 +6362,7 @@ function App() {
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Metric title="Total vendido" value={money(cashClosingReport.totalSold)} icon="money" />
                     <Metric title="Total recebido" value={money(cashClosingReport.totalReceived)} icon="check" />
-                    <Metric title="Pendente/fiado" value={money(cashClosingReport.pendingAmount)} icon="alert" />
+                    <Metric title="A receber" value={money(cashClosingReport.pendingAmount)} icon="alert" />
                     <Metric title="Cancelados" value={cashClosingReport.cancelledOrders} icon="alert" />
                   </div>
                 </CardBox>
@@ -6332,7 +6394,7 @@ function App() {
                     <Metric title="Dinheiro" value={money(periodSalesReport.byPayment?.Dinheiro || 0)} icon="money" />
                     <Metric title="Débito" value={money(periodSalesReport.byPayment?.["Cartão débito"] || 0)} icon="money" />
                     <Metric title="Crédito" value={money(periodSalesReport.byPayment?.["Cartão crédito"] || 0)} icon="money" />
-                    <Metric title="Pendente/fiado" value={money(periodSalesReport.pendingAmount)} icon="alert" />
+                    <Metric title="A receber" value={money(periodSalesReport.pendingAmount)} icon="alert" />
                     <Metric title="Cancelados" value={periodSalesReport.cancelledOrders.length} icon="alert" />
                   </div>
                 </CardBox>
@@ -6709,7 +6771,7 @@ function App() {
                     <div className="md:col-span-2 rounded-3xl border border-amber-100 bg-amber-50 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-sm font-black text-amber-950">Backup operacional</p>
-                        <p className="mt-1 text-xs text-amber-900">Baixe ou restaure um arquivo JSON com produtos, clientes, entregadores, pedidos, caixa, comandas, notificações e configurações atuais. Use antes de grandes alterações ou antes de subir uma nova versão.</p>
+                        <p className="mt-1 text-xs text-amber-900">Baixe ou restaure um arquivo JSON com produtos, clientes, entregadores, pedidos, caixa, notificações e configurações atuais. Use antes de grandes alterações ou antes de subir uma nova versão.</p>
                         <p className="mt-1 text-xs font-bold text-amber-950">Resumo atual: {products.length} produtos • {clients.length} clientes • {deliveries.length} pedidos • {couriers.length} entregadores</p>
                         <p className="mt-1 text-[11px] font-semibold text-amber-800">Ao restaurar, os dados carregados na tela atual serão substituídos pelo arquivo selecionado.</p>
                       </div>
@@ -6998,7 +7060,7 @@ function App() {
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    Perfis: Administrador vê tudo e gerencia acessos. Gerente vê operação e cadastros. Caixa vê vendas/caixa/comandas. Operador vê painel, entregas, balcão e clientes.
+                    Perfis: Administrador vê tudo e gerencia acessos. Gerente vê operação e cadastros. Caixa vê vendas e fechamento de caixa. Operador vê painel, entregas, balcão e clientes.
                   </div>
                   {storeUsersStatus && <p className="mt-3 text-sm text-zinc-500">{storeUsersStatus}</p>}
                 </CardBox>

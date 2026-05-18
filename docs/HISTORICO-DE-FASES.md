@@ -447,3 +447,12 @@ Versão: `6.0.47-fase-59-impressao-automatica-app`
 - O pedido do app passa a criar automaticamente as vias `customer_app + kitchen` e `customer_app + delivery`.
 - A fila de impressão agora deduplica por `source + source_id + print_type`, evitando conflito com bancos onde `print_jobs.id` é numérico.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-47.sql`.
+
+## Fase 60 — Conversão para Lanchonete
+
+Versão: `6.0.48-fase-60-conversao-lanchonete`
+
+- Conversão da identidade e categorias padrão para lanchonete.
+- Remoção da aba Fiados/Comandas da navegação operacional.
+- Preparação de produtos para tipo de cardápio, ingredientes, ingredientes removíveis e adicionais sugeridos.
+- SQL obrigatório: `supabase/migracao-final-producao-6-0-48.sql`.

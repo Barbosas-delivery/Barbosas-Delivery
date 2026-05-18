@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.47-fase-59-impressao-automatica-app`
+`6.0.48-fase-60-conversao-lanchonete`
 
 ## Revisão final
 
@@ -214,29 +214,29 @@ A Fase 56 não exige alteração nova de schema. A migração `supabase/migracao
 
 ## Fase 57 — Central de impressão no sistema
 
-Versão: `6.0.47-fase-59-impressao-automatica-app`
+Versão: `6.0.48-fase-60-conversao-lanchonete`
 
 - Painel desktop ganhou **Central de impressão** com resumo de jobs pendentes, imprimindo, impressos e falhas.
 - Adicionada listagem dos últimos `print_jobs` com origem, via, status, tentativas, worker e erro.
 - Adicionados botões para reimprimir job, cancelar job, reprocessar falhas, liberar jobs travados e limpar impressos antigos.
 - Adicionada tabela `print_workers` para heartbeat do computador de impressão.
-- Migração obrigatória: `supabase/migracao-final-producao-6-0-47.sql`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-48.sql`.
 
 
 ### Fase 58 — estabilidade de produção
 
 Correções principais: tabela `public.coupons`, função `public.apply_product_stock_deltas(jsonb)` segura contra `DELETE` sem `WHERE`, deploy padronizado com pnpm e scripts desktop usando pnpm.
 
-SQL obrigatório: `supabase/migracao-final-producao-6-0-47.sql`.
+SQL obrigatório: `supabase/migracao-final-producao-6-0-48.sql`.
 
 
-## Fase 59 — Impressão automática definitiva para pedidos do app
+## Fase 60 — Impressão automática definitiva para pedidos do app
 
-Versão: `6.0.47-fase-59-impressao-automatica-app`
+Versão: `6.0.48-fase-60-conversao-lanchonete`
 
 Correção oficial para pedidos do aplicativo criarem automaticamente as vias de impressão:
 
 - `customer_app + kitchen`
 - `customer_app + delivery`
 
-SQL obrigatório: `supabase/migracao-final-producao-6-0-47.sql`.
+SQL obrigatório: `supabase/migracao-final-producao-6-0-48.sql`.
