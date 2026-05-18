@@ -414,3 +414,14 @@ Versão: `6.0.44-fase-56-instalador-windows`
 - Painel desktop ganhou opção para iniciar com o Windows.
 - Configuração local permanece em `desktop-config.json`, preservada entre atualizações.
 - Documentação criada em `docs/FASE-56-INSTALADOR-WINDOWS.md` e `docs/INSTALACAO-DESKTOP-WINDOWS.md`.
+
+## Fase 57 — Central de impressão no sistema
+
+Versão: `6.0.45-fase-57-central-impressao`
+
+- Adicionada Central de impressão ao painel Electron.
+- A central lista `print_jobs` recentes com origem, via, status, tentativas, worker e erro.
+- Adicionados botões de reimpressão, cancelamento, reprocessamento de falhas, liberação de travados e limpeza de impressos antigos.
+- Adicionada tabela `print_workers` para registrar heartbeat do computador de impressão.
+- Adicionada função `reset_stale_print_jobs` para recuperar jobs travados em `printing`.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-45.sql`.

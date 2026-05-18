@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.44-fase-56-instalador-windows`
+`6.0.45-fase-57-central-impressao`
 
 ## Revisão final
 
@@ -170,7 +170,7 @@ Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 
 ## Fase 54 — Aplicativo Electron básico
 
-Versão: `6.0.44-fase-56-instalador-windows`
+Versão: `6.0.42-fase-54-corrige-assets-electron`
 
 - Criada a base do aplicativo desktop instalado no computador da loja.
 - O Electron carrega o app web e adiciona um painel local de impressão.
@@ -181,7 +181,7 @@ Versão: `6.0.44-fase-56-instalador-windows`
 
 ## Fase 55 — Consumidor automático de impressão
 
-Versão: `6.0.44-fase-56-instalador-windows`
+Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
 
 - O Electron Desktop agora busca `print_jobs` pendentes no Supabase.
 - Ao imprimir, marca o job como `printed`.
@@ -211,3 +211,13 @@ Barbosas-Delivery-Desktop-6.0.44-Setup.exe
 ```
 
 A Fase 56 não exige alteração nova de schema. A migração `supabase/migracao-final-producao-6-0-44.sql` mantém a estrutura final da fila de impressão.
+
+## Fase 57 — Central de impressão no sistema
+
+Versão: `6.0.45-fase-57-central-impressao`
+
+- Painel desktop ganhou **Central de impressão** com resumo de jobs pendentes, imprimindo, impressos e falhas.
+- Adicionada listagem dos últimos `print_jobs` com origem, via, status, tentativas, worker e erro.
+- Adicionados botões para reimprimir job, cancelar job, reprocessar falhas, liberar jobs travados e limpar impressos antigos.
+- Adicionada tabela `print_workers` para heartbeat do computador de impressão.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-45.sql`.

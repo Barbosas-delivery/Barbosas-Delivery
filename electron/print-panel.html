@@ -103,6 +103,55 @@
     </section>
 
     <section class="card">
+      <h2>5. Central de impressão</h2>
+      <p>Controle operacional da fila: pendentes, impressos, falhas, computador de impressão e reimpressão manual.</p>
+      <div class="summary-grid">
+        <div class="summary-card">Total<strong id="summaryTotal">0</strong></div>
+        <div class="summary-card">Pendentes<strong id="summaryPending">0</strong></div>
+        <div class="summary-card">Imprimindo<strong id="summaryPrinting">0</strong></div>
+        <div class="summary-card">Impressos<strong id="summaryPrinted">0</strong></div>
+        <div class="summary-card">Falhas<strong id="summaryFailed">0</strong></div>
+      </div>
+      <div class="grid">
+        <label>Status
+          <select id="queueStatusFilter">
+            <option value="">Todos</option>
+            <option value="pending">Pendentes</option>
+            <option value="printing">Imprimindo</option>
+            <option value="printed">Impressos</option>
+            <option value="failed">Falhas</option>
+            <option value="cancelled">Cancelados</option>
+          </select>
+        </label>
+        <label>Origem
+          <select id="queueSourceFilter">
+            <option value="">Todas</option>
+            <option value="customer_app">Pedido do app</option>
+            <option value="pdv_entregas">PDV Entregas</option>
+            <option value="pdv_balcao">PDV Balcão</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="refreshQueue" class="secondary">Atualizar central</button>
+        <button id="requeueFailed" class="warn">Reprocessar falhas</button>
+        <button id="cleanupPrinted" class="danger">Limpar impressos antigos</button>
+        <button id="resetStale" class="secondary">Liberar travados</button>
+      </div>
+      <p id="printWorkers" class="muted">Computadores de impressão: aguardando...</p>
+      <div style="overflow:auto; max-height: 360px; border-radius: 12px; margin-top: 12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Origem</th><th>Via</th><th>Status</th><th>Tent.</th><th>Worker</th><th>Erro</th><th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="queueRows"><tr><td colspan="8" class="muted">Carregando fila...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Resultado / logs</h2>
       <pre id="result">Aguardando ação...</pre>
     </section>
@@ -128,6 +177,15 @@
       workerDetails: document.querySelector("#workerDetails"),
       result: document.querySelector("#result"),
       appInfo: document.querySelector("#appInfo"),
+      summaryTotal: document.querySelector("#summaryTotal"),
+      summaryPending: document.querySelector("#summaryPending"),
+      summaryPrinting: document.querySelector("#summaryPrinting"),
+      summaryPrinted: document.querySelector("#summaryPrinted"),
+      summaryFailed: document.querySelector("#summaryFailed"),
+      queueStatusFilter: document.querySelector("#queueStatusFilter"),
+      queueSourceFilter: document.querySelector("#queueSourceFilter"),
+      queueRows: document.querySelector("#queueRows"),
+      printWorkers: document.querySelector("#printWorkers"),
     };
 
     function show(value) {
@@ -150,6 +208,70 @@
         pollIntervalSeconds: Number(fields.pollIntervalSeconds.value || 5),
         startWithWindows: fields.startWithWindows.checked,
       };
+    }
+
+    function formatShortDate(value) {
+      if (!value) return "-";
+      try { return new Date(value).toLocaleString("pt-BR"); } catch { return String(value); }
+    }
+
+    function getQueueFilters() {
+      return {
+        status: fields.queueStatusFilter.value,
+        source: fields.queueSourceFilter.value,
+        limit: 50,
+      };
+    }
+
+    function renderQueueRows(jobs = []) {
+      if (!Array.isArray(jobs) || !jobs.length) {
+        fields.queueRows.innerHTML = '<tr><td colspan="8" class="muted">Nenhum job encontrado para o filtro atual.</td></tr>';
+        return;
+      }
+      fields.queueRows.innerHTML = jobs.map((job) => {
+        const id = String(job.id);
+        const status = String(job.status || "");
+        const canRequeue = ["failed", "printed", "cancelled", "printing"].includes(status);
+        const canCancel = ["pending", "failed", "printing"].includes(status);
+        return `<tr>
+          <td>${id}</td>
+          <td>${job.source || "-"}<br><span class="muted">${job.source_id || ""}</span></td>
+          <td>${job.print_type || "-"}</td>
+          <td class="status-${status}">${status || "-"}<br><span class="muted">${formatShortDate(job.printed_at || job.failed_at || job.printing_at || job.created_at)}</span></td>
+          <td>${job.attempts ?? 0}</td>
+          <td>${job.worker_id || job.locked_by || "-"}</td>
+          <td>${job.error_message || "-"}</td>
+          <td class="row">
+            ${canRequeue ? `<button class="mini warn" data-action="requeue" data-id="${id}">Reimprimir</button>` : ""}
+            ${canCancel ? `<button class="mini danger" data-action="cancel" data-id="${id}">Cancelar</button>` : ""}
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    function renderPrintWorkers(workers) {
+      if (!Array.isArray(workers)) {
+        fields.printWorkers.textContent = `Computadores de impressão: ${workers?.message || "tabela print_workers ainda não disponível"}`;
+        return;
+      }
+      if (!workers.length) {
+        fields.printWorkers.textContent = "Computadores de impressão: nenhum heartbeat registrado ainda.";
+        return;
+      }
+      fields.printWorkers.textContent = `Computadores de impressão: ${workers.map((worker) => `${worker.computer_name || worker.worker_id} (${worker.status || "-"}, ${formatShortDate(worker.last_seen_at)})`).join(" • ")}`;
+    }
+
+    async function refreshPrintCenter() {
+      const data = await api.fetchPrintCenter(getQueueFilters());
+      const summary = data.summary || {};
+      fields.summaryTotal.textContent = summary.total || 0;
+      fields.summaryPending.textContent = summary.pending || 0;
+      fields.summaryPrinting.textContent = summary.printing || 0;
+      fields.summaryPrinted.textContent = summary.printed || 0;
+      fields.summaryFailed.textContent = summary.failed || 0;
+      renderQueueRows(data.jobs || []);
+      renderPrintWorkers(data.workers);
+      return data;
     }
 
     async function loadPrinters(selectedName = "") {
@@ -180,6 +302,7 @@
       fields.startWithWindows.checked = Boolean(config.startWithWindows);
       await loadPrinters(config.printerName || "");
       await refreshWorkerStatus();
+      await refreshPrintCenter().catch(() => {});
     }
 
     document.querySelector("#saveConfig").addEventListener("click", async () => {
@@ -237,11 +360,55 @@
       await refreshWorkerStatus();
     });
 
+    document.querySelector("#refreshQueue").addEventListener("click", async () => {
+      const data = await refreshPrintCenter();
+      show({ ok: true, message: "Central atualizada.", summary: data.summary });
+    });
+
+    fields.queueStatusFilter.addEventListener("change", () => refreshPrintCenter().catch((error) => show({ ok: false, error: error.message })));
+    fields.queueSourceFilter.addEventListener("change", () => refreshPrintCenter().catch((error) => show({ ok: false, error: error.message })));
+
+    document.querySelector("#requeueFailed").addEventListener("click", async () => {
+      const result = await api.requeueFailedPrintJobs();
+      show({ ok: true, message: "Falhas reenfileiradas.", count: Array.isArray(result) ? result.length : 0 });
+      await refreshPrintCenter();
+    });
+
+    document.querySelector("#resetStale").addEventListener("click", async () => {
+      const result = await api.resetStalePrintJobs(10);
+      show({ ok: true, message: "Jobs travados liberados.", count: Array.isArray(result) ? result.length : 0 });
+      await refreshPrintCenter();
+    });
+
+    document.querySelector("#cleanupPrinted").addEventListener("click", async () => {
+      const result = await api.cleanupPrintedPrintJobs(7);
+      show({ ok: true, message: "Impressos antigos removidos.", result });
+      await refreshPrintCenter();
+    });
+
+    fields.queueRows.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const id = button.dataset.id;
+      if (button.dataset.action === "requeue") {
+        const result = await api.requeuePrintJob(id);
+        show({ ok: true, message: `Job ${id} reenfileirado.`, result });
+      }
+      if (button.dataset.action === "cancel") {
+        const result = await api.cancelPrintJob(id);
+        show({ ok: true, message: `Job ${id} cancelado.`, result });
+      }
+      await refreshPrintCenter();
+    });
+
     if (api.onPrintWorkerLog) {
       api.onPrintWorkerLog(() => refreshWorkerStatus().catch(() => {}));
     }
 
-    setInterval(() => refreshWorkerStatus().catch(() => {}), 5000);
+    setInterval(() => {
+      refreshWorkerStatus().catch(() => {});
+      refreshPrintCenter().catch(() => {});
+    }, 5000);
     loadConfig().catch((error) => show({ ok: false, error: error.message }));
   </script>
 </body>

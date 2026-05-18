@@ -12,6 +12,13 @@ contextBridge.exposeInMainWorld("barbosasDesktop", {
   startPrintWorker: () => ipcRenderer.invoke("desktop:start-print-worker"),
   stopPrintWorker: () => ipcRenderer.invoke("desktop:stop-print-worker"),
   processPrintJobsOnce: () => ipcRenderer.invoke("desktop:process-print-jobs-once"),
+  fetchPrintCenter: (filters) => ipcRenderer.invoke("desktop:fetch-print-center", filters),
+  fetchPrintJobs: (filters) => ipcRenderer.invoke("desktop:fetch-print-jobs", filters),
+  requeuePrintJob: (jobId) => ipcRenderer.invoke("desktop:requeue-print-job", jobId),
+  cancelPrintJob: (jobId) => ipcRenderer.invoke("desktop:cancel-print-job", jobId),
+  requeueFailedPrintJobs: () => ipcRenderer.invoke("desktop:requeue-failed-print-jobs"),
+  cleanupPrintedPrintJobs: (daysToKeep) => ipcRenderer.invoke("desktop:cleanup-printed-print-jobs", daysToKeep),
+  resetStalePrintJobs: (minutes) => ipcRenderer.invoke("desktop:reset-stale-print-jobs", minutes),
   onPrintWorkerLog: (callback) => {
     const listener = (_event, entry) => callback(entry);
     ipcRenderer.on("desktop:print-worker-log", listener);

@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
-const APP_VERSION = "6.0.44-fase-56-instalador-windows";
+const APP_VERSION = "6.0.45-fase-57-central-impressao";
 const CONFIG_FILE = "desktop-config.json";
 const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {
@@ -324,6 +324,176 @@ async function supabaseRpc(config, functionName, body = {}) {
   return payload;
 }
 
+
+async function supabaseRest(config, pathAndQuery, { method = "GET", body = null } = {}) {
+  requireSupabaseConfig(config);
+  const baseUrl = config.supabaseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/rest/v1/${pathAndQuery}`, {
+    method,
+    headers: {
+      apikey: config.supabaseAnonKey,
+      authorization: `Bearer ${config.supabaseAnonKey}`,
+      "content-type": "application/json",
+      prefer: "return=representation",
+    },
+    body: body === null ? undefined : JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+
+  if (!response.ok) {
+    const message = typeof payload === "object" && payload?.message ? payload.message : text || `Supabase respondeu ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+function normalizePrintJobId(jobId) {
+  const raw = String(jobId ?? "").trim();
+  if (!raw) throw new Error("ID do job de impressão não informado.");
+  return raw;
+}
+
+function buildPrintJobFilters({ status = "", source = "", printType = "", limit = 50 } = {}) {
+  const params = new URLSearchParams();
+  params.set("select", "id,source,source_id,print_type,status,attempts,worker_id,locked_by,printer_name,created_at,printing_at,printed_at,failed_at,cancelled_at,error_message,updated_at");
+  params.set("order", "created_at.desc");
+  params.set("limit", String(Math.max(1, Math.min(Number(limit || 50), 100))));
+  if (status) params.set("status", `eq.${status}`);
+  if (source) params.set("source", `eq.${source}`);
+  if (printType) params.set("print_type", `eq.${printType}`);
+  return params.toString();
+}
+
+async function fetchPrintJobs(filters = {}) {
+  const config = await readConfig();
+  const query = buildPrintJobFilters(filters);
+  return await supabaseRest(config, `print_jobs?${query}`) || [];
+}
+
+async function requeuePrintJob(jobId) {
+  const config = await readConfig();
+  const id = normalizePrintJobId(jobId);
+  const payload = {
+    status: "pending",
+    worker_id: "",
+    locked_by: "",
+    printing_at: null,
+    failed_at: null,
+    cancelled_at: null,
+    error_message: "",
+    updated_at: new Date().toISOString(),
+  };
+  const result = await supabaseRest(config, `print_jobs?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: payload });
+  addPrintLog("info", `Job ${id} reenfileirado para reimpressão.`);
+  return result?.[0] || { ok: true, id };
+}
+
+async function cancelPrintJob(jobId) {
+  const config = await readConfig();
+  const id = normalizePrintJobId(jobId);
+  const payload = {
+    status: "cancelled",
+    cancelled_at: new Date().toISOString(),
+    error_message: "Cancelado manualmente pela central de impressão.",
+    updated_at: new Date().toISOString(),
+  };
+  const result = await supabaseRest(config, `print_jobs?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: payload });
+  addPrintLog("info", `Job ${id} cancelado manualmente.`);
+  return result?.[0] || { ok: true, id };
+}
+
+async function requeueFailedPrintJobs() {
+  const config = await readConfig();
+  const payload = {
+    status: "pending",
+    worker_id: "",
+    locked_by: "",
+    printing_at: null,
+    failed_at: null,
+    error_message: "",
+    updated_at: new Date().toISOString(),
+  };
+  const result = await supabaseRest(config, "print_jobs?status=eq.failed", { method: "PATCH", body: payload }) || [];
+  addPrintLog("info", `${result.length} job(s) com falha reenfileirado(s).`);
+  return result;
+}
+
+async function resetStalePrintJobs(minutes = 10) {
+  const config = await readConfig();
+  const result = await supabaseRpc(config, "reset_stale_print_jobs", {
+    p_minutes: Math.max(1, Math.min(Number(minutes || 10), 120)),
+  }) || [];
+  addPrintLog("info", `${result.length} job(s) travado(s) voltou/voltaram para pendente.`);
+  return result;
+}
+
+async function cleanupPrintedPrintJobs(daysToKeep = 7) {
+  const config = await readConfig();
+  const days = Math.max(1, Math.min(Number(daysToKeep || 7), 90));
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const result = await supabaseRest(config, `print_jobs?status=eq.printed&printed_at=lt.${encodeURIComponent(cutoff)}`, { method: "DELETE" }) || [];
+  addPrintLog("info", `${result.length} job(s) impresso(s) antigo(s) removido(s).`);
+  return { deleted: result.length, cutoff };
+}
+
+async function fetchPrintWorkers() {
+  const config = await readConfig();
+  try {
+    const params = new URLSearchParams();
+    params.set("select", "worker_id,computer_name,status,last_seen_at,last_error,printer_name,app_version,updated_at");
+    params.set("order", "last_seen_at.desc");
+    params.set("limit", "20");
+    return await supabaseRest(config, `print_workers?${params.toString()}`) || [];
+  } catch (error) {
+    return { unavailable: true, message: error?.message || String(error) };
+  }
+}
+
+async function upsertPrintWorkerHeartbeat(status = "online") {
+  const config = await readConfig();
+  try {
+    await supabaseRpc(config, "upsert_print_worker_heartbeat", {
+      p_worker_id: printWorker.workerId,
+      p_computer_name: process.env.COMPUTERNAME || process.env.HOSTNAME || "computador-da-loja",
+      p_status: status,
+      p_printer_name: config.printerName || "padrão do sistema",
+      p_app_version: APP_VERSION,
+      p_last_error: printWorker.lastError || "",
+    });
+  } catch (error) {
+    addPrintLog("warn", `Não foi possível atualizar status do computador de impressão: ${error?.message || error}`);
+  }
+}
+
+async function fetchPrintCenterData(filters = {}) {
+  const config = await readConfig();
+  requireSupabaseConfig(config);
+  const [jobs, workers] = await Promise.all([
+    fetchPrintJobs(filters),
+    fetchPrintWorkers(),
+  ]);
+  const summary = Array.isArray(jobs)
+    ? jobs.reduce((acc, job) => {
+        const status = String(job.status || "unknown");
+        acc[status] = (acc[status] || 0) + 1;
+        acc.total += 1;
+        return acc;
+      }, { total: 0, pending: 0, printing: 0, printed: 0, failed: 0, cancelled: 0 })
+    : { total: 0, pending: 0, printing: 0, printed: 0, failed: 0, cancelled: 0 };
+  return { jobs, workers, summary, worker: getPrintWorkerStatus() };
+}
+
 async function validateSupabaseConnection(configInput) {
   const config = sanitizeConfig(configInput || await readConfig());
   if (!config.supabaseUrl || !config.supabaseAnonKey) {
@@ -451,6 +621,7 @@ async function processPrintJobsOnce() {
       return getPrintWorkerStatus();
     }
     requireSupabaseConfig(config);
+    await upsertPrintWorkerHeartbeat("online");
     const jobs = await claimPendingPrintJobs(config, 5);
     printWorker.lastClaimCount = Array.isArray(jobs) ? jobs.length : 0;
     if (!jobs.length) return getPrintWorkerStatus();
@@ -511,6 +682,7 @@ function stopPrintWorker() {
   printWorker.timer = null;
   if (printWorker.running) addPrintLog("info", "Consumidor automático de impressão parado.");
   printWorker.running = false;
+  void upsertPrintWorkerHeartbeat("offline");
   return getPrintWorkerStatus();
 }
 
@@ -588,6 +760,13 @@ ipcMain.handle("desktop:test-print", async (_event, options = {}) => {
   return printHtml({ html, printerName: options.printerName, silentPrint: options.silentPrint ?? config.silentPrint, paperWidthMm: options.paperWidthMm || config.paperWidthMm });
 });
 
+ipcMain.handle("desktop:fetch-print-center", (_event, filters = {}) => fetchPrintCenterData(filters));
+ipcMain.handle("desktop:fetch-print-jobs", (_event, filters = {}) => fetchPrintJobs(filters));
+ipcMain.handle("desktop:requeue-print-job", (_event, jobId) => requeuePrintJob(jobId));
+ipcMain.handle("desktop:cancel-print-job", (_event, jobId) => cancelPrintJob(jobId));
+ipcMain.handle("desktop:requeue-failed-print-jobs", () => requeueFailedPrintJobs());
+ipcMain.handle("desktop:cleanup-printed-print-jobs", (_event, daysToKeep = 7) => cleanupPrintedPrintJobs(daysToKeep));
+ipcMain.handle("desktop:reset-stale-print-jobs", (_event, minutes = 10) => resetStalePrintJobs(minutes));
 ipcMain.handle("desktop:validate-supabase", (_event, config) => validateSupabaseConnection(config));
 ipcMain.handle("desktop:get-print-worker-status", () => getPrintWorkerStatus());
 ipcMain.handle("desktop:start-print-worker", () => startPrintWorker());
