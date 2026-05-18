@@ -1,7 +1,7 @@
 {
   "name": "barbosas-delivery",
   "private": true,
-  "version": "6.0.52",
+  "version": "6.0.53",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,9 @@
     "desktop:build": "pnpm run desktop:installer",
     "desktop:pack": "pnpm run build && electron-builder --dir --publish=never",
     "desktop:installer": "pnpm run build && electron-builder --win nsis --publish=never",
-    "desktop:doctor": "node scripts/desktop-smoke-test.mjs"
+    "desktop:doctor": "node scripts/desktop-smoke-test.mjs",
+    "desktop:update-check": "node scripts/desktop-smoke-test.mjs",
+    "desktop:installer:win": "pnpm run desktop:installer"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

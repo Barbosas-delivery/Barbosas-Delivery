@@ -27,6 +27,21 @@
     .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 800; background: #1f2937; color: #e5e7eb; }
     .pill.on { background: rgba(34,197,94,.18); color: #86efac; }
     .pill.off { background: rgba(248,113,113,.15); color: #fca5a5; }
+    .checklist { display: grid; gap: 8px; margin-top: 10px; }
+    .check-item { display: flex; justify-content: space-between; gap: 12px; border: 1px solid rgba(148, 163, 184, .18); border-radius: 12px; padding: 10px; background: rgba(2, 6, 23, .45); }
+    .check-item strong { display: block; color: #f8fafc; }
+    .check-item span { color: #94a3b8; font-size: 12px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 8px 0 14px; }
+    .summary-card { border: 1px solid rgba(148, 163, 184, .18); border-radius: 12px; padding: 10px; color: #94a3b8; background: rgba(2, 6, 23, .45); }
+    .summary-card strong { display: block; color: #f8fafc; font-size: 20px; }
+    button.danger { background: #ef4444; color: #450a0a; }
+    button.mini { padding: 6px 9px; border-radius: 9px; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid rgba(148, 163, 184, .16); padding: 8px; text-align: left; vertical-align: top; }
+    .status-printed { color: #86efac; }
+    .status-failed { color: #fca5a5; }
+    .status-pending { color: #fde68a; }
+    .status-printing { color: #93c5fd; }
     @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -151,6 +166,21 @@
       </div>
     </section>
 
+
+    <section class="card">
+      <h2>6. Atualização do app instalado no PC</h2>
+      <p>Use este bloco depois de instalar a nova versão para confirmar se o computador da loja está usando o Desktop 6.0.53 e registrar a instalação no Supabase.</p>
+      <div class="row">
+        <span id="desktopVersion" class="pill">Versão: carregando...</span>
+        <span id="desktopReady" class="pill">0%</span>
+      </div>
+      <div id="desktopChecklist" class="checklist"><div class="muted">Carregando checklist desktop...</div></div>
+      <div class="row" style="margin-top: 12px;">
+        <button id="refreshUpdateStatus" class="secondary">Conferir versão instalada</button>
+        <button id="backupConfig" class="warn">Backup da configuração local</button>
+        <button id="registerInstallation">Registrar instalação no Supabase</button>
+      </div>
+    </section>
     <section class="card">
       <h2>Resultado / logs</h2>
       <pre id="result">Aguardando ação...</pre>
@@ -186,6 +216,9 @@
       queueSourceFilter: document.querySelector("#queueSourceFilter"),
       queueRows: document.querySelector("#queueRows"),
       printWorkers: document.querySelector("#printWorkers"),
+      desktopVersion: document.querySelector("#desktopVersion"),
+      desktopReady: document.querySelector("#desktopReady"),
+      desktopChecklist: document.querySelector("#desktopChecklist"),
     };
 
     function show(value) {
@@ -287,9 +320,28 @@
       return printers;
     }
 
+
+    function renderDesktopUpdateStatus(status) {
+      fields.desktopVersion.textContent = `Versão: ${status.appVersion || "-"}`;
+      fields.desktopReady.textContent = `${status.readyPercent || 0}% pronto`;
+      fields.desktopReady.className = `pill ${(status.readyPercent || 0) >= 80 ? "on" : "off"}`;
+      const checklist = Array.isArray(status.checklist) ? status.checklist : [];
+      fields.desktopChecklist.innerHTML = checklist.map((item) => `
+        <div class="check-item">
+          <div><strong>${item.ok ? "✅" : "⚠️"} ${item.label}</strong><span>${item.detail || ""}</span></div>
+          <span>${item.ok ? "OK" : "Ajustar"}</span>
+        </div>
+      `).join("") || '<div class="muted">Checklist indisponível.</div>';
+    }
+
+    async function refreshDesktopUpdateStatus() {
+      const status = await api.getUpdateStatus();
+      renderDesktopUpdateStatus(status);
+      return status;
+    }
     async function loadConfig() {
       const [info, config] = await Promise.all([api.getAppInfo(), api.getConfig()]);
-      fields.appInfo.textContent = `${info.name} ${info.version} • Configuração local: ${info.userDataPath}`;
+      fields.appInfo.textContent = `${info.name} ${info.version} • PC: ${info.computerName || "-"} • Configuração local: ${info.userDataPath}`;
       fields.supabaseUrl.value = config.supabaseUrl || "";
       fields.supabaseAnonKey.value = config.supabaseAnonKey || "";
       fields.paperWidthMm.value = String(config.paperWidthMm || 80);
@@ -302,12 +354,14 @@
       fields.startWithWindows.checked = Boolean(config.startWithWindows);
       await loadPrinters(config.printerName || "");
       await refreshWorkerStatus();
+      await refreshDesktopUpdateStatus().catch(() => {});
       await refreshPrintCenter().catch(() => {});
     }
 
     document.querySelector("#saveConfig").addEventListener("click", async () => {
       const saved = await api.saveConfig(collectConfig());
       show({ ok: true, message: "Configuração salva no computador.", saved: { ...saved, supabaseAnonKey: saved.supabaseAnonKey ? "***" : "" } });
+      await refreshDesktopUpdateStatus().catch(() => {});
     });
 
     document.querySelector("#testSupabase").addEventListener("click", async () => {
@@ -399,6 +453,24 @@
         show({ ok: true, message: `Job ${id} cancelado.`, result });
       }
       await refreshPrintCenter();
+    });
+
+
+    document.querySelector("#refreshUpdateStatus").addEventListener("click", async () => {
+      const status = await refreshDesktopUpdateStatus();
+      show({ ok: true, message: "Versão desktop conferida.", status });
+    });
+
+    document.querySelector("#backupConfig").addEventListener("click", async () => {
+      const result = await api.backupConfig();
+      show(result);
+    });
+
+    document.querySelector("#registerInstallation").addEventListener("click", async () => {
+      const result = await api.registerInstallation();
+      show(result);
+      await refreshDesktopUpdateStatus().catch(() => {});
+      await refreshPrintCenter().catch(() => {});
     });
 
     if (api.onPrintWorkerLog) {

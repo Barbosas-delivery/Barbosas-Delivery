@@ -42,7 +42,10 @@ assert.match(mainSource, /setLoginItemSettings/, "Electron precisa permitir inic
 assert.match(mainSource, /fetchPrintCenterData/, "Electron precisa buscar dados da central de impressão");
 assert.match(mainSource, /requeuePrintJob/, "Electron precisa reenfileirar jobs para reimpressão");
 assert.match(mainSource, /upsertPrintWorkerHeartbeat/, "Electron precisa atualizar heartbeat do computador de impressão");
-assert.match(mainSource, /APP_VERSION = "6\.0\.52-fase-64-finalizacao-profissional"/, "Electron precisa expor a versão da Fase 64");
+assert.match(mainSource, /registerDesktopInstallation/, "Electron precisa registrar instalação desktop no Supabase");
+assert.match(mainSource, /backupDesktopConfig/, "Electron precisa gerar backup da configuração local");
+assert.match(mainSource, /getDesktopUpdateStatus/, "Electron precisa expor checklist de atualização instalada");
+assert.match(mainSource, /APP_VERSION = "6\.0\.53-fase-65-atualizacao-desktop-instalado"/, "Electron precisa expor a versão da Fase 65");
 assert.match(mainSource, /contextIsolation:\s*true/, "janela Electron precisa manter contextIsolation ativo");
 assert.match(mainSource, /nodeIntegration:\s*false/, "janela Electron não deve expor Node diretamente ao app web");
 assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("barbosasDesktop"/, "preload precisa expor bridge segura");
@@ -51,6 +54,9 @@ assert.match(preloadSource, /processPrintJobsOnce/, "preload precisa permitir pr
 assert.match(preloadSource, /fetchPrintCenter/, "preload precisa expor a central de impressão");
 assert.match(preloadSource, /requeuePrintJob/, "preload precisa permitir reimpressão manual");
 assert.match(preloadSource, /resetStalePrintJobs/, "preload precisa permitir liberar jobs travados");
+assert.match(preloadSource, /getUpdateStatus/, "preload precisa expor status de atualização do desktop instalado");
+assert.match(preloadSource, /backupConfig/, "preload precisa permitir backup da configuração local");
+assert.match(preloadSource, /registerInstallation/, "preload precisa registrar instalação no Supabase");
 assert.match(panelSource, /Pedido do app: 1 via cozinha \+ 1 via entrega/, "painel precisa refletir regra operacional do app");
 assert.match(panelSource, /PDV Entregas: 1 via cozinha \+ 1 via entrega/, "painel precisa refletir regra do PDV Entregas");
 assert.match(panelSource, /PDV Balcão: 1 via balcão/, "painel precisa refletir regra do PDV Balcão");
@@ -60,5 +66,8 @@ assert.match(panelSource, /Central de impressão/, "painel precisa ter central d
 assert.match(panelSource, /Reprocessar falhas/, "central precisa reprocessar falhas");
 assert.match(panelSource, /Liberar travados/, "central precisa liberar jobs travados");
 assert.match(panelSource, /Iniciar Barbosa’s Delivery Desktop junto com o Windows/, "painel precisa controlar inicialização com Windows");
+assert.match(panelSource, /Atualização do app instalado no PC/, "painel precisa mostrar atualização do app instalado no PC");
+assert.match(panelSource, /Backup da configuração local/, "painel precisa permitir backup da configuração local");
+assert.match(panelSource, /Registrar instalação no Supabase/, "painel precisa registrar instalação no Supabase");
 
 console.log("✓ Estrutura Electron validada.");

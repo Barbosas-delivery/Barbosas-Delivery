@@ -504,3 +504,16 @@ Versão: `6.0.52-fase-64-finalizacao-profissional`
 - Criado SQL `supabase/migracao-final-producao-6-0-52.sql` para registrar rodadas de validação operacional.
 - Criada documentação `docs/FASE-64-FINALIZACAO-PROFISSIONAL.md`.
 - Service worker, Electron e package atualizados para a versão final da fase 64.
+
+---
+
+## Fase 65 — Atualização do aplicativo Desktop instalado no PC
+
+Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
+
+- Desktop/Electron atualizado para a versão 6.0.53.
+- Adicionada seção **Atualização do app instalado no PC** no painel de impressão local.
+- Painel agora mostra versão instalada, checklist desktop, backup de configuração local e registro da instalação no Supabase.
+- Criada tabela `desktop_installations` e função `register_desktop_installation`.
+- Criados documentos e scripts auxiliares para gerar e instalar o novo Setup Windows.
+- SQL obrigatório: `supabase/migracao-final-producao-6-0-53.sql`.

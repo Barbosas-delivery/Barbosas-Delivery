@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld("barbosasDesktop", {
   requeueFailedPrintJobs: () => ipcRenderer.invoke("desktop:requeue-failed-print-jobs"),
   cleanupPrintedPrintJobs: (daysToKeep) => ipcRenderer.invoke("desktop:cleanup-printed-print-jobs", daysToKeep),
   resetStalePrintJobs: (minutes) => ipcRenderer.invoke("desktop:reset-stale-print-jobs", minutes),
+  getUpdateStatus: () => ipcRenderer.invoke("desktop:get-update-status"),
+  backupConfig: () => ipcRenderer.invoke("desktop:backup-config"),
+  registerInstallation: () => ipcRenderer.invoke("desktop:register-installation"),
   onPrintWorkerLog: (callback) => {
     const listener = (_event, entry) => callback(entry);
     ipcRenderer.on("desktop:print-worker-log", listener);

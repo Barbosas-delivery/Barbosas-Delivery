@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.52-fase-64-finalizacao-profissional";
+export const APP_VERSION = "6.0.53-fase-65-atualizacao-desktop-instalado";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

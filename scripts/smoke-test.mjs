@@ -52,11 +52,12 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.52-fase-64-finalizacao-profissional"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-52-fase-64-finalizacao-profissional-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.53-fase-65-atualizacao-desktop-instalado"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-53-fase-65-atualizacao-desktop-instalado-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
   const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
   const finalizationMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-52.sql", import.meta.url), "utf8");
+  const desktopUpdateMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-53.sql", import.meta.url), "utf8");
   assert.ok(appSource.includes("Barbosa's Lanches") || readFileSync(new URL("../src/constants/initialData.js", import.meta.url), "utf8").includes("Barbosa's Lanches"), "fase 60 deve converter a identidade para lanchonete");
   assert.ok(appSource.includes("Cardápio da lanchonete"), "cadastro deve orientar operação de lanchonete");
   assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
@@ -148,6 +149,8 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("productionReadiness"), "diagnóstico exportado precisa incluir resumo de prontidão");
   assert.match(finalizationMigrationSource, /create table if not exists public\.production_validation_runs/i, "fase 64 precisa registrar validações de produção");
   assert.match(finalizationMigrationSource, /register_production_validation_run/i, "fase 64 precisa ter função para registrar rodada de validação");
+  assert.match(desktopUpdateMigrationSource, /create table if not exists public\.desktop_installations/i, "fase 65 precisa registrar instalações desktop por PC");
+  assert.match(desktopUpdateMigrationSource, /register_desktop_installation/i, "fase 65 precisa ter função para registrar instalação desktop");
 });
 
 test("fluxos principais existem no código", () => {
@@ -219,6 +222,9 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
     "supabase/migracao-final-producao-6-0-52.sql",
+    "supabase/migracao-final-producao-6-0-53.sql",
+    "docs/FASE-65-ATUALIZACAO-DESKTOP-INSTALADO.md",
+    "docs/ATUALIZAR-APP-INSTALADO-PC.md",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "docs/FASE-60-CONVERSAO-LANCHONETE.md",
     "docs/FASE-61-PERSONALIZACAO-LANCHES.md",

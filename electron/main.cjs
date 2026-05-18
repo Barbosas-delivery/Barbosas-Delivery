@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
-const APP_VERSION = "6.0.52-fase-64-finalizacao-profissional";
+const APP_VERSION = "6.0.53-fase-65-atualizacao-desktop-instalado";
 const CONFIG_FILE = "desktop-config.json";
 const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {
@@ -106,6 +106,7 @@ async function writeConfig(config) {
   await fs.mkdir(path.dirname(getConfigPath()), { recursive: true });
   await fs.writeFile(getConfigPath(), JSON.stringify(nextConfig, null, 2), "utf8");
   applyStartupSetting(nextConfig);
+  void registerDesktopInstallation();
   if (nextConfig.autoPrint.enabled) {
     try {
       await startPrintWorker();
@@ -476,6 +477,82 @@ async function upsertPrintWorkerHeartbeat(status = "online") {
   }
 }
 
+function getComputerName() {
+  return process.env.COMPUTERNAME || process.env.HOSTNAME || "computador-da-loja";
+}
+
+function getDesktopInstallChecklist(config = DEFAULT_CONFIG) {
+  return [
+    { id: "version", label: "Versão desktop instalada", ok: APP_VERSION.includes("6.0.53"), detail: APP_VERSION },
+    { id: "supabase", label: "Supabase configurado", ok: Boolean(config.supabaseUrl && config.supabaseAnonKey), detail: config.supabaseUrl ? "URL configurada" : "Configure URL e anon key" },
+    { id: "printer", label: "Impressora selecionada", ok: Boolean(config.printerName) || Boolean(config.silentPrint), detail: config.printerName || "Usando impressora padrão do Windows" },
+    { id: "autoprint", label: "Impressão automática", ok: Boolean(config.autoPrint?.enabled), detail: config.autoPrint?.enabled ? "Ligada" : "Desligada" },
+    { id: "startup", label: "Iniciar com Windows", ok: Boolean(config.startWithWindows), detail: config.startWithWindows ? "Ativado" : "Opcional: ativar no painel" },
+  ];
+}
+
+async function getDesktopUpdateStatus() {
+  const config = await readConfig();
+  const checklist = getDesktopInstallChecklist(config);
+  const okCount = checklist.filter((item) => item.ok).length;
+  return {
+    appVersion: APP_VERSION,
+    packageVersion: app.getVersion(),
+    computerName: getComputerName(),
+    workerId: printWorker.workerId,
+    userDataPath: app.getPath("userData"),
+    configPath: getConfigPath(),
+    installDate: new Date().toISOString(),
+    checklist,
+    readyPercent: Math.round((okCount / checklist.length) * 100),
+  };
+}
+
+async function backupDesktopConfig() {
+  const config = await readConfig();
+  const status = await getDesktopUpdateStatus();
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = path.join(app.getPath("userData"), `backup-config-desktop-${stamp}.json`);
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    status,
+    config,
+  };
+  await fs.writeFile(backupPath, JSON.stringify(payload, null, 2), "utf8");
+  addPrintLog("info", `Backup da configuração desktop criado em ${backupPath}`);
+  return { ok: true, backupPath, appVersion: APP_VERSION };
+}
+
+async function registerDesktopInstallation() {
+  const config = await readConfig();
+  const status = await getDesktopUpdateStatus();
+  try {
+    const result = await supabaseRpc(config, "register_desktop_installation", {
+      p_worker_id: printWorker.workerId,
+      p_computer_name: status.computerName,
+      p_app_version: APP_VERSION,
+      p_package_version: app.getVersion(),
+      p_printer_name: config.printerName || "padrão do sistema",
+      p_auto_print_enabled: Boolean(config.autoPrint?.enabled),
+      p_start_with_windows: Boolean(config.startWithWindows),
+      p_config: {
+        paperWidthMm: config.paperWidthMm,
+        silentPrint: config.silentPrint,
+        copies: config.copies,
+        autoPrint: config.autoPrint,
+        pollIntervalSeconds: config.pollIntervalSeconds,
+      },
+    });
+    addPrintLog("ok", `Instalação desktop registrada no Supabase: ${APP_VERSION}`);
+    return { ok: true, result, status };
+  } catch (error) {
+    const message = error?.message || String(error);
+    addPrintLog("warn", `Não foi possível registrar instalação desktop: ${message}`);
+    return { ok: false, message, status };
+  }
+}
+
 async function fetchPrintCenterData(filters = {}) {
   const config = await readConfig();
   requireSupabaseConfig(config);
@@ -707,6 +784,7 @@ app.whenReady().then(async () => {
   createMainWindow();
   const config = await readConfig();
   applyStartupSetting(config);
+  if (config.supabaseUrl && config.supabaseAnonKey) void registerDesktopInstallation();
   if (config.autoPrint.enabled && config.supabaseUrl && config.supabaseAnonKey) {
     try {
       await startPrintWorker();
@@ -732,6 +810,8 @@ ipcMain.handle("desktop:get-app-info", () => ({
   packageVersion: app.getVersion(),
   userDataPath: app.getPath("userData"),
   isPackaged: app.isPackaged,
+  computerName: getComputerName(),
+  configPath: getConfigPath(),
 }));
 
 ipcMain.handle("desktop:get-config", () => readConfig());
@@ -767,6 +847,9 @@ ipcMain.handle("desktop:cancel-print-job", (_event, jobId) => cancelPrintJob(job
 ipcMain.handle("desktop:requeue-failed-print-jobs", () => requeueFailedPrintJobs());
 ipcMain.handle("desktop:cleanup-printed-print-jobs", (_event, daysToKeep = 7) => cleanupPrintedPrintJobs(daysToKeep));
 ipcMain.handle("desktop:reset-stale-print-jobs", (_event, minutes = 10) => resetStalePrintJobs(minutes));
+ipcMain.handle("desktop:get-update-status", () => getDesktopUpdateStatus());
+ipcMain.handle("desktop:backup-config", () => backupDesktopConfig());
+ipcMain.handle("desktop:register-installation", () => registerDesktopInstallation());
 ipcMain.handle("desktop:validate-supabase", (_event, config) => validateSupabaseConnection(config));
 ipcMain.handle("desktop:get-print-worker-status", () => getPrintWorkerStatus());
 ipcMain.handle("desktop:start-print-worker", () => startPrintWorker());
