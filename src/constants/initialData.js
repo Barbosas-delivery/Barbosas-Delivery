@@ -94,6 +94,13 @@ export const initialProducts = [
       { id: "ovo", name: "Ovo", price: 3, active: true },
       { id: "hamburguer-extra", name: "Hambúrguer extra", price: 8, active: true }
     ],
+    comboChoices: [
+      { id: "ponto-carne", label: "Ponto da carne", required: false, max: 1, options: [{ id: "normal", name: "Normal", price: 0 }, { id: "bem-passado", name: "Bem passado", price: 0 }] }
+    ],
+    sauceLimit: 1,
+    prepMinutes: 25,
+    salesTags: ["Mais vendido", "Recomendado"],
+    suggestedProductIds: ["2"],
     allowItemNotes: true,
     pausedUntil: "",
     pauseReason: "",
@@ -115,6 +122,13 @@ export const initialProducts = [
       { id: "cheddar", name: "Cheddar", price: 4, active: true },
       { id: "bacon", name: "Bacon", price: 5, active: true }
     ],
+    comboChoices: [
+      { id: "molho", label: "Molho", required: false, max: 1, options: [{ id: "maionese-verde", name: "Maionese verde", price: 0 }, { id: "barbecue", name: "Barbecue", price: 0 }, { id: "cheddar-extra", name: "Cheddar extra", price: 2 }] }
+    ],
+    sauceLimit: 1,
+    prepMinutes: 18,
+    salesTags: ["Crocante", "Combina com lanche"],
+    suggestedProductIds: ["1"],
     allowItemNotes: true,
     pausedUntil: "",
     pauseReason: "",

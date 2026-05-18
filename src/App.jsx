@@ -15,6 +15,8 @@ import {
   findProductByBarcodeInSupabase,
   restoreProductInSupabase,
   normalizeProductVariants,
+  normalizeProductComboChoices,
+  normalizeProductSalesTags,
   applyProductStockDeltasInSupabase,
   fetchProductStockFromSupabase,
 } from "./services/supabaseProducts";
@@ -363,7 +365,7 @@ function App() {
   const [customerProductSearch, setCustomerProductSearch] = useState("");
   const [customerCart, setCustomerCart] = useState([]);
   const [customerVariantPicker, setCustomerVariantPicker] = useState({ open: false, product: null, quantities: {} });
-  const [customerItemCustomizer, setCustomerItemCustomizer] = useState({ open: false, product: null, selectedAddons: [], removedIngredients: [], itemNote: "" });
+  const [customerItemCustomizer, setCustomerItemCustomizer] = useState({ open: false, product: null, selectedAddons: [], removedIngredients: [], comboChoices: {}, itemNote: "" });
   const [showCustomerCheckout, setShowCustomerCheckout] = useState(false);
   const [showCustomerNeedMoreMessage, setShowCustomerNeedMoreMessage] = useState(false);
   const [customerPayment, setCustomerPayment] = useState("Pix");
@@ -1262,7 +1264,7 @@ function App() {
   const [counterDraft, setCounterDraft] = useState({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
   const [newCourier, setNewCourier] = useState({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
   const todayInput = getDateInputValue(new Date());
-  const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+  const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
   const [stockAdjustmentDraft, setStockAdjustmentDraft] = useState({ productId: "", mode: "entrada", quantity: "", targetStock: "", reason: "Reposição de estoque" });
   const [productGroups, setProductGroups] = useState(() => normalizeProductGroups(initialProductGroups));
   const [newProductGroup, setNewProductGroup] = useState("");
@@ -2367,7 +2369,7 @@ function App() {
         return setLastAction(`Produto não restaurado no Supabase: ${error.message || "verifique UPDATE em products."}`);
       }
 
-      setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+      setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
       await loadProducts();
       setLastAction(ignoredColumns.length > 0 ? `Produto recadastrado e reativado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto recadastrado: o cadastro excluído foi reativado no Supabase.");
       return;
@@ -2387,7 +2389,7 @@ function App() {
 
     setProductGroups((previousGroups) => mergeProductGroups(previousGroups, [savedProduct]));
     setProducts((previousProducts) => [...previousProducts, savedProduct]);
-    setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+    setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
     await loadProducts();
     setLastAction(ignoredColumns.length > 0 ? `Produto cadastrado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto cadastrado com sucesso no Supabase.");
   }
@@ -2810,6 +2812,7 @@ function App() {
     const type = String(product?.productType || product?.product_type || "").toLowerCase();
     return ["lanche", "porção", "porcao", "combo", "adicional/molho"].some((keyword) => type.includes(keyword))
       || normalizeAddonOptions(product?.defaultAddons).length > 0
+      || normalizeProductComboChoices(product?.comboChoices).length > 0
       || normalizeCustomizationList(product?.removableIngredients).length > 0
       || normalizeCustomizationList(product?.ingredients).length > 0
       || product?.allowItemNotes === true;
@@ -2819,12 +2822,12 @@ function App() {
     setShowCustomerCheckout(false);
     setShowCustomerNeedMoreMessage(false);
     setCustomerOrderConfirmation(null);
-    setCustomerItemCustomizer({ open: true, product, selectedAddons: [], removedIngredients: [], itemNote: "" });
+    setCustomerItemCustomizer({ open: true, product, selectedAddons: [], removedIngredients: [], comboChoices: {}, itemNote: "" });
     setCustomerError("");
   }
 
   function closeCustomerItemCustomizer() {
-    setCustomerItemCustomizer({ open: false, product: null, selectedAddons: [], removedIngredients: [], itemNote: "" });
+    setCustomerItemCustomizer({ open: false, product: null, selectedAddons: [], removedIngredients: [], comboChoices: {}, itemNote: "" });
   }
 
   function toggleCustomerAddon(addon) {
@@ -2851,19 +2854,52 @@ function App() {
     });
   }
 
+
+  function toggleCustomerComboChoice(choice, option) {
+    const choiceId = String(choice.id || choice.label || "");
+    const optionId = String(option.id || option.name || "");
+    setCustomerItemCustomizer((previous) => {
+      const current = Array.isArray(previous.comboChoices?.[choiceId]) ? previous.comboChoices[choiceId] : [];
+      const exists = current.some((item) => String(item.id || item.name) === optionId);
+      const max = Math.max(1, Number(choice.max || 1));
+      const nextForChoice = exists
+        ? current.filter((item) => String(item.id || item.name) !== optionId)
+        : [...(max === 1 ? [] : current).slice(0, Math.max(0, max - 1)), { id: optionId, name: option.name, price: toSafeMoneyNumber(option.price, 0) }];
+      return { ...previous, comboChoices: { ...(previous.comboChoices || {}), [choiceId]: nextForChoice } };
+    });
+  }
+
+  function buildSelectedComboChoices(customizer = {}, product = {}) {
+    const choices = normalizeProductComboChoices(product.comboChoices);
+    const selected = customizer.comboChoices || {};
+    return choices.map((choice) => {
+      const choiceId = String(choice.id || choice.label || "");
+      const options = Array.isArray(selected[choiceId]) ? selected[choiceId] : [];
+      return { id: choiceId, label: choice.label, required: choice.required === true, max: choice.max, options };
+    }).filter((choice) => choice.options.length > 0 || choice.required);
+  }
+
+  function getComboChoicesTotal(comboChoices = []) {
+    return comboChoices.reduce((sum, choice) => sum + (Array.isArray(choice.options) ? choice.options : []).reduce((inner, option) => inner + toSafeMoneyNumber(option.price, 0), 0), 0);
+  }
+
   function buildCustomizedCartItem(product, customizer) {
     const selectedAddons = Array.isArray(customizer.selectedAddons) ? customizer.selectedAddons : [];
     const removedIngredients = Array.isArray(customizer.removedIngredients) ? customizer.removedIngredients : [];
+    const selectedComboChoices = buildSelectedComboChoices(customizer, product);
     const basePrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0));
     const addonsTotal = selectedAddons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0);
+    const comboChoicesTotal = getComboChoicesTotal(selectedComboChoices);
     return {
       id: product.id,
       productId: product.id,
       name: String(product.name || "Produto"),
       productName: String(product.name || "Produto"),
-      price: basePrice + addonsTotal,
+      price: basePrice + addonsTotal + comboChoicesTotal,
       basePrice,
       addonsTotal,
+      comboChoicesTotal,
+      selectedComboChoices,
       originalPrice: toSafeMoneyNumber(product.price, 0),
       promotionId: getProductActivePromotion(product, promotions)?.id || null,
       quantity: 1,
@@ -2881,6 +2917,12 @@ function App() {
     const product = customerItemCustomizer.product;
     if (!product) return closeCustomerItemCustomizer();
     const availableStock = Math.max(0, Number(product.stock || 0));
+    const requiredChoices = normalizeProductComboChoices(product.comboChoices).filter((choice) => choice.required === true);
+    const missingChoice = requiredChoices.find((choice) => !Array.isArray(customerItemCustomizer.comboChoices?.[String(choice.id || choice.label || "")]) || customerItemCustomizer.comboChoices[String(choice.id || choice.label || "")].length === 0);
+    if (missingChoice) {
+      setCustomerError(`Escolha uma opção em ${missingChoice.label}.`);
+      return;
+    }
     const customizedItem = buildCustomizedCartItem(product, customerItemCustomizer);
 
     setCustomerCart((previousCart) => {
@@ -5377,7 +5419,8 @@ function App() {
                                     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-zinc-100 bg-white">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" /> : <div className="h-full w-full bg-white" />}</div>
                                     <div className="min-w-0 flex-1">
                                       <p className="font-black text-base leading-tight break-words">{product.name}</p>
-                                      <p className="text-[11px] text-zinc-500 mt-1">{product.category} • estoque {product.stock}</p>
+                                      <p className="text-[11px] text-zinc-500 mt-1">{product.category} • estoque {product.stock}{Number(product.prepMinutes || 0) > 0 ? ` • preparo ${product.prepMinutes}min` : ""}</p>
+                                      {Array.isArray(product.salesTags) && product.salesTags.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{product.salesTags.map((tag) => <span key={tag} className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-black text-orange-800">{tag}</span>)}</div>}
                                       {shouldCustomizeCustomerProduct(product) && !productHasActiveVariants(product) && <p className="text-[11px] font-bold text-orange-700 mt-1">Personalizar: adicionais, remover ingredientes e observação</p>}
                                       {productHasActiveVariants(product) && <p className="text-[11px] font-bold text-purple-700 mt-1">Escolha os sabores</p>}
                                       {hasProductInCart && (
@@ -5420,10 +5463,13 @@ function App() {
                   {customerItemCustomizer.open && customerItemCustomizer.product && (() => {
                     const product = customerItemCustomizer.product;
                     const addonOptions = normalizeAddonOptions(product.defaultAddons);
+                    const comboChoices = normalizeProductComboChoices(product.comboChoices);
+                    const selectedComboChoices = buildSelectedComboChoices(customerItemCustomizer, product);
+                    const comboChoicesTotal = getComboChoicesTotal(selectedComboChoices);
                     const removableIngredients = normalizeCustomizationList(product.removableIngredients);
                     const ingredients = normalizeCustomizationList(product.ingredients);
                     const selectedAddonsTotal = customerItemCustomizer.selectedAddons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0);
-                    const finalUnitPrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0)) + selectedAddonsTotal;
+                    const finalUnitPrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0)) + selectedAddonsTotal + comboChoicesTotal;
                     return (
                       <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 md:items-center md:p-4">
                         <div className="w-full max-w-lg max-h-[88vh] overflow-auto rounded-[2rem] bg-white text-zinc-950 p-5 space-y-4 shadow-2xl border border-zinc-200">
@@ -5440,6 +5486,35 @@ function App() {
                             <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
                               <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Ingredientes padrão</p>
                               <p className="mt-1 text-sm font-semibold text-zinc-800">{ingredients.join(", ")}</p>
+                            </div>
+                          )}
+
+                          {comboChoices.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Escolhas do combo/porção</p>
+                              <div className="grid gap-3">
+                                {comboChoices.map((choice) => {
+                                  const choiceId = String(choice.id || choice.label || "");
+                                  const selectedOptions = Array.isArray(customerItemCustomizer.comboChoices?.[choiceId]) ? customerItemCustomizer.comboChoices[choiceId] : [];
+                                  return (
+                                    <div key={choiceId} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                                      <p className="text-sm font-black text-zinc-900">{choice.label}{choice.required ? " *" : ""}</p>
+                                      <p className="text-[11px] text-zinc-500">Escolha até {choice.max || 1} opção{Number(choice.max || 1) > 1 ? "ões" : ""}</p>
+                                      <div className="mt-2 grid gap-2">
+                                        {choice.options.map((option) => {
+                                          const checked = selectedOptions.some((current) => String(current.id || current.name) === String(option.id || option.name));
+                                          return (
+                                            <button key={option.id || option.name} type="button" onClick={() => toggleCustomerComboChoice(choice, option)} className={`flex items-center justify-between gap-3 rounded-2xl border p-3 text-left ${checked ? "border-purple-300 bg-purple-50" : "border-zinc-100 bg-white"}`}>
+                                              <span className="font-black text-sm">{checked ? "✓ " : "+ "}{option.name}</span>
+                                              {Number(option.price || 0) > 0 && <span className="text-sm font-black text-purple-700">+ {money(option.price)}</span>}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
 
@@ -5482,6 +5557,7 @@ function App() {
                           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm">
                             <div className="flex items-center justify-between gap-3"><span className="font-bold text-emerald-900">Valor do item</span><span className="font-black text-emerald-800">{money(finalUnitPrice)}</span></div>
                             {selectedAddonsTotal > 0 && <p className="mt-1 text-xs font-semibold text-emerald-800">Inclui adicionais: + {money(selectedAddonsTotal)}</p>}
+                            {comboChoicesTotal > 0 && <p className="mt-1 text-xs font-semibold text-emerald-800">Inclui escolhas do combo: + {money(comboChoicesTotal)}</p>}
                           </div>
 
                           <div className="grid grid-cols-2 gap-2 pt-2">
@@ -5582,6 +5658,7 @@ function App() {
                           <div className="min-w-0 flex-1">
                             <p className="font-black leading-tight text-sm break-words">{item.name}</p>
                             {item.variantName && <p className="mt-0.5 text-xs font-bold text-purple-700">Sabor: {item.variantName}</p>}
+                            {Array.isArray(item.selectedComboChoices) && item.selectedComboChoices.some((choice) => Array.isArray(choice.options) && choice.options.length > 0) && <p className="mt-1 text-xs font-bold text-purple-700">Escolhas: {item.selectedComboChoices.filter((choice) => Array.isArray(choice.options) && choice.options.length > 0).map((choice) => `${choice.label}: ${choice.options.map((option) => `${option.name}${Number(option.price || 0) > 0 ? ` (+${money(option.price)})` : ""}`).join(" / ")}`).join("; ")}</p>}
                             {Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0 && <p className="mt-1 text-xs font-bold text-emerald-700">Adicionais: {item.selectedAddons.map((addon) => `${addon.name}${Number(addon.price || 0) > 0 ? ` (+${money(addon.price)})` : ""}`).join(", ")}</p>}
                             {Array.isArray(item.removedIngredients) && item.removedIngredients.length > 0 && <p className="mt-1 text-xs font-bold text-red-700">Remover: {item.removedIngredients.map((ingredient) => `sem ${ingredient}`).join(", ")}</p>}
                             {item.itemNote && <p className="mt-1 text-xs font-bold text-zinc-700">Obs: {item.itemNote}</p>}

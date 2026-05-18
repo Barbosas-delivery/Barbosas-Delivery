@@ -21,9 +21,11 @@ function normalizePrintItem(item = {}) {
     barcode: normalizeText(item.barcode),
     selectedAddons: Array.isArray(item.selectedAddons) ? item.selectedAddons : [],
     removedIngredients: Array.isArray(item.removedIngredients) ? item.removedIngredients : [],
+    selectedComboChoices: Array.isArray(item.selectedComboChoices) ? item.selectedComboChoices : [],
     itemNote: normalizeText(item.itemNote || item.notes || item.observation),
     basePrice: toSafeMoneyNumber(item.basePrice, unitPrice),
     addonsTotal: toSafeMoneyNumber(item.addonsTotal, 0),
+    comboChoicesTotal: toSafeMoneyNumber(item.comboChoicesTotal, 0),
     isKit: item.isKit === true,
     kitId: item.kitId || null,
   };
@@ -55,7 +57,7 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const createdAt = new Date().toISOString();
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.50",
+    templateVersion: "6.0.51",
     printType,
     source,
     createdAt,
@@ -112,7 +114,7 @@ export function buildPrintJobRowsForOrder(delivery = {}, options = {}) {
       print_type: printType,
       status: PRINT_JOB_STATUS.PENDING,
       payload: buildPrintJobPayload(delivery, printType),
-      template_version: "6.0.50",
+      template_version: "6.0.51",
       receipt_width_mm: 80,
       copies: 1,
       attempts: 0,

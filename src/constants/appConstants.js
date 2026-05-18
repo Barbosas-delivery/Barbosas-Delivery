@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.50-fase-62-impressao-cozinha-otimizada";
+export const APP_VERSION = "6.0.51-fase-63-combos-porcoes-molhos";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

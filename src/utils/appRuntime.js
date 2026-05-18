@@ -967,8 +967,12 @@ function getCustomerCartCustomizationIdentity(item) {
     .filter(Boolean)
     .sort()
     .join("|");
+  const comboIdentity = (Array.isArray(item.selectedComboChoices) ? item.selectedComboChoices : [])
+    .map((choice) => `${String(choice.label || choice.id || "").trim().toLowerCase()}:${(Array.isArray(choice.options) ? choice.options : []).map((option) => `${String(option.name || option.id || "").trim().toLowerCase()}:${Number(option.price || 0)}`).sort().join("/")}`)
+    .sort()
+    .join("|");
   const noteIdentity = String(item.itemNote || item.notes || "").trim().toLowerCase();
-  return [addonIdentity, removedIdentity, noteIdentity].join("::");
+  return [addonIdentity, removedIdentity, comboIdentity, noteIdentity].join("::");
 }
 
 function getCustomerCartLineIdentity(item) {

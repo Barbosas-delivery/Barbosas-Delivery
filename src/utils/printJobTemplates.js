@@ -36,6 +36,11 @@ function normalizeItems(items = []) {
     const quantity = Math.max(1, Number(item.quantity || 1));
     const unitPrice = toSafeMoneyNumber(item.unitPrice ?? item.price, 0);
     const addons = Array.isArray(item.selectedAddons) ? item.selectedAddons.map(normalizeAddon) : [];
+    const comboChoices = Array.isArray(item.selectedComboChoices) ? item.selectedComboChoices.map((choice) => ({
+      id: choice.id || choice.label || "",
+      label: safeText(choice.label || choice.name, "Escolha"),
+      options: (Array.isArray(choice.options) ? choice.options : []).map(normalizeAddon),
+    })).filter((choice) => choice.options.length > 0) : [];
     const addonsTotal = toSafeMoneyNumber(item.addonsTotal, addons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0));
     const basePrice = toSafeMoneyNumber(item.basePrice, Math.max(0, unitPrice - addonsTotal));
     return {
@@ -48,6 +53,7 @@ function normalizeItems(items = []) {
       total: toSafeMoneyNumber(item.total, unitPrice * quantity),
       notes: safeText(item.itemNote || item.notes || item.observation || item.note),
       selectedAddons: addons,
+      selectedComboChoices: comboChoices,
       removedIngredients: Array.isArray(item.removedIngredients) ? item.removedIngredients.map((ingredient) => safeText(ingredient)).filter(Boolean) : [],
       category: safeText(item.category || item.productCategory || item.product_type),
     };
@@ -55,7 +61,7 @@ function normalizeItems(items = []) {
 }
 
 function hasPreparationDetails(item = {}) {
-  return Boolean(item.selectedAddons?.length || item.removedIngredients?.length || item.notes);
+  return Boolean(item.selectedAddons?.length || item.selectedComboChoices?.length || item.removedIngredients?.length || item.notes);
 }
 
 function buildAddonText(addons = [], { showPrices = false } = {}) {
@@ -68,6 +74,7 @@ function buildAddonText(addons = [], { showPrices = false } = {}) {
 function buildItemsText(items = [], { showPrices = false, kitchen = false } = {}) {
   return normalizeItems(items).flatMap((item, index) => compactLines([
     kitchen ? `ITEM ${index + 1} - ${item.quantity}x ${item.name}` : showPrices ? `${item.quantity}x ${item.name} - ${money(item.total)}` : `${item.quantity}x ${item.name}`,
+    item.selectedComboChoices.length > 0 ? `ESCOLHAS: ${item.selectedComboChoices.map((choice) => `${choice.label}: ${buildAddonText(choice.options, { showPrices })}`).join("; ")}` : "",
     item.selectedAddons.length > 0 ? `+ ${buildAddonText(item.selectedAddons, { showPrices })}` : "",
     item.removedIngredients.length > 0 ? `SEM: ${item.removedIngredients.map((ingredient) => ingredient.toUpperCase()).join(", ")}` : "",
     item.notes ? `OBS DO ITEM: ${item.notes}` : "",
@@ -82,6 +89,7 @@ function buildKitchenItemsHtml(items = []) {
         <span class="item-index">ITEM ${index + 1}</span>
         <strong>${escapeHtml(`${item.quantity}x ${item.name}`)}</strong>
       </div>
+      ${item.selectedComboChoices.length > 0 ? `<div class="prep-box choice"><b>ESCOLHAS DO COMBO</b>${item.selectedComboChoices.map((choice) => `<span>${escapeHtml(choice.label)}: ${escapeHtml(buildAddonText(choice.options, { showPrices: false }))}</span>`).join("")}</div>` : ""}
       ${item.selectedAddons.length > 0 ? `<div class="prep-box addon"><b>ADICIONAIS</b>${item.selectedAddons.map((addon) => `<span>+ ${escapeHtml(addon.name)}</span>`).join("")}</div>` : ""}
       ${item.removedIngredients.length > 0 ? `<div class="prep-box remove"><b>REMOVER / SEM</b>${item.removedIngredients.map((ingredient) => `<span>SEM ${escapeHtml(ingredient.toUpperCase())}</span>`).join("")}</div>` : ""}
       ${item.notes ? `<div class="prep-box note"><b>OBS DO ITEM</b><span>${escapeHtml(item.notes)}</span></div>` : ""}
@@ -94,6 +102,7 @@ function buildItemsHtml(items = [], { showPrices = false } = {}) {
   return normalizeItems(items).map((item) => `
     <div class="sale-item">
       <div class="sale-line"><b>${escapeHtml(`${item.quantity}x ${item.name}`)}</b>${showPrices ? `<span>${escapeHtml(money(item.total))}</span>` : ""}</div>
+      ${item.selectedComboChoices.length > 0 ? `<small><b>Escolhas:</b> ${escapeHtml(item.selectedComboChoices.map((choice) => `${choice.label}: ${buildAddonText(choice.options, { showPrices })}`).join("; "))}</small>` : ""}
       ${item.selectedAddons.length > 0 ? `<small><b>Adicionais:</b> ${escapeHtml(buildAddonText(item.selectedAddons, { showPrices }))}</small>` : ""}
       ${item.removedIngredients.length > 0 ? `<small><b>Sem:</b> ${escapeHtml(item.removedIngredients.join(", "))}</small>` : ""}
       ${item.notes ? `<small><b>Obs:</b> ${escapeHtml(item.notes)}</small>` : ""}

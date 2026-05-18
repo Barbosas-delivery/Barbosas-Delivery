@@ -52,10 +52,10 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.50-fase-62-impressao-cozinha-otimizada"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-50-fase-62-impressao-cozinha-otimizada-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.51-fase-63-combos-porcoes-molhos"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-51-fase-63-combos-porcoes-molhos-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-50.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
   assert.ok(appSource.includes("Barbosa's Lanches") || readFileSync(new URL("../src/constants/initialData.js", import.meta.url), "utf8").includes("Barbosa's Lanches"), "fase 60 deve converter a identidade para lanchonete");
   assert.ok(appSource.includes("Cardápio da lanchonete"), "cadastro deve orientar operação de lanchonete");
   assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
@@ -212,7 +212,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-50.sql",
+    "supabase/migracao-final-producao-6-0-51.sql",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "docs/FASE-60-CONVERSAO-LANCHONETE.md",
     "docs/FASE-61-PERSONALIZACAO-LANCHES.md",

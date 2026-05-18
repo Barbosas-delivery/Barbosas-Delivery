@@ -478,3 +478,17 @@ Versão: `6.0.50-fase-62-impressao-cozinha-otimizada`
 - Melhorada a via de balcão para mostrar personalização e valores.
 - Atualizado o payload da fila `print_jobs` para `templateVersion: 6.0.50`.
 - Criado SQL `supabase/migracao-final-producao-6-0-50.sql` com metadados da fila, view operacional e funções auxiliares de reimpressão/limpeza.
+
+---
+
+## Fase 63 — Combos, porções, molhos e sugestões de venda
+
+Versão: `6.0.51-fase-63-combos-porcoes-molhos`
+
+- Adicionado suporte a escolhas de combo/porção no cadastro de produtos.
+- Adicionado limite de molhos grátis, tempo de preparo, selos comerciais e sugestões de venda.
+- Cliente passa a escolher opções de combo/porção na personalização do item.
+- Escolhas obrigatórias são validadas antes de adicionar ao carrinho.
+- Acréscimos das escolhas entram no preço final do item.
+- Carrinho, pedido e impressão passam a carregar `selectedComboChoices`.
+- Criado SQL `supabase/migracao-final-producao-6-0-51.sql` com novas colunas, view e funções auxiliares.

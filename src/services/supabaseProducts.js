@@ -23,6 +23,46 @@ export function normalizeProductListField(value) {
     .filter(Boolean);
 }
 
+export function normalizeProductComboChoices(value) {
+  const parsed = typeof value === "string" ? (() => {
+    try { return JSON.parse(value); } catch {
+      return value.split(/[\n]+/).map((line) => {
+        const [labelPart, optionsPart, requiredPart, maxPart] = String(line || "").split("|");
+        const options = String(optionsPart || "").split(/[;,]+/).map((option) => {
+          const [namePart, pricePart] = option.split("+");
+          return { name: String(namePart || "").trim(), price: Number(pricePart || 0), active: true };
+        }).filter((option) => option.name);
+        return { label: String(labelPart || "").trim(), required: String(requiredPart || "").toLowerCase().includes("obrig"), max: Number(maxPart || 1), options };
+      });
+    }
+  })() : value;
+  return (Array.isArray(parsed) ? parsed : [])
+    .map((choice, index) => ({
+      id: choice.id || `choice-${Date.now()}-${Math.random().toString(36).slice(2)}-${index}`,
+      label: String(choice.label || choice.name || "").trim(),
+      required: choice.required === true,
+      max: Math.max(1, Number(choice.max || choice.maxSelections || 1)),
+      options: (Array.isArray(choice.options) ? choice.options : [])
+        .map((option, optionIndex) => ({
+          id: option.id || `option-${index}-${optionIndex}`,
+          name: String(option.name || option.label || option || "").trim(),
+          price: Number(option.price || option.value || 0),
+          active: option.active !== false,
+        }))
+        .filter((option) => option.name && option.active !== false),
+      active: choice.active !== false,
+    }))
+    .filter((choice) => choice.label && choice.options.length > 0 && choice.active !== false);
+}
+
+export function normalizeProductSalesTags(value) {
+  const parsed = typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return value.split(/[\n,;]+/); } })() : value;
+  return (Array.isArray(parsed) ? parsed : [])
+    .map((item) => String(item?.name || item?.label || item || "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
 export function normalizeProductAddons(value) {
   const parsed = typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return value.split(/[\n,;]+/).map((name) => ({ name })); } })() : value;
   return (Array.isArray(parsed) ? parsed : [])
@@ -55,6 +95,11 @@ export function mapProductFromDatabase(product) {
     removableIngredients: normalizeProductListField(product.removable_ingredients || product.removableIngredients || []),
     defaultAddons: normalizeProductAddons(product.default_addons || product.defaultAddons || []),
     allowItemNotes: product.allow_item_notes !== false,
+    comboChoices: normalizeProductComboChoices(product.combo_choices || product.comboChoices || []),
+    sauceLimit: Number(product.sauce_limit ?? product.sauceLimit ?? 0),
+    prepMinutes: Number(product.prep_minutes ?? product.prepMinutes ?? 0),
+    salesTags: normalizeProductSalesTags(product.sales_tags || product.salesTags || []),
+    suggestedProductIds: normalizeProductListField(product.suggested_product_ids || product.suggestedProductIds || []),
     hasVariants: product.has_variants === true || product.hasVariants === true,
     variants: normalizeProductVariants(product.variants || product.product_variants || []),
     active: isTruthyActive(product.active),
@@ -79,6 +124,11 @@ export function buildProductInsertPayload(newProduct, productId) {
     removable_ingredients: normalizeProductListField(newProduct.removableIngredients),
     default_addons: normalizeProductAddons(newProduct.defaultAddons),
     allow_item_notes: newProduct.allowItemNotes !== false,
+    combo_choices: normalizeProductComboChoices(newProduct.comboChoices),
+    sauce_limit: Number(newProduct.sauceLimit || 0),
+    prep_minutes: Number(newProduct.prepMinutes || 0),
+    sales_tags: normalizeProductSalesTags(newProduct.salesTags),
+    suggested_product_ids: normalizeProductListField(newProduct.suggestedProductIds),
     has_variants: newProduct.hasVariants === true,
     variants: normalizeProductVariants(newProduct.variants),
     paused_until: newProduct.pausedUntil || null,
@@ -103,6 +153,11 @@ export function buildProductPatch(product, options = {}) {
     removable_ingredients: normalizeProductListField(product.removableIngredients),
     default_addons: normalizeProductAddons(product.defaultAddons),
     allow_item_notes: product.allowItemNotes !== false,
+    combo_choices: normalizeProductComboChoices(product.comboChoices),
+    sauce_limit: Number(product.sauceLimit || 0),
+    prep_minutes: Number(product.prepMinutes || 0),
+    sales_tags: normalizeProductSalesTags(product.salesTags),
+    suggested_product_ids: normalizeProductListField(product.suggestedProductIds),
     has_variants: product.hasVariants === true,
     variants: normalizeProductVariants(product.variants),
     paused_until: product.pausedUntil || null,
@@ -207,7 +262,7 @@ export async function applyProductStockDeltasInSupabase(stockDeltas = []) {
   if (error) {
     const rpcMissing = /function|schema cache|apply_product_stock_deltas|could not find/i.test(String(error.message || error));
     const message = rpcMissing
-      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-50.sql antes de operar vendas."
+      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-51.sql antes de operar vendas."
       : (error.message || "Falha ao aplicar movimento de estoque no Supabase.");
     return { error: new Error(message), fallbackUsed: false, data: null };
   }
