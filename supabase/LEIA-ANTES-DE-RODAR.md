@@ -3,7 +3,7 @@
 Use sempre a migração final mais recente deste pacote:
 
 ```txt
-supabase/migracao-final-producao-6-0-43.sql
+supabase/migracao-final-producao-6-0-44.sql
 ```
 
 Ela consolida as tabelas/funções usadas pelo aplicativo web e pelo Electron Desktop.

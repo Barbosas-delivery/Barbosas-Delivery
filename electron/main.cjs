@@ -5,6 +5,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
+const APP_VERSION = "6.0.44-fase-56-instalador-windows";
 const CONFIG_FILE = "desktop-config.json";
 const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {
@@ -25,6 +26,7 @@ const DEFAULT_CONFIG = {
     pdvCounter: true,
   },
   pollIntervalSeconds: 5,
+  startWithWindows: false,
 };
 
 const printWorker = {
@@ -65,6 +67,7 @@ function sanitizeConfig(input = {}) {
       ...(input.autoPrint || {}),
     },
     pollIntervalSeconds: Math.max(3, Number(input.pollIntervalSeconds || DEFAULT_CONFIG.pollIntervalSeconds)),
+    startWithWindows: Boolean(input.startWithWindows),
   };
 }
 
@@ -77,10 +80,32 @@ async function readConfig() {
   }
 }
 
+
+function applyStartupSetting(config) {
+  if (!app.isPackaged && process.platform !== "win32") return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(config.startWithWindows),
+      path: process.execPath,
+    });
+  } catch (error) {
+    addPrintLog("error", `Não foi possível alterar inicialização com Windows: ${error?.message || error}`);
+  }
+}
+
+function getStartupStatus() {
+  try {
+    return app.getLoginItemSettings();
+  } catch {
+    return { openAtLogin: false };
+  }
+}
+
 async function writeConfig(config) {
   const nextConfig = sanitizeConfig(config);
   await fs.mkdir(path.dirname(getConfigPath()), { recursive: true });
   await fs.writeFile(getConfigPath(), JSON.stringify(nextConfig, null, 2), "utf8");
+  applyStartupSetting(nextConfig);
   if (nextConfig.autoPrint.enabled) {
     try {
       await startPrintWorker();
@@ -500,6 +525,7 @@ function getPrintWorkerStatus() {
     printedCount: printWorker.printedCount,
     failedCount: printWorker.failedCount,
     logs: printWorker.logs,
+    startup: getStartupStatus(),
   };
 }
 
@@ -508,6 +534,7 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(buildMenu());
   createMainWindow();
   const config = await readConfig();
+  applyStartupSetting(config);
   if (config.autoPrint.enabled && config.supabaseUrl && config.supabaseAnonKey) {
     try {
       await startPrintWorker();
@@ -528,7 +555,9 @@ app.on("window-all-closed", () => {
 
 ipcMain.handle("desktop:get-app-info", () => ({
   name: APP_NAME,
-  version: app.getVersion(),
+  version: APP_VERSION,
+  electronVersion: process.versions.electron,
+  packageVersion: app.getVersion(),
   userDataPath: app.getPath("userData"),
   isPackaged: app.isPackaged,
 }));

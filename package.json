@@ -1,7 +1,7 @@
 {
   "name": "barbosas-delivery",
   "private": true,
-  "version": "6.0.43",
+  "version": "6.0.44",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,10 @@
     "test": "node scripts/smoke-test.mjs && node scripts/desktop-smoke-test.mjs",
     "desktop": "electron .",
     "desktop:dev": "echo \"Abra outro terminal com npm run dev e rode: BARBOSAS_DESKTOP_DEV_URL=http://localhost:5173 npm run desktop\" && electron .",
-    "desktop:build": "npm run build && electron-builder --win nsis --publish=never"
+    "desktop:build": "npm run desktop:installer",
+    "desktop:pack": "npm run build && electron-builder --dir --publish=never",
+    "desktop:installer": "npm run build && electron-builder --win nsis --publish=never",
+    "desktop:doctor": "node scripts/desktop-smoke-test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
@@ -40,16 +43,24 @@
     "appId": "br.com.barbosas.delivery.desktop",
     "productName": "Barbosa's Delivery Desktop",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "public/favicon.svg",
+      "public/icons.svg"
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "Barbosas-Delivery-Desktop-${version}-Setup.${ext}"
     },
@@ -58,7 +69,18 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "Barbosa’s Delivery Desktop",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "asar": true,
+    "compression": "maximum",
+    "artifactName": "Barbosas-Delivery-Desktop-${version}-Setup.${ext}",
+    "extraMetadata": {
+      "main": "electron/main.cjs"
     }
-  }
+  },
+  "description": "Sistema Barbosa’s Delivery com app web, Electron Desktop e impressão automática local.",
+  "author": "Barbosa’s Delivery"
 }

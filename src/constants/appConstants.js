@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.43-fase-55-consumidor-impressao-automatico";
+export const APP_VERSION = "6.0.44-fase-56-instalador-windows";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

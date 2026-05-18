@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.43-fase-55-consumidor-impressao-automatico"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-43-fase-55-consumidor-impressao-automatico-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.44-fase-56-instalador-windows"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-44-fase-56-instalador-windows-sem-cache/);
 
   const viteConfigSource = readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
   assert.match(viteConfigSource, /base:\s*["']\.\/["']/, "vite.config.js precisa usar base './' para o Electron carregar assets via file://.");
@@ -69,7 +69,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-43.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-44.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -193,7 +193,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-43.sql",
+    "supabase/migracao-final-producao-6-0-44.sql",
     "src/utils/printJobTemplates.js",
     "electron/main.cjs",
     "electron/preload.cjs",

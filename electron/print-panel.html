@@ -34,7 +34,7 @@
   <main>
     <section class="card">
       <h1>Barbosa's Delivery Desktop</h1>
-      <p>Painel local da loja para configurar Supabase, impressora e impressão automática real pela fila <code>print_jobs</code>.</p>
+      <p>Painel local da loja para configurar Supabase, impressora, instalador Windows e impressão automática real pela fila <code>print_jobs</code>.</p>
       <div id="appInfo" class="muted">Carregando informações...</div>
     </section>
 
@@ -81,6 +81,7 @@
       <label class="row"><input id="customerApp" type="checkbox" /> Pedido do app: 1 via cozinha + 1 via entrega</label>
       <label class="row"><input id="pdvDelivery" type="checkbox" /> PDV Entregas: 1 via cozinha + 1 via entrega</label>
       <label class="row"><input id="pdvCounter" type="checkbox" /> PDV Balcão: 1 via balcão</label>
+      <label class="row"><input id="startWithWindows" type="checkbox" /> Iniciar Barbosa’s Delivery Desktop junto com o Windows</label>
       <label>Intervalo de busca da fila
         <input id="pollIntervalSeconds" type="number" min="3" step="1" />
       </label>
@@ -120,6 +121,7 @@
       pdvDelivery: document.querySelector("#pdvDelivery"),
       pdvCounter: document.querySelector("#pdvCounter"),
       pollIntervalSeconds: document.querySelector("#pollIntervalSeconds"),
+      startWithWindows: document.querySelector("#startWithWindows"),
       workerRunning: document.querySelector("#workerRunning"),
       workerProcessing: document.querySelector("#workerProcessing"),
       workerCounts: document.querySelector("#workerCounts"),
@@ -146,6 +148,7 @@
           pdvCounter: fields.pdvCounter.checked,
         },
         pollIntervalSeconds: Number(fields.pollIntervalSeconds.value || 5),
+        startWithWindows: fields.startWithWindows.checked,
       };
     }
 
@@ -174,6 +177,7 @@
       fields.pdvDelivery.checked = config.autoPrint?.pdvDelivery !== false;
       fields.pdvCounter.checked = config.autoPrint?.pdvCounter !== false;
       fields.pollIntervalSeconds.value = String(config.pollIntervalSeconds || 5);
+      fields.startWithWindows.checked = Boolean(config.startWithWindows);
       await loadPrinters(config.printerName || "");
       await refreshWorkerStatus();
     }
@@ -206,7 +210,7 @@
       fields.workerRunning.className = `pill ${status.running ? "on" : "off"}`;
       fields.workerProcessing.textContent = status.processing ? "Imprimindo/processando" : "Aguardando fila";
       fields.workerCounts.textContent = `${status.printedCount || 0} impressos • ${status.failedCount || 0} falhas`;
-      fields.workerDetails.textContent = `Worker: ${status.workerId} • Última busca: ${status.lastRunAt || "nunca"}${status.lastError ? ` • Erro: ${status.lastError}` : ""}`;
+      fields.workerDetails.textContent = `Worker: ${status.workerId} • Última busca: ${status.lastRunAt || "nunca"} • Iniciar com Windows: ${status.startup?.openAtLogin ? "sim" : "não"}${status.lastError ? ` • Erro: ${status.lastError}` : ""}`;
       if (Array.isArray(status.logs) && status.logs.length) {
         fields.result.textContent = status.logs.map((log) => `[${new Date(log.at).toLocaleTimeString("pt-BR")}] ${log.level.toUpperCase()} - ${log.message}`).join("\n");
       }

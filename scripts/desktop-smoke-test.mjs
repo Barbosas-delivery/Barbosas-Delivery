@@ -20,8 +20,12 @@ const panelSource = readFileSync("electron/print-panel.html", "utf8");
 assert.equal(packageJson.main, "electron/main.cjs", "package.json precisa apontar o entrypoint desktop");
 assert.ok(packageJson.scripts.desktop, "script npm run desktop precisa existir");
 assert.ok(packageJson.scripts["desktop:build"], "script npm run desktop:build precisa existir");
+assert.ok(packageJson.scripts["desktop:installer"], "script npm run desktop:installer precisa existir");
+assert.ok(packageJson.scripts["desktop:pack"], "script npm run desktop:pack precisa existir");
 assert.ok(packageJson.devDependencies.electron, "Electron precisa estar nas devDependencies");
 assert.ok(packageJson.devDependencies["electron-builder"], "electron-builder precisa estar preparado para gerar instalador");
+assert.equal(packageJson.build?.productName, "Barbosa's Delivery Desktop", "instalador precisa ter nome do produto");
+assert.match(JSON.stringify(packageJson.build || {}), /Barbosas-Delivery-Desktop-\$\{version\}-Setup/, "instalador precisa gerar Setup identificável");
 
 assert.match(mainSource, /BrowserWindow/, "main precisa criar janelas Electron");
 assert.match(mainSource, /getPrintersAsync/, "Electron precisa listar impressoras locais");
@@ -34,6 +38,8 @@ assert.match(mainSource, /setInterval\(\(\) => \{\n    void processPrintJobsOnce
 assert.match(mainSource, /p_sources/, "Electron precisa respeitar fontes de impressão habilitadas");
 assert.match(mainSource, /getJobCopies/, "Electron precisa respeitar a quantidade de vias por tipo de cupom");
 assert.match(mainSource, /desktop-config\.json/, "configurações locais precisam ficar salvas no computador");
+assert.match(mainSource, /setLoginItemSettings/, "Electron precisa permitir iniciar com Windows");
+assert.match(mainSource, /APP_VERSION = "6\.0\.44-fase-56-instalador-windows"/, "Electron precisa expor a versão da Fase 56");
 assert.match(mainSource, /contextIsolation:\s*true/, "janela Electron precisa manter contextIsolation ativo");
 assert.match(mainSource, /nodeIntegration:\s*false/, "janela Electron não deve expor Node diretamente ao app web");
 assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("barbosasDesktop"/, "preload precisa expor bridge segura");
@@ -44,5 +50,6 @@ assert.match(panelSource, /PDV Entregas: 1 via cozinha \+ 1 via entrega/, "paine
 assert.match(panelSource, /PDV Balcão: 1 via balcão/, "painel precisa refletir regra do PDV Balcão");
 assert.match(panelSource, /Ativar impressão automática neste computador/, "painel precisa permitir ligar impressão automática real");
 assert.match(panelSource, /Processar fila agora/, "painel precisa permitir processar a fila manualmente");
+assert.match(panelSource, /Iniciar Barbosa’s Delivery Desktop junto com o Windows/, "painel precisa controlar inicialização com Windows");
 
 console.log("✓ Estrutura Electron validada.");

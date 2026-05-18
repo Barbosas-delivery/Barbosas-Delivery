@@ -402,3 +402,15 @@ Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
 - Falhas de impressão são registradas com `mark_print_job_failed`.
 - Painel local ganhou iniciar/parar automático, processar fila agora, logs e status.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.
+
+
+## Fase 56 — Instalador Windows
+
+Versão: `6.0.44-fase-56-instalador-windows`
+
+- Preparado empacotamento Windows com `electron-builder` e NSIS.
+- Adicionados scripts `desktop:pack` e `desktop:installer`.
+- `desktop:build` agora aponta para a geração do instalador.
+- Painel desktop ganhou opção para iniciar com o Windows.
+- Configuração local permanece em `desktop-config.json`, preservada entre atualizações.
+- Documentação criada em `docs/FASE-56-INSTALADOR-WINDOWS.md` e `docs/INSTALACAO-DESKTOP-WINDOWS.md`.

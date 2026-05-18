@@ -35,7 +35,7 @@ A Fase 30 adicionou a aba **Diagnóstico** para conferir ambiente, Supabase, PWA
 
 ## Versão atual
 
-`6.0.43-fase-55-consumidor-impressao-automatico`
+`6.0.44-fase-56-instalador-windows`
 
 ## Revisão final
 
@@ -170,7 +170,7 @@ Versão: `6.0.40-fase-53-modelos-cupom-impressao`
 
 ## Fase 54 — Aplicativo Electron básico
 
-Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
+Versão: `6.0.44-fase-56-instalador-windows`
 
 - Criada a base do aplicativo desktop instalado no computador da loja.
 - O Electron carrega o app web e adiciona um painel local de impressão.
@@ -181,7 +181,7 @@ Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
 
 ## Fase 55 — Consumidor automático de impressão
 
-Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
+Versão: `6.0.44-fase-56-instalador-windows`
 
 - O Electron Desktop agora busca `print_jobs` pendentes no Supabase.
 - Ao imprimir, marca o job como `printed`.
@@ -189,3 +189,25 @@ Versão: `6.0.43-fase-55-consumidor-impressao-automatico`
 - Painel local permite iniciar/parar automático, processar fila manualmente e acompanhar logs.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-43.sql`.
 - Documentação: `docs/FASE-55-CONSUMIDOR-IMPRESSAO-AUTOMATICO.md`.
+
+
+## Fase 56 — Instalador Windows
+
+Versão: `6.0.44-fase-56-instalador-windows`
+
+Comandos principais do desktop:
+
+```bash
+pnpm run build
+pnpm run desktop
+pnpm run desktop:pack
+pnpm run desktop:installer
+```
+
+O instalador Windows é gerado em `release/` com nome no padrão:
+
+```txt
+Barbosas-Delivery-Desktop-6.0.44-Setup.exe
+```
+
+A Fase 56 não exige alteração nova de schema. A migração `supabase/migracao-final-producao-6-0-44.sql` mantém a estrutura final da fila de impressão.
