@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.53-fase-65-atualizacao-desktop-instalado"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-53-fase-65-atualizacao-desktop-instalado-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.54-fase-66-lanchonete-pro-comandas-pdv"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-54-fase-66-lanchonete-pro-comandas-pdv-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
   const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
   const finalizationMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-52.sql", import.meta.url), "utf8");
@@ -63,10 +63,10 @@ test("versão final consistente", () => {
   assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
   assert.ok(stockServiceSource.includes("product_type"), "produtos precisam estar preparados para tipo de cardápio de lanchonete");
   assert.match(stockMigrationSource, /create table if not exists public\.menu_addons/i, "migração precisa preparar adicionais globais para lanchonete");
-  assert.match(stockMigrationSource, /alter table public\.products add column if not exists removable_ingredients/i, "migração precisa preparar ingredientes removíveis por produto");
-  assert.match(stockMigrationSource, /alter table public\.order_items add column if not exists selected_addons/i, "migração precisa salvar adicionais escolhidos por item");
-  assert.match(stockMigrationSource, /alter table public\.order_items add column if not exists removed_ingredients/i, "migração precisa salvar ingredientes removidos por item");
-  assert.match(stockMigrationSource, /alter table public\.order_items add column if not exists item_note/i, "migração precisa salvar observação por item");
+  const lanchoneteProMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-54.sql", import.meta.url), "utf8");
+  assert.match(lanchoneteProMigrationSource, /create table if not exists public\.category_addons/i, "fase 66 precisa criar adicionais por categoria");
+  assert.match(lanchoneteProMigrationSource, /alter table if exists public\.tab_accounts/i, "fase 66 precisa preparar comandas integradas");
+  assert.match(lanchoneteProMigrationSource, /stock_controlled/i, "fase 66 precisa separar lanches sem estoque de bebidas com estoque");
   assert.ok(appSource.includes("Personalize seu lanche"), "cliente precisa ter modal de personalização de lanche");
   assert.ok(appSource.includes("selectedAddons") && appSource.includes("removedIngredients") && appSource.includes("itemNote"), "carrinho precisa carregar adicionais, removidos e observação por item");
 
@@ -222,8 +222,8 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
     "supabase/migracao-final-producao-6-0-52.sql",
-    "supabase/migracao-final-producao-6-0-53.sql",
-    "docs/FASE-65-ATUALIZACAO-DESKTOP-INSTALADO.md",
+    "supabase/migracao-final-producao-6-0-54.sql",
+    "docs/FASE-66-LANCHONETE-PRO-COMANDAS-PDV.md",
     "docs/ATUALIZAR-APP-INSTALADO-PC.md",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "docs/FASE-60-CONVERSAO-LANCHONETE.md",

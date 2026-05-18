@@ -75,11 +75,23 @@ export function normalizeProductAddons(value) {
     .filter((addon) => addon.name);
 }
 
+
+export function inferProductStockControlled(product = {}) {
+  if (product.stock_controlled !== undefined && product.stock_controlled !== null) return product.stock_controlled === true;
+  if (product.stockControlled !== undefined && product.stockControlled !== null) return product.stockControlled === true;
+  const type = String(product.product_type || product.productType || product.category || "").toLowerCase();
+  if (/(lanche|hamb[uú]rguer|hamburguer|por[cç][aã]o|combo)/.test(type)) return false;
+  if (/(bebida|refrigerante|suco|[áa]gua|sobremesa|produto)/.test(type)) return true;
+  return false;
+}
+
 export function mapProductFromDatabase(product) {
   return {
     id: product.id,
     name: product.name,
     category: product.category || "",
+    description: product.description || "",
+    stockControlled: inferProductStockControlled(product),
     price: Number(product.price || 0),
     cost: Number(product.cost || 0),
     stock: Number(product.stock || 0),
@@ -112,6 +124,8 @@ export function buildProductInsertPayload(newProduct, productId) {
     id: productId,
     name: String(newProduct.name || "").trim(),
     category: newProduct.category,
+    description: String(newProduct.description || "").trim(),
+    stock_controlled: inferProductStockControlled(newProduct),
     price: toNonNegativeNumber(newProduct.price, 0),
     cost: toNonNegativeNumber(newProduct.cost, 0),
     stock: toNonNegativeNumber(newProduct.stock, 0),
@@ -120,9 +134,9 @@ export function buildProductInsertPayload(newProduct, productId) {
     expiration_date: newProduct.expirationDate || null,
     image_url: newProduct.imageUrl || "",
     product_type: newProduct.productType || "produto",
-    ingredients: normalizeProductListField(newProduct.ingredients),
-    removable_ingredients: normalizeProductListField(newProduct.removableIngredients),
-    default_addons: normalizeProductAddons(newProduct.defaultAddons),
+    ingredients: [],
+    removable_ingredients: [],
+    default_addons: [],
     allow_item_notes: newProduct.allowItemNotes !== false,
     combo_choices: normalizeProductComboChoices(newProduct.comboChoices),
     sauce_limit: Number(newProduct.sauceLimit || 0),
@@ -142,6 +156,8 @@ export function buildProductPatch(product, options = {}) {
   const patch = {
     name: String(product.name || "").trim(),
     category: product.category,
+    description: String(product.description || "").trim(),
+    stock_controlled: inferProductStockControlled(product),
     price: Number(product.price || 0),
     cost: Number(product.cost || 0),
     min_stock: Number(product.minStock || 0),
@@ -149,9 +165,9 @@ export function buildProductPatch(product, options = {}) {
     expiration_date: product.expirationDate || null,
     image_url: product.imageUrl || "",
     product_type: product.productType || "produto",
-    ingredients: normalizeProductListField(product.ingredients),
-    removable_ingredients: normalizeProductListField(product.removableIngredients),
-    default_addons: normalizeProductAddons(product.defaultAddons),
+    ingredients: [],
+    removable_ingredients: [],
+    default_addons: [],
     allow_item_notes: product.allowItemNotes !== false,
     combo_choices: normalizeProductComboChoices(product.comboChoices),
     sauce_limit: Number(product.sauceLimit || 0),

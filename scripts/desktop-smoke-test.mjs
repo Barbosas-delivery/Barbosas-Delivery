@@ -45,7 +45,7 @@ assert.match(mainSource, /upsertPrintWorkerHeartbeat/, "Electron precisa atualiz
 assert.match(mainSource, /registerDesktopInstallation/, "Electron precisa registrar instalação desktop no Supabase");
 assert.match(mainSource, /backupDesktopConfig/, "Electron precisa gerar backup da configuração local");
 assert.match(mainSource, /getDesktopUpdateStatus/, "Electron precisa expor checklist de atualização instalada");
-assert.match(mainSource, /APP_VERSION = "6\.0\.53-fase-65-atualizacao-desktop-instalado"/, "Electron precisa expor a versão da Fase 65");
+assert.match(mainSource, /APP_VERSION = "6\.0\.54-fase-66-lanchonete-pro-comandas-pdv"/, "Electron precisa expor a versão da Fase 66");
 assert.match(mainSource, /contextIsolation:\s*true/, "janela Electron precisa manter contextIsolation ativo");
 assert.match(mainSource, /nodeIntegration:\s*false/, "janela Electron não deve expor Node diretamente ao app web");
 assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("barbosasDesktop"/, "preload precisa expor bridge segura");

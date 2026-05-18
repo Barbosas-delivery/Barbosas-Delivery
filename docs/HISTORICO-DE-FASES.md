@@ -517,3 +517,17 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Criada tabela `desktop_installations` e função `register_desktop_installation`.
 - Criados documentos e scripts auxiliares para gerar e instalar o novo Setup Windows.
 - SQL obrigatório: `supabase/migracao-final-producao-6-0-53.sql`.
+
+## Fase 66 — 6.0.54 — Lanchonete Pro, adicionais por categoria e comandas no PDV
+
+- Cadastro de lanches simplificado.
+- Adicionais movidos para configuração por categoria.
+- Remoção prática dos campos de adicionais sugeridos e ingredientes removíveis estruturados no fluxo principal.
+- Cliente não vê estoque de lanches, porções e combos.
+- Lanches, porções e combos sem controle de estoque por padrão.
+- Kits reposicionados como Combos na interface.
+- Comandas integradas ao PDV Balcão.
+- Comanda numerada de 1 a 100, com mesa e responsável obrigatório.
+- Adição posterior de itens na comanda com impressão dos novos itens.
+- Impressão de consumo completo da comanda.
+- Fechamento da comanda como venda normal.

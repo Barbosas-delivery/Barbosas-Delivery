@@ -115,6 +115,7 @@ import {
   syncOrderItemsWithProducts,
   reduceProductStock,
   restoreProductStock,
+  isStockControlledProduct,
 } from "./utils/stock";
 import {
   calculatePromotionFromPercent,
@@ -435,6 +436,8 @@ function App() {
   }, [dismissedCustomerOrderIds]);
 
   const [products, setProducts] = useState([]);
+  const [categoryAddons, setCategoryAddons] = useState([]);
+  const [categoryAddonDraft, setCategoryAddonDraft] = useState({ categoryName: initialProductGroups[0] || "Lanches", name: "", price: "" });
   const [promotions, setPromotions] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [kits, setKits] = useState([]);
@@ -462,6 +465,58 @@ function App() {
     setProducts(formattedProducts);
     setProductGroups((previousGroups) => mergeProductGroups(previousGroups, formattedProducts));
     if (!silent) setLastAction("Produtos carregados do Supabase.");
+  }
+
+
+  function normalizeCategoryAddon(row = {}) {
+    return {
+      id: row.id || `addon-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      categoryName: row.category_name || row.categoryName || "",
+      name: row.name || "Adicional",
+      price: toSafeMoneyNumber(row.price, 0),
+      active: row.active !== false,
+      sortOrder: Number(row.sort_order ?? row.sortOrder ?? 0),
+    };
+  }
+
+  async function loadCategoryAddons(options = {}) {
+    const silent = options?.silent === true;
+    const { data, error } = await supabase.from("category_addons").select("*").order("category_name", { ascending: true }).order("sort_order", { ascending: true }).order("name", { ascending: true });
+    if (error) {
+      if (!silent) console.warn("Adicionais por categoria ainda não carregados:", error);
+      setCategoryAddons([]);
+      return;
+    }
+    setCategoryAddons((Array.isArray(data) ? data : []).map(normalizeCategoryAddon));
+  }
+
+  function getCategoryAddons(categoryName) {
+    const normalized = normalizeGroupName(categoryName);
+    return categoryAddons.filter((addon) => addon.active !== false && normalizeGroupName(addon.categoryName) === normalized);
+  }
+
+  async function addCategoryAddon() {
+    const categoryName = normalizeGroupName(categoryAddonDraft.categoryName);
+    const name = String(categoryAddonDraft.name || "").trim();
+    if (!categoryName || !name) return setLastAction("Informe a categoria e o nome do adicional.");
+    const payload = { category_name: categoryName, name, price: toSafeMoneyNumber(categoryAddonDraft.price, 0), active: true, sort_order: categoryAddons.filter((addon) => normalizeGroupName(addon.categoryName) === categoryName).length + 1 };
+    const { error } = await supabase.from("category_addons").insert(payload);
+    if (error) return setLastAction(`Adicional não salvo: ${error.message || "rode o SQL da fase 66."}`);
+    setCategoryAddonDraft({ categoryName, name: "", price: "" });
+    await loadCategoryAddons({ silent: true });
+    setLastAction("Adicional por categoria cadastrado.");
+  }
+
+  async function toggleCategoryAddon(addon) {
+    const { error } = await supabase.from("category_addons").update({ active: addon.active === false }).eq("id", addon.id);
+    if (error) return setLastAction(`Não foi possível alterar o adicional: ${error.message || "verifique o SQL."}`);
+    await loadCategoryAddons({ silent: true });
+  }
+
+  async function removeCategoryAddon(addon) {
+    const { error } = await supabase.from("category_addons").update({ active: false }).eq("id", addon.id);
+    if (error) return setLastAction(`Não foi possível remover o adicional: ${error.message || "verifique o SQL."}`);
+    await loadCategoryAddons({ silent: true });
   }
 
   async function loadClients() {
@@ -1188,13 +1243,14 @@ function App() {
     let isMounted = true;
 
     loadProducts();
+    loadCategoryAddons();
     loadClients();
     loadCouriers();
     loadPromotions();
     loadCoupons();
     loadKits();
     loadDeliveries();
-    // Fase 60: Fiados/Comandas removidos da operação da lanchonete.
+    // Fase 60: Comandas/Comandas removidos da operação da lanchonete.
     loadCashData();
     loadOrderPayments();
     loadNotifications();
@@ -1211,6 +1267,7 @@ function App() {
     const refreshCatalog = () => {
       if (!isMounted) return;
       loadProducts({ silent: true });
+      loadCategoryAddons({ silent: true });
       loadPromotions();
       loadCoupons();
       loadKits();
@@ -1228,6 +1285,7 @@ function App() {
     const productsClientsChannel = supabase
       .channel("products-clients-sync")
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => { if (isMounted) loadProducts({ silent: true }); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "category_addons" }, () => { if (isMounted) loadCategoryAddons({ silent: true }); })
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => { if (isMounted) loadClients(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "couriers" }, () => { if (isMounted) loadCouriers(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "promotions" }, () => { if (isMounted) loadPromotions(); })
@@ -1264,7 +1322,7 @@ function App() {
   const [counterDraft, setCounterDraft] = useState({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
   const [newCourier, setNewCourier] = useState({ name: "", username: "", password: generateStrongPassword(), motorcycleType: "Moto própria" });
   const todayInput = getDateInputValue(new Date());
-  const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+  const [newProduct, setNewProduct] = useState({ name: "", category: initialProductGroups[0], productType: "lanche", description: "", stockControlled: false, comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "0", minStock: "0", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
   const [stockAdjustmentDraft, setStockAdjustmentDraft] = useState({ productId: "", mode: "entrada", quantity: "", targetStock: "", reason: "Reposição de estoque" });
   const [productGroups, setProductGroups] = useState(() => normalizeProductGroups(initialProductGroups));
   const [newProductGroup, setNewProductGroup] = useState("");
@@ -1309,7 +1367,9 @@ function App() {
   const [closingCashCounted, setClosingCashCounted] = useState("");
   const [tabsAccounts, setTabsAccounts] = useState([]);
   const [tabCreditLimits, setTabCreditLimits] = useState({});
-  const [tabDraft, setTabDraft] = useState({ customerName: "", phone: "", creditLimit: DEFAULT_TAB_CREDIT_LIMIT });
+  const [tabDraft, setTabDraft] = useState({ tabNumber: "", tableNumber: "", responsibleName: "", phone: "", notes: "" });
+  const [tabFromCounterDraft, setTabFromCounterDraft] = useState({ tabNumber: "", tableNumber: "", responsibleName: "", phone: "", notes: "" });
+  const [selectedOpenTabForCounter, setSelectedOpenTabForCounter] = useState("");
   const [tabProductSearch, setTabProductSearch] = useState("");
   const [tabProductSearchByTab, setTabProductSearchByTab] = useState({});
   const [tabLimitDrafts, setTabLimitDrafts] = useState({});
@@ -2210,7 +2270,7 @@ function App() {
     const finalPrice = newKit.price === "" ? baseTotal : Number(newKit.price || 0);
     const kitToSave = { id: makeUniqueNumericId(), name: newKit.name.trim(), description: newKit.description.trim(), items: newKit.items, price: finalPrice, endDate: newKit.endDate, active: true };
     const { error: kitError } = await insertWithSchemaRetry("kits", { id: kitToSave.id, name: kitToSave.name, description: kitToSave.description, price: kitToSave.price, end_date: kitToSave.endDate || null, active: true }, false);
-    if (kitError) return setLastAction(`Kit não salvo no Supabase: ${kitError.message || "verifique kits."}`);
+    if (kitError) return setLastAction(`Combo não salvo no Supabase: ${kitError.message || "verifique kits."}`);
     const { error: kitItemsError } = await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: makeUniqueNumericId(), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
     if (kitItemsError) {
       const { error: cleanupError } = await supabase.from("kits").delete().eq("id", kitToSave.id);
@@ -2268,14 +2328,14 @@ function App() {
   async function saveKitEdits(id) {
     const kit = kits.find((item) => item.id === id);
     if (!kit) return;
-    if (!kit.name.trim()) return setLastAction("Kit não salvo: informe o nome.");
-    if (!kit.items || kit.items.length === 0) return setLastAction("Kit não salvo: adicione produtos cadastrados.");
+    if (!kit.name.trim()) return setLastAction("Combo não salvo: informe o nome.");
+    if (!kit.items || kit.items.length === 0) return setLastAction("Combo não salvo: adicione produtos cadastrados.");
 
     const normalizedItems = (kit.items || [])
       .map((item) => ({ productId: Number(item.productId), quantity: Math.max(1, Number(item.quantity || 1)) }))
       .filter((item) => Number.isFinite(item.productId) && item.productId > 0);
 
-    if (normalizedItems.length === 0) return setLastAction("Kit não salvo: os produtos vinculados não foram encontrados.");
+    if (normalizedItems.length === 0) return setLastAction("Combo não salvo: os produtos vinculados não foram encontrados.");
 
     const { error: kitError } = await updateWithSchemaRetry("kits", id, {
       name: kit.name.trim(),
@@ -2287,7 +2347,7 @@ function App() {
 
     if (kitError) {
       console.error("Erro ao salvar kit no Supabase:", kitError);
-      return setLastAction(`Kit não salvo no Supabase: ${kitError.message || "verifique UPDATE em kits."}`);
+      return setLastAction(`Combo não salvo no Supabase: ${kitError.message || "verifique UPDATE em kits."}`);
     }
 
     const { data: replaceItemsResult, error: replaceItemsError } = await supabase.rpc("replace_kit_items", {
@@ -2298,7 +2358,7 @@ function App() {
     if (replaceItemsError || replaceItemsResult?.success === false) {
       const reason = replaceItemsError?.message || replaceItemsResult?.error || "verifique a função replace_kit_items";
       console.error("Erro ao substituir itens do kit de forma transacional:", replaceItemsError || replaceItemsResult);
-      return setLastAction(`Kit salvo parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-36.sql.`);
+      return setLastAction(`Combo salvo parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-36.sql.`);
     }
 
     setKits((previousKits) => previousKits.map((item) => (item.id === id ? { ...kit, items: normalizedItems } : item)));
@@ -2341,8 +2401,8 @@ function App() {
   }
 
   async function addProduct() {
-    const barcode = normalizeBarcode(newProduct.barcode);
-    if (!newProduct.name || !newProduct.price || !barcode) return setLastAction("Produto não salvo: nome, preço e código de barras são obrigatórios.");
+    const barcode = normalizeBarcode(newProduct.barcode) || `BD-${Date.now()}`;
+    if (!newProduct.name || !newProduct.price) return setLastAction("Produto não salvo: nome e preço são obrigatórios.");
     if (!normalizeGroupName(newProduct.category)) return setLastAction("Selecione um grupo para o produto.");
     if (hasDuplicateBarcode(products, barcode)) return setLastAction("Código de barras já cadastrado em outro produto ativo.");
     const cleanVariants = normalizeProductVariants(newProduct.variants);
@@ -2369,7 +2429,7 @@ function App() {
         return setLastAction(`Produto não restaurado no Supabase: ${error.message || "verifique UPDATE em products."}`);
       }
 
-      setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+      setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", description: "", stockControlled: false, comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "0", minStock: "0", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
       await loadProducts();
       setLastAction(ignoredColumns.length > 0 ? `Produto recadastrado e reativado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto recadastrado: o cadastro excluído foi reativado no Supabase.");
       return;
@@ -2389,7 +2449,7 @@ function App() {
 
     setProductGroups((previousGroups) => mergeProductGroups(previousGroups, [savedProduct]));
     setProducts((previousProducts) => [...previousProducts, savedProduct]);
-    setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", ingredients: "", removableIngredients: "", defaultAddons: "", comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "", minStock: "", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
+    setNewProduct({ name: "", category: productGroups[0] || "", productType: "lanche", description: "", stockControlled: false, comboChoices: "", sauceLimit: "", prepMinutes: "", salesTags: "", suggestedProductIds: "", allowItemNotes: true, price: "", cost: "", stock: "0", minStock: "0", barcode: "", imageUrl: "", hasVariants: false, variants: [] });
     await loadProducts();
     setLastAction(ignoredColumns.length > 0 ? `Produto cadastrado no Supabase. Colunas ignoradas: ${ignoredColumns.join(", ")}.` : "Produto cadastrado com sucesso no Supabase.");
   }
@@ -2811,10 +2871,8 @@ function App() {
   function shouldCustomizeCustomerProduct(product) {
     const type = String(product?.productType || product?.product_type || "").toLowerCase();
     return ["lanche", "porção", "porcao", "combo", "adicional/molho"].some((keyword) => type.includes(keyword))
-      || normalizeAddonOptions(product?.defaultAddons).length > 0
+      || getCategoryAddons(product?.category).length > 0
       || normalizeProductComboChoices(product?.comboChoices).length > 0
-      || normalizeCustomizationList(product?.removableIngredients).length > 0
-      || normalizeCustomizationList(product?.ingredients).length > 0
       || product?.allowItemNotes === true;
   }
 
@@ -2885,7 +2943,7 @@ function App() {
 
   function buildCustomizedCartItem(product, customizer) {
     const selectedAddons = Array.isArray(customizer.selectedAddons) ? customizer.selectedAddons : [];
-    const removedIngredients = Array.isArray(customizer.removedIngredients) ? customizer.removedIngredients : [];
+    const removedIngredients = [];
     const selectedComboChoices = buildSelectedComboChoices(customizer, product);
     const basePrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0));
     const addonsTotal = selectedAddons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0);
@@ -2931,7 +2989,7 @@ function App() {
         .filter((item) => item.isKit !== true && Number(item.id) === Number(product.id))
         .reduce((sum, item) => sum + toPositiveInteger(item.quantity, 1), 0);
 
-      if (existingQuantity + 1 > availableStock) {
+      if (isStockControlledProduct(product) && existingQuantity + 1 > availableStock) {
         setCustomerError(`Estoque insuficiente para ${product.name || "produto"}. Disponível: ${availableStock}.`);
         return currentCart;
       }
@@ -2961,7 +3019,7 @@ function App() {
     }
 
     const availableStock = Math.max(0, Number(product.stock || 0));
-    if (availableStock <= 0) {
+    if (isStockControlledProduct(product) && availableStock <= 0) {
       setCustomerError(`${product.name || "Produto"} está sem estoque.`);
       return;
     }
@@ -2983,7 +3041,7 @@ function App() {
         .filter((item) => item.isKit !== true && Number(item.id) === Number(productId))
         .reduce((sum, item) => sum + toPositiveInteger(item.quantity, 1), 0);
 
-      if (existingQuantity + 1 > availableStock) {
+      if (isStockControlledProduct(product) && existingQuantity + 1 > availableStock) {
         setCustomerError(`Estoque insuficiente para ${product.name || "produto"}. Disponível: ${availableStock}.`);
         return currentCart;
       }
@@ -4540,7 +4598,7 @@ function App() {
     const openedAt = tab?.openedAt ? new Date(tab.openedAt).getTime() : Date.now();
     const hoursOpen = Math.max(0, (Date.now() - openedAt) / 36e5);
     let nextLimit = currentLimit;
-    if (payment === "Fiado/anotado") {
+    if (payment === "Comanda/anotado") {
       nextLimit = Math.max(DEFAULT_TAB_CREDIT_LIMIT, currentLimit - TAB_DELAY_PENALTY);
     } else if (hoursOpen > TAB_DELAY_LIMIT_HOURS) {
       nextLimit = Math.max(DEFAULT_TAB_CREDIT_LIMIT, currentLimit - TAB_DELAY_PENALTY);
@@ -4551,20 +4609,98 @@ function App() {
     return nextLimit;
   }
 
+
+  function validateTabOpeningDraft(draft = {}) {
+    const tabNumber = Number(draft.tabNumber || 0);
+    const tableNumber = Number(draft.tableNumber || 0);
+    const responsibleName = String(draft.responsibleName || draft.customerName || "").trim();
+    if (!Number.isInteger(tabNumber) || tabNumber < 1 || tabNumber > 100) return { valid: false, message: "Informe uma comanda de 1 a 100." };
+    if (tabsAccounts.some((tab) => Number(tab.tabNumber || tab.id) === tabNumber)) return { valid: false, message: `Comanda ${tabNumber} já está aberta.` };
+    if (!Number.isInteger(tableNumber) || tableNumber < 1) return { valid: false, message: "Informe o número da mesa." };
+    if (responsibleName.split(/\s+/).filter(Boolean).length < 2) return { valid: false, message: "Informe o nome completo de uma pessoa da mesa." };
+    return { valid: true, tabNumber, tableNumber, responsibleName };
+  }
+
+  function prepareCounterItemsForTab(items = []) {
+    return syncOrderItemsWithProducts(items, products).map((item) => ({
+      ...item,
+      printedAt: new Date().toISOString(),
+      printBatchId: `tab-${Date.now()}` ,
+    }));
+  }
+
+  async function queueTabItemsPrint(tab, items, label = "ADIÇÃO NA COMANDA") {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const printOrder = {
+      id: `COMANDA-${tab.tabNumber || tab.id}-${Date.now()}`,
+      orderType: ORDER_TYPE.DELIVERY,
+      origin: "tab",
+      status: label,
+      client: `Mesa ${tab.tableNumber || "-"} • Comanda ${tab.tabNumber || tab.id} • ${tab.responsibleName || tab.customerName}`,
+      phone: tab.phone || "",
+      address: `Mesa ${tab.tableNumber || "-"}`,
+      deliveryDistrict: "Comanda",
+      payment: "Comanda aberta",
+      paymentStatus: PAYMENT_STATUS.PENDING,
+      items,
+      productsTotal: buildOrderTotal(items),
+      value: buildOrderTotal(items),
+      notes: `${label}. Responsável: ${tab.responsibleName || tab.customerName}. ${tab.notes || ""}`.trim(),
+      launchedAt: new Date().toISOString(),
+    };
+    await createPrintJobsForOrder(printOrder);
+  }
+
   async function createTabAccount() {
     if (!isCashOpen) return setLastAction("Abra o caixa antes de abrir uma comanda.");
-    const name = tabDraft.customerName.trim();
-    if (!name) return setLastAction("Informe o nome do cliente da comanda.");
+    const validation = validateTabOpeningDraft(tabDraft);
+    if (!validation.valid) return setLastAction(validation.message);
     const phone = tabDraft.phone ? formatBrazilMobilePhone(tabDraft.phone) : "";
-    const key = getTabCustomerKey({ customerName: name, phone });
-    const creditLimit = toSafeNumber(tabDraft.creditLimit, toSafeNumber(tabCreditLimits[key], DEFAULT_TAB_CREDIT_LIMIT));
-    if (creditLimit < 0) return setLastAction("Informe um limite válido para a comanda.");
-    const tab = { id: makeUniqueNumericId(), customerName: name, phone, creditLimit, payment: tabDraft.payment || "Dinheiro", items: [], openedAt: new Date().toISOString(), cashSessionId: cashSession.id || "", notes: "Comanda/fiado" };
+    const tab = { id: makeUniqueNumericId(), tabNumber: validation.tabNumber, tableNumber: validation.tableNumber, responsibleName: validation.responsibleName, customerName: validation.responsibleName, phone, creditLimit: 99999, payment: "Dinheiro", items: [], openedAt: new Date().toISOString(), cashSessionId: cashSession.id || "", notes: tabDraft.notes || "Comanda aberta" };
     try { await persistTabAccount(tab, "open"); } catch (error) { return setLastAction(`Comanda não aberta no Supabase: ${error.message || "verifique tab_accounts."}`); }
-    setTabCreditLimits((previous) => ({ ...previous, [key]: creditLimit }));
     setTabsAccounts((previous) => [tab, ...previous]);
-    setTabDraft({ customerName: "", phone: "", creditLimit: DEFAULT_TAB_CREDIT_LIMIT });
-    setLastAction(`Comanda aberta no Supabase para ${name} com limite de ${money(creditLimit)}.`);
+    setTabDraft({ tabNumber: "", tableNumber: "", responsibleName: "", phone: "", notes: "" });
+    setLastAction(`Comanda ${validation.tabNumber} aberta para a mesa ${validation.tableNumber}.`);
+  }
+
+  async function createTabFromCounterDraft() {
+    if (!isCashOpen) return setLastAction("Abra o caixa antes de criar comanda pelo PDV Balcão.");
+    if (counterDraft.items.length === 0) return setLastAction("Adicione itens no PDV antes de criar a comanda.");
+    const validation = validateTabOpeningDraft(tabFromCounterDraft);
+    if (!validation.valid) return setLastAction(validation.message);
+    const nextItems = prepareCounterItemsForTab(counterDraft.items);
+    const stockValidation = validateOrderItems(nextItems, products);
+    if (!authorizePdvStockOverride(stockValidation, "Comanda", nextItems)) return;
+    const tab = { id: makeUniqueNumericId(), tabNumber: validation.tabNumber, tableNumber: validation.tableNumber, responsibleName: validation.responsibleName, customerName: validation.responsibleName, phone: tabFromCounterDraft.phone ? formatBrazilMobilePhone(tabFromCounterDraft.phone) : "", creditLimit: 99999, payment: "Dinheiro", items: nextItems, openedAt: new Date().toISOString(), cashSessionId: cashSession.id || "", notes: tabFromCounterDraft.notes || counterDraft.notes || "Comanda criada pelo PDV Balcão" };
+    try { await persistTabAccount(tab, "open"); } catch (error) { return setLastAction(`Comanda não criada: ${error.message || "verifique o SQL da fase 66."}`); }
+    await queueTabItemsPrint(tab, nextItems, "ABERTURA DE COMANDA");
+    setTabsAccounts((previous) => [tab, ...previous]);
+    setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
+    setTabFromCounterDraft({ tabNumber: "", tableNumber: "", responsibleName: "", phone: "", notes: "" });
+    setLastAction(`Comanda ${tab.tabNumber} criada e enviada para impressão.`);
+  }
+
+  async function addCounterDraftToExistingTab() {
+    if (!selectedOpenTabForCounter) return setLastAction("Escolha uma comanda aberta para receber os itens.");
+    if (counterDraft.items.length === 0) return setLastAction("Adicione itens no PDV antes de enviar para a comanda.");
+    const tab = tabsAccounts.find((item) => String(item.id) === String(selectedOpenTabForCounter));
+    if (!tab) return setLastAction("Comanda aberta não encontrada.");
+    const newItems = prepareCounterItemsForTab(counterDraft.items);
+    const nextTab = { ...tab, items: [...(tab.items || []), ...newItems] };
+    const stockValidation = validateOrderItems(nextTab.items, products);
+    if (!authorizePdvStockOverride(stockValidation, "Comanda", nextTab.items)) return;
+    try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Itens não adicionados à comanda: ${error.message || "verifique o SQL da fase 66."}`); }
+    await queueTabItemsPrint(nextTab, newItems, "ADIÇÃO NA COMANDA");
+    setTabsAccounts((previous) => previous.map((item) => item.id === nextTab.id ? nextTab : item));
+    setCounterDraft({ customerName: "Cliente balcão", phone: "", payment: "Pix", changeFor: "", notes: "", items: [], discount: 0 });
+    setLastAction(`Itens adicionados à comanda ${nextTab.tabNumber || nextTab.id} e enviados para impressão.`);
+  }
+
+  async function printFullTabConsumption(tabId) {
+    const tab = tabsAccounts.find((item) => item.id === tabId);
+    if (!tab) return setLastAction("Comanda não encontrada.");
+    await queueTabItemsPrint(tab, tab.items || [], "CONSUMO COMPLETO DA COMANDA");
+    setLastAction(`Consumo completo da comanda ${tab.tabNumber || tab.id} enviado para impressão.`);
   }
 
   async function addProductToTab(tabId, product, quantity = 1) {
@@ -4573,19 +4709,15 @@ function App() {
     const safeQuantity = toPositiveInteger(quantity, 1);
     const tab = tabsAccounts.find((item) => item.id === tabId);
     if (!tab) return setLastAction("Comanda não encontrada.");
-    const existing = (tab.items || []).find((item) => Number(item.id) === Number(product.id));
-    const nextItems = existing
-      ? (tab.items || []).map((item) => Number(item.id) === Number(product.id) ? { ...item, quantity: toPositiveInteger(item.quantity, 1) + safeQuantity } : item)
-      : [...(tab.items || []), { id: product.id, name: product.name, price: Number(product.price || 0), quantity: safeQuantity, barcode: product.barcode }];
+    const newItem = { id: product.id, name: product.name, price: Number(product.price || 0), quantity: safeQuantity, barcode: product.barcode, printedAt: new Date().toISOString(), printBatchId: `tab-${Date.now()}` };
+    const nextItems = [...(tab.items || []), newItem];
     const validation = validateOrderItems(nextItems, products);
     if (!validation.valid) return setLastAction(validation.message);
-    const nextTotal = buildOrderTotal(nextItems);
-    const currentLimit = getCurrentTabCreditLimit(tab);
-    if (nextTotal > currentLimit) return setLastAction(`Limite da comanda excedido. Limite: ${money(currentLimit)} • total tentado: ${money(nextTotal)}.`);
     const nextTab = { ...tab, items: nextItems };
     try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Item não salvo na comanda: ${error.message || "verifique tab_accounts."}`); }
+    await queueTabItemsPrint(nextTab, [newItem], "ADIÇÃO NA COMANDA");
     setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
-    setLastAction(`${safeQuantity}x ${product.name} adicionado à comanda de ${tab.customerName}.`);
+    setLastAction(`${safeQuantity}x ${product.name} adicionado à comanda ${tab.tabNumber || tab.id} e enviado para impressão.`);
   }
 
 
@@ -4596,9 +4728,6 @@ function App() {
     const nextItems = (tab.items || []).map((item) => Number(item.id) === Number(productId) ? { ...item, quantity: safeQuantity } : item);
     const validation = validateOrderItems(nextItems, products);
     if (!validation.valid) return setLastAction(validation.message);
-    const nextTotal = buildOrderTotal(nextItems);
-    const currentLimit = getCurrentTabCreditLimit(tab);
-    if (nextTotal > currentLimit) return setLastAction(`Limite da comanda excedido. Limite: ${money(currentLimit)} • total tentado: ${money(nextTotal)}.`);
     const nextTab = { ...tab, items: nextItems };
     try { await persistTabAccount(nextTab, "open"); } catch (error) { return setLastAction(`Quantidade não salva no Supabase: ${error.message || "verifique tab_accounts."}`); }
     setTabsAccounts((previous) => previous.map((item) => item.id === tabId ? nextTab : item));
@@ -4662,7 +4791,7 @@ function App() {
       return setLastAction(`Troco da comanda inválido: recebido ${money(tabClosingChangeFor)} é menor que ${money(total)}.`);
     }
     const mixedPaymentDetails = tabClosingPayment === "Misto" ? getMixedPaymentDetails(tabClosingMixedPayment) : "";
-    const paymentStatus = tabClosingPayment === "Fiado/anotado" ? PAYMENT_STATUS.STORE_CREDIT : PAYMENT_STATUS.PAID;
+    const paymentStatus = PAYMENT_STATUS.PAID;
     const closedOrder = {
       id: makeUniqueNumericId(),
       cashSessionId: cashSession.id || "",
@@ -4670,7 +4799,7 @@ function App() {
       orderType: ORDER_TYPE.COUNTER,
       client: tab.customerName,
       phone: tab.phone,
-      address: "Comanda/fiado",
+      address: "Comanda/comanda",
       payment: tabClosingPayment,
       paymentStatus,
       changeFor: tabClosingPayment === "Dinheiro" ? tabClosingChangeFor : "",
@@ -4687,7 +4816,7 @@ function App() {
       reference: "Comanda fechada",
       courierUsername: "COMANDA",
       courierName: "Comanda",
-      notes: "Comanda fechada pelo painel de fiados",
+      notes: "Comanda fechada pelo painel de comandas",
       items: syncedItems,
       pickedUpByUsername: "",
       pickedUpByName: "",
@@ -5419,9 +5548,9 @@ function App() {
                                     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-zinc-100 bg-white">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" /> : <div className="h-full w-full bg-white" />}</div>
                                     <div className="min-w-0 flex-1">
                                       <p className="font-black text-base leading-tight break-words">{product.name}</p>
-                                      <p className="text-[11px] text-zinc-500 mt-1">{product.category} • estoque {product.stock}{Number(product.prepMinutes || 0) > 0 ? ` • preparo ${product.prepMinutes}min` : ""}</p>
+                                      <p className="text-[11px] text-zinc-500 mt-1">{product.category}{isStockControlledProduct(product) ? ` • estoque ${product.stock}` : ""}{Number(product.prepMinutes || 0) > 0 ? ` • preparo ${product.prepMinutes}min` : ""}</p>
                                       {Array.isArray(product.salesTags) && product.salesTags.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{product.salesTags.map((tag) => <span key={tag} className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-black text-orange-800">{tag}</span>)}</div>}
-                                      {shouldCustomizeCustomerProduct(product) && !productHasActiveVariants(product) && <p className="text-[11px] font-bold text-orange-700 mt-1">Personalizar: adicionais, remover ingredientes e observação</p>}
+                                      {shouldCustomizeCustomerProduct(product) && !productHasActiveVariants(product) && <p className="text-[11px] font-bold text-orange-700 mt-1">Personalizar: adicionais e observação</p>}
                                       {productHasActiveVariants(product) && <p className="text-[11px] font-bold text-purple-700 mt-1">Escolha os sabores</p>}
                                       {hasProductInCart && (
                                         <div className="mt-2 rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-800">
@@ -5434,7 +5563,7 @@ function App() {
                                   <div className="text-right shrink-0 min-w-[96px]">
                                     {getProductActivePromotion(product, promotions) && <p className="text-[11px] text-zinc-400 line-through">{money(product.price)}</p>}
                                     <p className="text-base font-black text-emerald-700">{money(getProductSalePrice(product, promotions))}</p>
-                                    {Number(product.stock || 0) <= 0 ? (
+                                    {isStockControlledProduct(product) && Number(product.stock || 0) <= 0 ? (
                                       <Button disabled className="mt-2 rounded-xl bg-zinc-400 px-3 py-3 h-auto text-xs touch-manipulation">Sem estoque</Button>
                                     ) : hasProductInCart && !productHasActiveVariants(product) ? (
                                       <div className="mt-2 inline-flex items-center rounded-2xl border border-emerald-200 bg-emerald-50 p-1 shadow-sm">
@@ -5462,12 +5591,12 @@ function App() {
 
                   {customerItemCustomizer.open && customerItemCustomizer.product && (() => {
                     const product = customerItemCustomizer.product;
-                    const addonOptions = normalizeAddonOptions(product.defaultAddons);
+                    const addonOptions = getCategoryAddons(product.category);
                     const comboChoices = normalizeProductComboChoices(product.comboChoices);
                     const selectedComboChoices = buildSelectedComboChoices(customerItemCustomizer, product);
                     const comboChoicesTotal = getComboChoicesTotal(selectedComboChoices);
-                    const removableIngredients = normalizeCustomizationList(product.removableIngredients);
-                    const ingredients = normalizeCustomizationList(product.ingredients);
+                    const removableIngredients = [];
+                    const ingredients = product.description ? [product.description] : [];
                     const selectedAddonsTotal = customerItemCustomizer.selectedAddons.reduce((sum, addon) => sum + toSafeMoneyNumber(addon.price, 0), 0);
                     const finalUnitPrice = toSafeMoneyNumber(getProductSalePrice(product, promotions), toSafeMoneyNumber(product.price, 0)) + selectedAddonsTotal + comboChoicesTotal;
                     return (
@@ -5477,14 +5606,14 @@ function App() {
                             <div>
                               <p className="text-xs font-black uppercase tracking-[0.18em] text-orange-700">Personalize seu lanche</p>
                               <h3 className="mt-1 text-2xl font-black leading-tight">{product.name}</h3>
-                              <p className="mt-1 text-sm text-zinc-600">Escolha adicionais, remova ingredientes e envie uma observação só deste item.</p>
+                              <p className="mt-1 text-sm text-zinc-600">Escolha adicionais e envie uma observação só deste item.</p>
                             </div>
                             <button type="button" onClick={closeCustomerItemCustomizer} className="h-9 w-9 shrink-0 rounded-full bg-zinc-100 text-xl font-black text-zinc-950">×</button>
                           </div>
 
                           {ingredients.length > 0 && (
                             <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
-                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Ingredientes padrão</p>
+                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Descrição do lanche</p>
                               <p className="mt-1 text-sm font-semibold text-zinc-800">{ingredients.join(", ")}</p>
                             </div>
                           )}
@@ -5535,24 +5664,10 @@ function App() {
                             </div>
                           )}
 
-                          {removableIngredients.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-black uppercase tracking-wide text-zinc-500">Remover ingredientes</p>
-                              <div className="flex flex-wrap gap-2">
-                                {removableIngredients.map((ingredient) => {
-                                  const checked = customerItemCustomizer.removedIngredients.includes(ingredient);
-                                  return <button key={ingredient} type="button" onClick={() => toggleCustomerRemovedIngredient(ingredient)} className={`rounded-2xl border px-3 py-2 text-xs font-black ${checked ? "border-red-200 bg-red-50 text-red-700" : "border-zinc-200 bg-zinc-50 text-zinc-700"}`}>{checked ? "Sem " : "Remover "}{ingredient}</button>;
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {product.allowItemNotes !== false && (
-                            <label className="block">
+                          <label className="block">
                               <span className="text-xs font-black uppercase tracking-wide text-zinc-500">Observação deste item</span>
                               <textarea value={customerItemCustomizer.itemNote} onChange={(event) => setCustomerItemCustomizer((previous) => ({ ...previous, itemNote: event.target.value.slice(0, 240) }))} placeholder="Ex: carne bem passada, pouco molho, cortar ao meio..." className="mt-1 min-h-[84px] w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
                             </label>
-                          )}
 
                           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm">
                             <div className="flex items-center justify-between gap-3"><span className="font-bold text-emerald-900">Valor do item</span><span className="font-black text-emerald-800">{money(finalUnitPrice)}</span></div>
@@ -5846,6 +5961,43 @@ function App() {
                 </CardBox>
 
                 <CardBox>
+                  <div className="flex flex-col gap-1 mb-4">
+                    <h3 className="font-bold text-lg">Adicionais por categoria</h3>
+                    <p className="text-sm text-zinc-500">Cadastre o adicional uma vez na categoria. Todos os itens dessa categoria passam a receber esse adicional no cliente e no PDV.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_160px_auto] gap-3 mb-4">
+                    <label className="block">
+                      <span className="text-xs font-medium text-zinc-600">Categoria</span>
+                      <select value={categoryAddonDraft.categoryName} onChange={(event) => setCategoryAddonDraft({ ...categoryAddonDraft, categoryName: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none">
+                        {productGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+                      </select>
+                    </label>
+                    <Input label="Nome do adicional" value={categoryAddonDraft.name} onChange={(value) => setCategoryAddonDraft({ ...categoryAddonDraft, name: value })} placeholder="Ex: Bacon extra" />
+                    <Input label="Preço" type="number" value={categoryAddonDraft.price} onChange={(value) => setCategoryAddonDraft({ ...categoryAddonDraft, price: value })} />
+                    <div className="flex items-end"><Button onClick={addCategoryAddon} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 w-full">Criar adicional</Button></div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {productGroups.map((group) => {
+                      const addonsForGroup = categoryAddons.filter((addon) => normalizeGroupName(addon.categoryName) === normalizeGroupName(group));
+                      return (
+                        <div key={group} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                          <p className="font-black text-sm mb-2">{group}</p>
+                          {addonsForGroup.length === 0 && <p className="text-xs text-zinc-500">Nenhum adicional cadastrado.</p>}
+                          <div className="space-y-2">
+                            {addonsForGroup.map((addon) => (
+                              <div key={addon.id} className="flex items-center justify-between gap-2 rounded-xl bg-white border border-zinc-100 px-3 py-2 text-sm">
+                                <span className={addon.active === false ? "line-through text-zinc-400" : "font-semibold"}>{addon.name} • {money(addon.price)}</span>
+                                <div className="flex gap-1"><Button onClick={() => toggleCategoryAddon(addon)} variant="secondary" className="rounded-xl px-2 py-1 text-xs">{addon.active === false ? "Ativar" : "Pausar"}</Button><Button onClick={() => removeCategoryAddon(addon)} variant="secondary" className="rounded-xl px-2 py-1 text-xs text-red-700">Remover</Button></div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardBox>
+
+                <CardBox>
                   <h3 className="font-bold text-lg mb-4">Novo produto</h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <Input label="Nome" value={newProduct.name} onChange={(value) => setNewProduct({ ...newProduct, name: value })} />
@@ -5857,7 +6009,7 @@ function App() {
                     </label>
                     <label className="block">
                       <span className="text-xs font-medium text-zinc-600">Tipo para cardápio</span>
-                      <select value={newProduct.productType || "lanche"} onChange={(event) => setNewProduct({ ...newProduct, productType: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
+                      <select value={newProduct.productType || "lanche"} onChange={(event) => { const productType = event.target.value; const stockControlled = ["bebida", "sobremesa", "produto"].includes(productType); setNewProduct({ ...newProduct, productType, stockControlled, stock: stockControlled ? newProduct.stock : "0", minStock: stockControlled ? newProduct.minStock : "0" }); }} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-zinc-950/20">
                         <option value="lanche">Lanche</option>
                         <option value="porcao">Porção</option>
                         <option value="bebida">Bebida</option>
@@ -5868,8 +6020,10 @@ function App() {
                     </label>
                     <Input label="Preço venda" type="number" value={newProduct.price} onChange={(value) => setNewProduct({ ...newProduct, price: value })} />
                     <Input label="Preço custo" type="number" value={newProduct.cost} onChange={(value) => setNewProduct({ ...newProduct, cost: value })} />
-                    <Input label="Estoque" type="number" value={newProduct.stock} onChange={(value) => setNewProduct({ ...newProduct, stock: value })} />
-                    <Input label="Estoque mínimo" type="number" value={newProduct.minStock} onChange={(value) => setNewProduct({ ...newProduct, minStock: value })} />
+                    {newProduct.stockControlled === true ? <>
+                      <Input label="Estoque" type="number" value={newProduct.stock} onChange={(value) => setNewProduct({ ...newProduct, stock: value })} />
+                      <Input label="Estoque mínimo" type="number" value={newProduct.minStock} onChange={(value) => setNewProduct({ ...newProduct, minStock: value })} />
+                    </> : <div className="md:col-span-2 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-emerald-800">Sem estoque para lanches, porções e combos.</div>}
                     <Input label="Código de barras" value={newProduct.barcode} onChange={(value) => setNewProduct({ ...newProduct, barcode: value })} />
                     <label className="block md:col-span-2">
                       <span className="text-xs font-medium text-zinc-600">Imagem do produto</span>
@@ -5891,22 +6045,21 @@ function App() {
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <label className="block md:col-span-1">
-                      <span className="text-xs font-medium text-zinc-600">Ingredientes padrão</span>
-                      <textarea value={newProduct.ingredients || ""} onChange={(event) => setNewProduct({ ...newProduct, ingredients: event.target.value })} placeholder="Ex: pão, hambúrguer, queijo, alface, tomate" className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
+                    <label className="block md:col-span-2">
+                      <span className="text-xs font-medium text-zinc-600">Descrição simples do cardápio</span>
+                      <textarea value={newProduct.description || ""} onChange={(event) => setNewProduct({ ...newProduct, description: event.target.value })} placeholder="Ex: Pão, hambúrguer, queijo, bacon, alface, tomate e molho da casa." className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
                     </label>
-                    <label className="block md:col-span-1">
-                      <span className="text-xs font-medium text-zinc-600">Ingredientes removíveis</span>
-                      <textarea value={newProduct.removableIngredients || ""} onChange={(event) => setNewProduct({ ...newProduct, removableIngredients: event.target.value })} placeholder="Ex: sem cebola, sem tomate, sem milho" className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
-                    </label>
-                    <label className="block md:col-span-1">
-                      <span className="text-xs font-medium text-zinc-600">Adicionais sugeridos</span>
-                      <textarea value={newProduct.defaultAddons || ""} onChange={(event) => setNewProduct({ ...newProduct, defaultAddons: event.target.value })} placeholder="Ex: bacon extra, cheddar, ovo, hambúrguer extra" className="mt-1 w-full min-h-[96px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-zinc-950/20" />
-                    </label>
-                    <label className="md:col-span-3 flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-emerald-800">
-                      <input type="checkbox" checked={newProduct.allowItemNotes !== false} onChange={(event) => setNewProduct({ ...newProduct, allowItemNotes: event.target.checked })} />
-                      Permitir observação por item quando a personalização do cliente for ativada na próxima fase.
-                    </label>
+                    <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3 space-y-3">
+                      <label className="flex items-center gap-3 text-sm font-bold text-zinc-700">
+                        <input type="checkbox" checked={newProduct.allowItemNotes !== false} onChange={(event) => setNewProduct({ ...newProduct, allowItemNotes: event.target.checked })} />
+                        Permitir observação por item
+                      </label>
+                      <label className="flex items-center gap-3 text-sm font-bold text-zinc-700">
+                        <input type="checkbox" checked={newProduct.stockControlled === true} onChange={(event) => setNewProduct({ ...newProduct, stockControlled: event.target.checked, stock: event.target.checked ? newProduct.stock : "0", minStock: event.target.checked ? newProduct.minStock : "0" })} />
+                        Controlar estoque
+                      </label>
+                      <p className="text-xs text-zinc-500">Lanches, porções e combos ficam sem estoque por padrão. Adicionais agora são cadastrados por categoria.</p>
+                    </div>
                   </div>
 
                   <div className="mt-4 rounded-3xl border border-zinc-100 bg-zinc-50 p-4 space-y-3">
@@ -6010,12 +6163,12 @@ function App() {
                                 <div>
                                   <p className="font-bold">{product.name}</p>
                                   <p className="text-sm text-zinc-600">Grupo: {product.category} • {money(product.price)} • Código: {product.barcode}</p>
-                                <p className="text-sm text-zinc-500">Estoque: {product.stock}{product.stock <= product.minStock ? " ⚠️" : ""} • Mínimo: {product.minStock}</p>
+                                {isStockControlledProduct(product) ? <p className="text-sm text-zinc-500">Estoque: {product.stock}{product.stock <= product.minStock ? " ⚠️" : ""} • Mínimo: {product.minStock}</p> : <p className="text-sm text-emerald-700 font-semibold">Sem controle de estoque neste item</p>}
                                 <p className={`text-sm font-semibold ${productAvailability.available ? "text-emerald-700" : "text-red-600"}`}>Status: {productAvailability.label}</p>
                                   {product.pauseReason && isProductPaused(product, currentStoreDate) && <p className="text-xs font-bold text-amber-700">Motivo: {product.pauseReason}</p>}
                                   {product.hasVariants && <p className="text-sm text-purple-700 font-semibold">Sabores: {getActiveProductVariants(product).length}</p>}
                                   {product.productType && <p className="text-sm text-emerald-700 font-semibold">Tipo: {product.productType}</p>}
-                                  {Array.isArray(product.ingredients) && product.ingredients.length > 0 && <p className="text-xs text-zinc-500">Ingredientes: {product.ingredients.slice(0, 6).join(", ")}{product.ingredients.length > 6 ? "..." : ""}</p>}
+                                  {product.description && <p className="text-xs text-zinc-500 max-w-2xl">{product.description}</p>}
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-2">
@@ -6072,18 +6225,15 @@ function App() {
                                 </div>
                               </div>
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-3xl border border-zinc-100 bg-white p-4">
-                                <label className="block">
-                                  <span className="text-xs font-medium text-zinc-600">Ingredientes padrão</span>
-                                  <textarea value={Array.isArray(product.ingredients) ? product.ingredients.join(", ") : (product.ingredients || "")} onChange={(event) => updateProductField(product.id, "ingredients", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
+                                <label className="block md:col-span-2">
+                                  <span className="text-xs font-medium text-zinc-600">Descrição simples do cardápio</span>
+                                  <textarea value={product.description || ""} onChange={(event) => updateProductField(product.id, "description", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
                                 </label>
-                                <label className="block">
-                                  <span className="text-xs font-medium text-zinc-600">Ingredientes removíveis</span>
-                                  <textarea value={Array.isArray(product.removableIngredients) ? product.removableIngredients.join(", ") : (product.removableIngredients || "")} onChange={(event) => updateProductField(product.id, "removableIngredients", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
-                                </label>
-                                <label className="block">
-                                  <span className="text-xs font-medium text-zinc-600">Adicionais sugeridos</span>
-                                  <textarea value={Array.isArray(product.defaultAddons) ? product.defaultAddons.map((addon) => addon.name || addon).join(", ") : (product.defaultAddons || "")} onChange={(event) => updateProductField(product.id, "defaultAddons", event.target.value)} className="mt-1 w-full min-h-[88px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none" />
-                                </label>
+                                <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3 space-y-3">
+                                  <label className="flex items-center gap-3 text-sm font-bold text-zinc-700"><input type="checkbox" checked={product.allowItemNotes !== false} onChange={(event) => updateProductField(product.id, "allowItemNotes", event.target.checked)} />Permitir observação</label>
+                                  <label className="flex items-center gap-3 text-sm font-bold text-zinc-700"><input type="checkbox" checked={isStockControlledProduct(product)} onChange={(event) => updateProductField(product.id, "stockControlled", event.target.checked)} />Controlar estoque</label>
+                                  <p className="text-xs text-zinc-500">Adicionais ficam na categoria, não no produto.</p>
+                                </div>
                               </div>
 
                               <div className="rounded-3xl border border-zinc-100 bg-white p-4 space-y-3">
@@ -6138,7 +6288,7 @@ function App() {
 
             {activeTab === "kits" && (
               <div className="space-y-6">
-                <Title title="Kits da loja" subtitle="Monte combos usando somente produtos já cadastrados. O valor base vem dos produtos, mas pode ser alterado." />
+                <Title title="Combos da loja" subtitle="Monte combos usando somente produtos já cadastrados. O valor base vem dos produtos, mas pode ser alterado." />
 
                 <CardBox>
                   <h3 className="font-bold text-lg mb-4">Novo kit</h3>
@@ -6169,7 +6319,7 @@ function App() {
                     </div>
 
                     <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
-                      <h4 className="font-bold mb-3">Produtos do kit</h4>
+                      <h4 className="font-bold mb-3">Produtos do combo</h4>
                       {newKit.items.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto adicionado ao kit.</p>}
                       <div className="grid gap-2">
                         {newKit.items.map((item) => {
@@ -6218,7 +6368,7 @@ function App() {
                                 {kit.active && !isKitInPeriod(kit) && <p className="text-xs font-bold text-amber-700">Data final vencida. O kit não aparece para o cliente.</p>}
                               </div>
                               <div className="flex flex-wrap gap-2">
-                                <Button onClick={() => setEditingKitId(kit.id)} variant="secondary" className="rounded-2xl">Editar kit</Button>
+                                <Button onClick={() => setEditingKitId(kit.id)} variant="secondary" className="rounded-2xl">Editar combo</Button>
                                 <Button onClick={() => toggleKitStatus(kit.id)} variant="secondary" className="rounded-2xl">{kit.active ? "Inativar" : "Ativar"}</Button>
                               </div>
                             </div>
@@ -6233,7 +6383,7 @@ function App() {
                               <div className="rounded-3xl border border-zinc-100 bg-white p-4 space-y-3">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                   <div>
-                                    <p className="font-bold">Produtos do kit</p>
+                                    <p className="font-bold">Produtos do combo</p>
                                     <p className="text-sm text-zinc-500">Valor base atual: {money(baseTotal)}</p>
                                   </div>
                                   <div className="w-full md:max-w-md"><SearchBox value={editingKitProductSearch} onChange={setEditingKitProductSearch} placeholder="Pesquisar produto para adicionar" /></div>
@@ -6476,13 +6626,13 @@ function App() {
                       {deliveryProductResults.map((product) => <div key={product.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50 p-3"><div><p className="font-bold">{product.name}</p><p className="text-xs text-zinc-500">{product.category} • Código: {product.barcode}</p><p className="text-sm font-semibold mt-1">{money(product.price)}</p></div><Button onClick={() => addProductToDelivery(product)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Adicionar</Button></div>)}
                     </div>
                   <div className="mt-5 border-t border-zinc-100 pt-4">
-                      <h4 className="font-bold mb-3">Kits disponíveis</h4>
-                      <SearchBox value={pvdKitSearch} onChange={setPvdKitSearch} placeholder="Buscar kit" />
+                      <h4 className="font-bold mb-3">Combos disponíveis</h4>
+                      <SearchBox value={pvdKitSearch} onChange={setPvdKitSearch} placeholder="Buscar combo" />
                       <div className="mt-3 grid gap-2 max-h-64 overflow-auto pr-1">
                         {pvdKitResults.map((kit) => (
                           <div key={kit.id} className="rounded-2xl border border-yellow-200 bg-yellow-50 p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
                             <div><p className="font-bold">{kit.name}</p><p className="text-xs text-zinc-600">{describeKitItems(kit, products)}</p><p className="text-sm font-semibold mt-1">{money(kit.price)}</p></div>
-                            <Button onClick={() => addKitToDelivery(kit)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Adicionar kit</Button>
+                            <Button onClick={() => addKitToDelivery(kit)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Adicionar combo</Button>
                           </div>
                         ))}
                       </div>
@@ -6578,13 +6728,13 @@ function App() {
                     </div>
 
                     <div className="mt-5 border-t border-zinc-100 pt-4">
-                      <h4 className="font-bold mb-3">Kits disponíveis</h4>
-                      <SearchBox value={counterKitSearch} onChange={setCounterKitSearch} placeholder="Buscar kit" />
+                      <h4 className="font-bold mb-3">Combos disponíveis</h4>
+                      <SearchBox value={counterKitSearch} onChange={setCounterKitSearch} placeholder="Buscar combo" />
                       <div className="mt-3 grid gap-2 max-h-56 overflow-auto pr-1">
                         {counterKitResults.map((kit) => (
                           <div key={kit.id} className="rounded-2xl border border-yellow-200 bg-yellow-50 p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
                             <div><p className="font-bold">{kit.name}</p><p className="text-xs text-zinc-600">{describeKitItems(kit, products)}</p><p className="text-sm font-semibold mt-1">{money(kit.price)}</p></div>
-                            <Button onClick={() => addKitToCounter(kit)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Adicionar kit</Button>
+                            <Button onClick={() => addKitToCounter(kit)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Adicionar combo</Button>
                           </div>
                         ))}
                       </div>
@@ -6605,6 +6755,22 @@ function App() {
                     </div>
 
                     <div className="mt-4 space-y-2"><h4 className="font-bold">Itens da venda</h4>{counterDraft.items.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto selecionado ainda.</p>}{counterDraft.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 p-3"><div className="min-w-0"><p className="font-semibold truncate">{item.name}</p><p className="text-xs text-zinc-500">{money(item.price)} unidade</p></div><div className="flex items-center gap-2"><input type="number" min="1" value={item.quantity} onChange={(event) => updateCounterItemQuantity(item.id, event.target.value)} className="w-16 rounded-xl border border-zinc-200 px-2 py-2 text-center" /><span className="font-bold w-20 text-right">{money(item.price * item.quantity)}</span><button onClick={() => removeCounterItem(item.id)} className="rounded-xl bg-red-50 px-2 py-2 text-red-600">remover</button></div></div>)}</div>
+
+                    <div className="mt-5 rounded-3xl border border-orange-200 bg-orange-50 p-4 space-y-3">
+                      <div><p className="font-black text-orange-900">Comanda pelo PDV Balcão</p><p className="text-xs text-orange-800">Use o carrinho acima como uma venda normal e envie para uma comanda aberta ou nova.</p></div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <Input label="Comanda 1 a 100" type="number" value={tabFromCounterDraft.tabNumber} onChange={(value) => setTabFromCounterDraft({ ...tabFromCounterDraft, tabNumber: value })} />
+                        <Input label="Mesa" type="number" value={tabFromCounterDraft.tableNumber} onChange={(value) => setTabFromCounterDraft({ ...tabFromCounterDraft, tableNumber: value })} />
+                        <Input label="Nome completo do responsável" value={tabFromCounterDraft.responsibleName} onChange={(value) => setTabFromCounterDraft({ ...tabFromCounterDraft, responsibleName: value })} />
+                        <Input label="Telefone opcional" value={tabFromCounterDraft.phone} onChange={(value) => setTabFromCounterDraft({ ...tabFromCounterDraft, phone: normalizePhoneInput(value) })} />
+                        <Input label="Observação da comanda" value={tabFromCounterDraft.notes} onChange={(value) => setTabFromCounterDraft({ ...tabFromCounterDraft, notes: value })} />
+                        <div className="flex items-end"><Button onClick={createTabFromCounterDraft} className="rounded-2xl bg-orange-700 hover:bg-orange-800 w-full">Criar comanda</Button></div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                        <label className="block"><span className="text-xs font-medium text-orange-900">Adicionar em comanda aberta</span><select value={selectedOpenTabForCounter} onChange={(event) => setSelectedOpenTabForCounter(event.target.value)} className="mt-1 w-full min-h-[48px] rounded-2xl border border-orange-200 bg-white px-4 py-3 text-base outline-none"><option value="">Selecione uma comanda</option>{tabsAccounts.map((tab) => <option key={tab.id} value={tab.id}>Comanda {tab.tabNumber || tab.id} • Mesa {tab.tableNumber || "-"} • {tab.responsibleName || tab.customerName}</option>)}</select></label>
+                        <div className="flex items-end"><Button onClick={addCounterDraftToExistingTab} variant="secondary" className="rounded-2xl w-full">Adicionar à comanda</Button></div>
+                      </div>
+                    </div>
 
                     <div className="mt-5 flex flex-col md:flex-row md:items-center justify-between gap-3 border-t border-zinc-100 pt-4"><div><p className="text-sm text-zinc-500">Produtos</p><p className="text-2xl font-black">{money(counterDraftTotal)}</p><p className="text-sm text-zinc-500">Desconto: -{money(counterDraftDiscount)}</p><p className="text-sm text-zinc-500">Taxa de entrega: {money(0)}</p><p className="text-3xl font-black mt-2">Total balcão: {money(counterDraftFinalTotal)}</p></div><Button onClick={launchCounterSale} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 py-6 px-6">Finalizar venda e imprimir</Button></div>
                   </CardBox>
@@ -6844,16 +7010,17 @@ function App() {
 
             {activeTab === "tabs" && (
               <div className="space-y-6">
-                <Title title="Fiados e comandas" subtitle="Abra comandas, adicione produtos e feche com impressão em 2 vias." />
+                <Title title="Comandas de mesa" subtitle="Abra comandas numeradas de 1 a 100, adicione consumos e feche como venda normal no balcão." />
                 <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1fr_1.2fr] gap-6">
                   <CardBox>
                     <h3 className="font-bold text-lg mb-4">Nova comanda</h3>
                     <div className="grid gap-3">
-                      <Input label="Nome do cliente" value={tabDraft.customerName} onChange={(value) => setTabDraft({ ...tabDraft, customerName: value })} placeholder="Ex: João" />
+                      <Input label="Número da comanda" type="number" value={tabDraft.tabNumber} onChange={(value) => setTabDraft({ ...tabDraft, tabNumber: value })} placeholder="1 a 100" />
+                      <Input label="Mesa" type="number" value={tabDraft.tableNumber} onChange={(value) => setTabDraft({ ...tabDraft, tableNumber: value })} placeholder="Ex: 12" />
+                      <Input label="Nome completo do responsável" value={tabDraft.responsibleName} onChange={(value) => setTabDraft({ ...tabDraft, responsibleName: value })} placeholder="Ex: João Carlos da Silva" />
                       <Input label="Telefone opcional" value={tabDraft.phone} onChange={(value) => setTabDraft({ ...tabDraft, phone: normalizePhoneInput(value) })} placeholder="(43) 98873-6791" />
-                      <Input label="Limite inicial da comanda" type="number" value={tabDraft.creditLimit} onChange={(value) => setTabDraft({ ...tabDraft, creditLimit: value })} placeholder="50" />
-                      <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">Limite padrão: {money(DEFAULT_TAB_CREDIT_LIMIT)}. Após pagamentos rápidos, o limite sobe automaticamente; se atrasar ou fechar como fiado, o limite pode diminuir. Você também pode alterar manualmente em cada comanda.</p>
-                      <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">A forma de pagamento aparece somente quando a comanda for fechada.</p>
+                      <Input label="Observação" value={tabDraft.notes} onChange={(value) => setTabDraft({ ...tabDraft, notes: value })} placeholder="Ex: mesa próxima ao balcão" />
+                      <p className="rounded-2xl bg-zinc-50 p-3 text-xs text-zinc-600">Comanda não é fiado: ela fica aberta durante o consumo e vira uma venda normal quando fechar.</p>
                     </div>
                     <Button onClick={createTabAccount} disabled={!isCashOpen} className="mt-4 rounded-2xl bg-zinc-950 text-white hover:bg-zinc-800">Abrir comanda</Button>
                     <div className="mt-4 rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Comandas abertas: <b>{tabsAccounts.length}</b></div>
@@ -6885,18 +7052,11 @@ function App() {
                           <div key={tab.id} className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 space-y-3">
                             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                               <div>
-                                <p className="font-black">{tab.customerName}</p>
-                                <p className="text-xs text-zinc-500">Aberta {new Date(tab.openedAt).toLocaleString("pt-BR")}</p>
-                                <p className="text-xs font-bold text-emerald-700">Limite: {money(getCurrentTabCreditLimit(tab))} • disponível: {money(getTabCreditRemaining(tab))}</p>
+                                <p className="font-black">Comanda {tab.tabNumber || tab.id} • Mesa {tab.tableNumber || "-"}</p>
+                                <p className="text-xs text-zinc-500">Responsável: {tab.responsibleName || tab.customerName} • aberta {new Date(tab.openedAt).toLocaleString("pt-BR")}</p>
+                                <p className="text-xs font-bold text-emerald-700">Fechamento vira venda normal no caixa.</p>
                               </div>
                               <p className="text-xl font-black">{money(total)}</p>
-                            </div>
-                            <div className="rounded-2xl border border-zinc-100 bg-white p-3">
-                              <p className="text-xs font-bold text-zinc-600 mb-2">Controle do limite desta comanda</p>
-                              <div className="flex flex-col md:flex-row gap-2">
-                                <input type="number" value={tabLimitDrafts[tab.id] ?? getCurrentTabCreditLimit(tab)} onChange={(event) => setTabLimitDrafts((previous) => ({ ...previous, [tab.id]: event.target.value }))} className="flex-1 rounded-2xl border border-zinc-200 bg-white px-3 py-2 outline-none" />
-                                <Button onClick={() => applyManualTabLimit(tab.id)} variant="secondary" className="rounded-2xl">Alterar limite</Button>
-                              </div>
                             </div>
                             <div className="rounded-2xl border border-zinc-100 bg-white p-3">
                               <p className="text-xs font-bold text-zinc-600 mb-2">Adicionar produto direto nesta comanda</p>
@@ -6910,13 +7070,13 @@ function App() {
                             </div>
                             {closingTabId === tab.id ? (
                               <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 space-y-3">
-                                <label className="block"><span className="text-xs font-medium text-zinc-600">Forma de pagamento para fechar</span><select value={tabClosingPayment} onChange={(event) => { setTabClosingPayment(event.target.value); setTabClosingMixedPayment(createEmptyMixedPayment()); setTabClosingChangeFor(""); }} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-2 outline-none"><option>Dinheiro</option><option>Pix</option><option>Cartão débito</option><option>Cartão crédito</option><option>Misto</option><option>Fiado/anotado</option></select></label>
+                                <label className="block"><span className="text-xs font-medium text-zinc-600">Forma de pagamento para fechar</span><select value={tabClosingPayment} onChange={(event) => { setTabClosingPayment(event.target.value); setTabClosingMixedPayment(createEmptyMixedPayment()); setTabClosingChangeFor(""); }} className="mt-1 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-2 outline-none"><option>Dinheiro</option><option>Pix</option><option>Cartão débito</option><option>Cartão crédito</option><option>Misto</option></select></label>
                                 {tabClosingPayment === "Dinheiro" && <div className="space-y-2"><Input label="Valor recebido / troco para quanto?" type="number" value={tabClosingChangeFor} onChange={setTabClosingChangeFor} placeholder="Ex: 100" />{tabClosingChangeFor && <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-emerald-800"><p className="text-xs font-bold">Troco da comanda</p><p className="text-2xl font-black">{money(calculateChangeDue(tabClosingChangeFor, total))}</p></div>}</div>}
                                 {tabClosingPayment === "Misto" && <div className="grid grid-cols-2 gap-2"><Input label="Pix" type="number" value={tabClosingMixedPayment.pix} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, pix: value })} /><Input label="Dinheiro" type="number" value={tabClosingMixedPayment.cash} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, cash: value })} /><Input label="Débito" type="number" value={tabClosingMixedPayment.debit} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, debit: value })} /><Input label="Crédito" type="number" value={tabClosingMixedPayment.credit} onChange={(value) => setTabClosingMixedPayment({ ...tabClosingMixedPayment, credit: value })} /><p className="col-span-2 text-xs font-bold text-zinc-600">Informado: {money(getMixedPaymentTotal(tabClosingMixedPayment))} de {money(total)}</p></div>}
                                 <Input label="Senha de login da loja para fechar" type="password" value={tabClosingStorePassword} onChange={setTabClosingStorePassword} placeholder="Digite a senha da loja" />
                                 <div className="flex gap-2"><Button onClick={() => closeTabAccount(tab.id)} disabled={tab.items.length === 0 || !tabClosingStorePassword} className="flex-1 rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Confirmar e imprimir 2 vias</Button><Button onClick={cancelClosingTab} variant="secondary" className="rounded-2xl">Cancelar</Button></div>
                               </div>
-                            ) : <Button onClick={() => startClosingTab(tab.id)} disabled={tab.items.length === 0 || !isCashOpen} className="w-full rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Fechar comanda</Button>}
+                            ) : <div className="grid grid-cols-1 md:grid-cols-2 gap-2"><Button onClick={() => printFullTabConsumption(tab.id)} disabled={tab.items.length === 0} variant="secondary" className="w-full rounded-2xl">Imprimir consumo completo</Button><Button onClick={() => startClosingTab(tab.id)} disabled={tab.items.length === 0 || !isCashOpen} className="w-full rounded-2xl bg-emerald-700 text-white hover:bg-emerald-800">Fechar comanda</Button></div>}
                           </div>
                         );
                       })}

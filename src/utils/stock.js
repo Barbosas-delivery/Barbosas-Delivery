@@ -1,5 +1,14 @@
 import { toPositiveInteger } from "./numbers";
 
+export function isStockControlledProduct(product = {}) {
+  if (!product) return true;
+  if (product.stockControlled !== undefined) return product.stockControlled === true;
+  if (product.stock_controlled !== undefined) return product.stock_controlled === true;
+  const type = String(product.productType || product.product_type || product.category || "").toLowerCase();
+  if (/(lanche|hamb[uú]rguer|hamburguer|por[cç][aã]o|combo)/.test(type)) return false;
+  return true;
+}
+
 export function expandItemsForStock(items) {
   return (items || []).flatMap((item) => {
     if (item.isKit && Array.isArray(item.kitItems)) {
@@ -30,7 +39,7 @@ export function validateOrderItems(items, products) {
     if (!product || product.active !== true) {
       return { valid: false, message: "Produto indisponível no pedido. Remova para continuar." };
     }
-    if (Number(product.stock || 0) < Number(quantity || 0)) {
+    if (isStockControlledProduct(product) && Number(product.stock || 0) < Number(quantity || 0)) {
       return { valid: false, message: `Estoque insuficiente para ${product.name}. Disponível: ${product.stock}.` };
     }
   }
@@ -79,7 +88,7 @@ export function reduceProductStock(products, items) {
     const totalQuantity = stockItems
       .filter((item) => Number(item.id) === Number(product.id))
       .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    if (!totalQuantity) return product;
+    if (!totalQuantity || !isStockControlledProduct(product)) return product;
     return { ...product, stock: Math.max(0, Number(product.stock || 0) - totalQuantity) };
   });
 }
@@ -90,7 +99,7 @@ export function restoreProductStock(products, items) {
     const totalQuantity = stockItems
       .filter((item) => Number(item.id) === Number(product.id))
       .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    if (!totalQuantity) return product;
+    if (!totalQuantity || !isStockControlledProduct(product)) return product;
     return { ...product, stock: Number(product.stock || 0) + totalQuantity };
   });
 }
