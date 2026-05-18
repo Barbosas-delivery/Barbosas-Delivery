@@ -492,3 +492,15 @@ Versão: `6.0.51-fase-63-combos-porcoes-molhos`
 - Acréscimos das escolhas entram no preço final do item.
 - Carrinho, pedido e impressão passam a carregar `selectedComboChoices`.
 - Criado SQL `supabase/migracao-final-producao-6-0-51.sql` com novas colunas, view e funções auxiliares.
+
+---
+
+## Fase 64 — Finalização profissional
+
+Versão: `6.0.52-fase-64-finalizacao-profissional`
+
+- Adicionado checklist **Pronto para produção** na aba Diagnóstico.
+- Diagnóstico exportado passa a incluir `productionReadiness` com progresso e itens validados.
+- Criado SQL `supabase/migracao-final-producao-6-0-52.sql` para registrar rodadas de validação operacional.
+- Criada documentação `docs/FASE-64-FINALIZACAO-PROFISSIONAL.md`.
+- Service worker, Electron e package atualizados para a versão final da fase 64.

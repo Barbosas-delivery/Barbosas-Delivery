@@ -52,10 +52,11 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.51-fase-63-combos-porcoes-molhos"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-51-fase-63-combos-porcoes-molhos-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.52-fase-64-finalizacao-profissional"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-52-fase-64-finalizacao-profissional-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
   const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
+  const finalizationMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-52.sql", import.meta.url), "utf8");
   assert.ok(appSource.includes("Barbosa's Lanches") || readFileSync(new URL("../src/constants/initialData.js", import.meta.url), "utf8").includes("Barbosa's Lanches"), "fase 60 deve converter a identidade para lanchonete");
   assert.ok(appSource.includes("Cardápio da lanchonete"), "cadastro deve orientar operação de lanchonete");
   assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
@@ -142,6 +143,11 @@ test("versão final consistente", () => {
   assert.ok(supabaseClientSource.includes("removeChannel()"), "cliente Supabase desativado precisa ter removeChannel() para cleanup seguro");
   assert.ok(readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8").includes("isTruthyActive(product.active)"), "produtos com active nulo/ausente no Supabase devem continuar visíveis, não sumir do cliente");
   assert.ok(readFileSync(new URL("../src/utils/catalog.js", import.meta.url), "utf8").includes("isTruthyActive(product.active)"), "catálogo do cliente precisa tratar active ausente como ativo para tabelas antigas");
+  assert.ok(constantsSource.includes("PRODUCTION_READINESS_CHECKLIST"), "fase 64 precisa expor checklist final de produção");
+  assert.ok(appSource.includes("Pronto para produção"), "diagnóstico precisa mostrar checklist final de produção");
+  assert.ok(appSource.includes("productionReadiness"), "diagnóstico exportado precisa incluir resumo de prontidão");
+  assert.match(finalizationMigrationSource, /create table if not exists public\.production_validation_runs/i, "fase 64 precisa registrar validações de produção");
+  assert.match(finalizationMigrationSource, /register_production_validation_run/i, "fase 64 precisa ter função para registrar rodada de validação");
 });
 
 test("fluxos principais existem no código", () => {
@@ -212,7 +218,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-51.sql",
+    "supabase/migracao-final-producao-6-0-52.sql",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "docs/FASE-60-CONVERSAO-LANCHONETE.md",
     "docs/FASE-61-PERSONALIZACAO-LANCHES.md",

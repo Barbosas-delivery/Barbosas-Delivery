@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.51-fase-63-combos-porcoes-molhos";
+export const APP_VERSION = "6.0.52-fase-64-finalizacao-profissional";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
@@ -76,3 +76,13 @@ export const TAB_DELAY_LIMIT_HOURS = 24;
 
 export const STORAGE_PREFIX = "barbosas_delivery_v3_";
 export const STORAGE_24_MONTHS_MS = 1000 * 60 * 60 * 24 * 730;
+
+export const PRODUCTION_READINESS_CHECKLIST = [
+  { id: "supabase", label: "Supabase configurado", description: "URL, chave anônima e migrações finais aplicadas." },
+  { id: "order_flow", label: "Pedido completo testado", description: "Cliente monta lanche, escolhe adicionais, remove ingredientes, envia pedido e a loja recebe." },
+  { id: "print_flow", label: "Impressão validada", description: "Cozinha, entrega e balcão imprimem em 80mm com personalização do lanche." },
+  { id: "stock_flow", label: "Estoque protegido", description: "Baixa atômica ativa e sem permitir saldo negativo na venda." },
+  { id: "vercel", label: "Deploy Vercel conferido", description: "Build web aprovado, service worker sem cache antigo e variáveis configuradas." },
+  { id: "desktop", label: "Desktop de impressão pronto", description: "Electron abre, lista impressoras, consome fila e permite reprocessar falhas." },
+  { id: "backup", label: "Rotina de backup definida", description: "Loja sabe baixar diagnóstico, backup diário e checklist antes de operar." },
+];

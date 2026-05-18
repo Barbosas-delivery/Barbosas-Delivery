@@ -1,4 +1,4 @@
-const CACHE_NAME = "barbosas-delivery-6-0-51-fase-63-combos-porcoes-molhos-sem-cache";
+const CACHE_NAME = "barbosas-delivery-6-0-52-fase-64-finalizacao-profissional-sem-cache";
 self.__BARBOSAS_DELIVERY_CACHE_POLICY__ = CACHE_NAME;
 
 self.addEventListener("install", (event) => {

@@ -1,5 +1,5 @@
 import { Button, Card, CardContent, CardBox, Metric, Icon, Title, Input } from "./ui";
-import { DELIVERY_STATUS, PAYMENT_STATUS } from "../constants/appConstants";
+import { DELIVERY_STATUS, PAYMENT_STATUS, PRODUCTION_READINESS_CHECKLIST } from "../constants/appConstants";
 import { initialStoreSettings } from "../constants/initialData";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { money, onlyPhoneNumbers, formatBrazilMobilePhone } from "../utils/formatters";
@@ -429,6 +429,21 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
     { name: "Testes internos", ok: passedTests === selfTests.length, detail: `${passedTests}/${selfTests.length} testes aprovados` },
   ];
 
+  const productionChecklist = PRODUCTION_READINESS_CHECKLIST.map((item) => {
+    const statusById = {
+      supabase: supabaseClientReady && supabaseUrlConfigured && supabaseKeyConfigured,
+      order_flow: activeProducts > 0 && Array.isArray(deliveries) && deliveries.length >= 0,
+      print_flow: printMode === "Serviço local" || localPrintUrl !== "Não configurada",
+      stock_flow: activeProducts > 0 && lowStockProducts === 0,
+      vercel: serviceWorkerCacheDisabled && online,
+      desktop: printMode === "Serviço local" || localPrintUrl !== "Não configurada",
+      backup: localStorageOk,
+    };
+    return { ...item, ok: Boolean(statusById[item.id]) };
+  });
+  const productionReadyCount = productionChecklist.filter((item) => item.ok).length;
+  const productionReadyPercent = Math.round((productionReadyCount / Math.max(productionChecklist.length, 1)) * 100);
+
   const exportDiagnostics = () => {
     const payload = {
       app: "Barbosa's Delivery",
@@ -465,6 +480,12 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
         promotions: (promotions || []).length,
       },
       checks,
+      productionReadiness: {
+        ready: productionReadyCount,
+        total: productionChecklist.length,
+        percent: productionReadyPercent,
+        items: productionChecklist,
+      },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -505,6 +526,27 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
             <div key={check.name} className={`rounded-2xl border p-4 ${check.ok ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
               <p className={`font-black ${check.ok ? "text-emerald-800" : "text-amber-800"}`}>{check.ok ? "✅" : "⚠️"} {check.name}</p>
               <p className="mt-1 text-sm text-zinc-600">{check.detail}</p>
+            </div>
+          ))}
+        </div>
+      </CardBox>
+
+      <CardBox>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-bold text-lg">Pronto para produção</h3>
+            <p className="text-sm text-zinc-500">Checklist final da fase 64 para validar pedido completo, impressão, estoque, Vercel e desktop antes de abrir a loja.</p>
+          </div>
+          <div className="rounded-2xl bg-zinc-950 px-4 py-3 text-white text-center">
+            <p className="text-xs font-black uppercase tracking-wide opacity-70">Conclusão</p>
+            <p className="text-2xl font-black">{productionReadyPercent}%</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {productionChecklist.map((item) => (
+            <div key={item.id} className={`rounded-2xl border p-4 ${item.ok ? "border-emerald-100 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}>
+              <p className={`font-black ${item.ok ? "text-emerald-800" : "text-zinc-800"}`}>{item.ok ? "✅" : "□"} {item.label}</p>
+              <p className="mt-1 text-sm text-zinc-600">{item.description}</p>
             </div>
           ))}
         </div>

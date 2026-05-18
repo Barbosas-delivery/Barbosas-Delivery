@@ -42,7 +42,7 @@ assert.match(mainSource, /setLoginItemSettings/, "Electron precisa permitir inic
 assert.match(mainSource, /fetchPrintCenterData/, "Electron precisa buscar dados da central de impressão");
 assert.match(mainSource, /requeuePrintJob/, "Electron precisa reenfileirar jobs para reimpressão");
 assert.match(mainSource, /upsertPrintWorkerHeartbeat/, "Electron precisa atualizar heartbeat do computador de impressão");
-assert.match(mainSource, /APP_VERSION = "6\.0\.51-fase-63-combos-porcoes-molhos"/, "Electron precisa expor a versão da Fase 63");
+assert.match(mainSource, /APP_VERSION = "6\.0\.52-fase-64-finalizacao-profissional"/, "Electron precisa expor a versão da Fase 64");
 assert.match(mainSource, /contextIsolation:\s*true/, "janela Electron precisa manter contextIsolation ativo");
 assert.match(mainSource, /nodeIntegration:\s*false/, "janela Electron não deve expor Node diretamente ao app web");
 assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("barbosasDesktop"/, "preload precisa expor bridge segura");
