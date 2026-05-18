@@ -521,8 +521,8 @@ function App() {
       const message = error.message || String(error);
       const missingCouponsTable = error.code === "PGRST205" || /coupons.*schema cache|Could not find the table/i.test(message);
       if (missingCouponsTable) {
-        console.warn("Tabela public.coupons ausente. Rode a migração 6.0.46 para habilitar cupons.", error);
-        setLastAction("Cupons indisponíveis: rode a migração 6.0.46 no Supabase para criar public.coupons.");
+        console.warn("Tabela public.coupons ausente. Rode a migração 6.0.47 para habilitar cupons.", error);
+        setLastAction("Cupons indisponíveis: rode a migração 6.0.47 no Supabase para criar public.coupons.");
       } else {
         console.error("Erro ao carregar cupons:", error);
       }
@@ -968,7 +968,7 @@ function App() {
     const printJobResult = await createPrintJobsForOrder(savedDelivery);
     if (printJobResult.error) {
       console.error("Erro ao criar fila de impressão:", printJobResult.error);
-      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.41 e verifique a tabela print_jobs.`, "loja", orderId);
+      addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.47 e verifique a tabela print_jobs.`, "loja", orderId);
     }
     await auditAction("save_order", "orders", orderId, { value: savedDelivery.value, status: savedDelivery.status, payment: savedDelivery.payment, cashSessionId: savedDelivery.cashSessionId || "", printJobsQueued: printJobResult.jobs?.length || 0, printJobQueueError: printJobResult.error?.message || "" });
 

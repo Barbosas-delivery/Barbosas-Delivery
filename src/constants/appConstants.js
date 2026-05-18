@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.46-fase-58-estabilidade-producao";
+export const APP_VERSION = "6.0.47-fase-59-impressao-automatica-app";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

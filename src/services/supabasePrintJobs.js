@@ -50,7 +50,7 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const createdAt = new Date().toISOString();
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.44",
+    templateVersion: "6.0.47",
     printType,
     source,
     createdAt,
@@ -95,36 +95,72 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   };
 }
 
-export function buildPrintJobRowsForOrder(delivery = {}) {
+export function buildPrintJobRowsForOrder(delivery = {}, options = {}) {
   const sourceId = String(delivery.id || "").trim();
   if (!sourceId) return [];
   const source = getPrintJobSource(delivery);
-  return getPrintTypesForOrder(delivery).map((printType) => ({
-    id: buildPrintJobId(sourceId, printType),
-    source,
-    source_id: sourceId,
-    print_type: printType,
-    status: PRINT_JOB_STATUS.PENDING,
-    payload: buildPrintJobPayload(delivery, printType),
-    copies: 1,
-    attempts: 0,
-    error_message: "",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }));
+  const includeLegacyTextId = options.includeLegacyTextId === true;
+  return getPrintTypesForOrder(delivery).map((printType) => {
+    const row = {
+      source,
+      source_id: sourceId,
+      print_type: printType,
+      status: PRINT_JOB_STATUS.PENDING,
+      payload: buildPrintJobPayload(delivery, printType),
+      copies: 1,
+      attempts: 0,
+      error_message: "",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    // Bancos antigos da Fase 52 criaram print_jobs.id como texto obrigatório.
+    // Bancos corrigidos/atuais usam id numérico identity. Por isso o fluxo padrão
+    // não envia id; só usamos o id textual como fallback quando o banco exigir.
+    if (includeLegacyTextId) row.id = buildPrintJobId(sourceId, printType);
+    return row;
+  });
+}
+
+function shouldRetryWithLegacyTextId(error) {
+  const message = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return Boolean(error) && (
+    message.includes("null value in column \"id\"") ||
+    message.includes("violates not-null constraint") ||
+    message.includes("column \"id\" of relation \"print_jobs\"")
+  );
 }
 
 export async function createPrintJobsForOrder(delivery = {}) {
   const rows = buildPrintJobRowsForOrder(delivery);
   if (!rows.length) return { jobs: [], error: null };
 
-  const { data, error } = await supabase
+  const query = supabase
     .from("print_jobs")
-    .upsert(rows, { onConflict: "id", ignoreDuplicates: true })
+    .upsert(rows, { onConflict: "source,source_id,print_type", ignoreDuplicates: true })
+    .select("id, source, source_id, print_type, status");
+
+  const { data, error } = await query;
+
+  if (!error) {
+    return {
+      jobs: Array.isArray(data) ? data : rows,
+      error: null,
+    };
+  }
+
+  if (!shouldRetryWithLegacyTextId(error)) {
+    return { jobs: [], error };
+  }
+
+  const legacyRows = buildPrintJobRowsForOrder(delivery, { includeLegacyTextId: true });
+  const legacyResult = await supabase
+    .from("print_jobs")
+    .upsert(legacyRows, { onConflict: "source,source_id,print_type", ignoreDuplicates: true })
     .select("id, source, source_id, print_type, status");
 
   return {
-    jobs: Array.isArray(data) ? data : rows,
-    error,
+    jobs: Array.isArray(legacyResult.data) ? legacyResult.data : legacyRows,
+    error: legacyResult.error,
   };
 }

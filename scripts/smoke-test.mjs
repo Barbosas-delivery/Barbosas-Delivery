@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.46-fase-58-estabilidade-producao"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-46-fase-58-estabilidade-producao-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.47-fase-59-impressao-automatica-app"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-47-fase-59-impressao-automatica-app-sem-cache/);
 
   const viteConfigSource = readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
   assert.match(viteConfigSource, /base:\s*["']\.\/["']/, "vite.config.js precisa usar base './' para o Electron carregar assets via file://.");
@@ -69,7 +69,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("const stockPersisted = await persistStockDeltasForItems"), "fluxos críticos devem verificar retorno da sincronização de estoque");
   assert.ok(appSource.includes("applyProductStockDeltasInSupabase"), "estoque deve usar delta atômico no Supabase quando a migração estiver aplicada");
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-46.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-47.sql", import.meta.url), "utf8");
   assert.doesNotMatch(stockServiceSource, /Fallback de compatibilidade|fallbackUsed:\s*true|select\("id, stock"\)/, "estoque não pode cair em fallback não atômico em produção");
   assert.match(stockServiceSource, /Migração de estoque atômico não encontrada/, "sem função SQL, o app deve alertar e não mascarar o erro");
   assert.match(stockMigrationSource, /for update/i, "função de estoque precisa travar a linha do produto");
@@ -121,6 +121,8 @@ test("versão final consistente", () => {
   assert.ok(printTemplatesSource.includes("Via de preparo") && printTemplatesSource.includes("Via do entregador") && printTemplatesSource.includes("Via do caixa"), "cada cupom precisa ter finalidade operacional clara");
   assert.ok(printTemplatesSource.includes("buildItemsHtml") && printTemplatesSource.includes("buildHtmlTicket"), "Electron precisa receber HTML pronto para impressão térmica");
   assert.ok(appSource.includes("createPrintJobsForOrder(savedDelivery)"), "pedido/venda salvo deve criar jobs de impressão no Supabase");
+  assert.ok(readFileSync(new URL("../src/services/supabasePrintJobs.js", import.meta.url), "utf8").includes("onConflict: \"source,source_id,print_type\""), "fila de impressão deve evitar duplicidade por source/source_id/print_type, não por id incompatível");
+  assert.ok(readFileSync(new URL("../src/services/supabasePrintJobs.js", import.meta.url), "utf8").includes("includeLegacyTextId"), "fila de impressão precisa ter fallback para bancos antigos com id textual obrigatório");
   assert.ok(appSource.includes("impressão pendente criada") || appSource.includes("impressões pendentes criadas"), "fluxos de PDV devem informar fila de impressão, não pop-up do navegador");
   assert.doesNotMatch(appSource, /printDeliveryReceipt\(savedSale|printDeliveryReceipt\(savedDelivery|preOpenedPrintWindow/, "criação de pedido/venda não deve depender de janela de impressão do navegador");
 
@@ -199,7 +201,7 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-46.sql",
+    "supabase/migracao-final-producao-6-0-47.sql",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "vercel.json",
     "src/utils/printJobTemplates.js",

@@ -173,7 +173,7 @@ export async function applyProductStockDeltasInSupabase(stockDeltas = []) {
   if (error) {
     const rpcMissing = /function|schema cache|apply_product_stock_deltas|could not find/i.test(String(error.message || error));
     const message = rpcMissing
-      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-46.sql antes de operar vendas."
+      ? "Migração de estoque atômico não encontrada. Rode supabase/migracao-final-producao-6-0-47.sql antes de operar vendas."
       : (error.message || "Falha ao aplicar movimento de estoque no Supabase.");
     return { error: new Error(message), fallbackUsed: false, data: null };
   }

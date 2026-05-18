@@ -437,3 +437,13 @@ Versão: `6.0.46-fase-58-estabilidade-producao`
 - Adicionado `vercel.json` para deploy com pnpm.
 - Scripts Electron ajustados para pnpm.
 - Migração obrigatória: `supabase/migracao-final-producao-6-0-46.sql`.
+
+
+## Fase 59 — Impressão automática definitiva para pedidos do app
+
+Versão: `6.0.47-fase-59-impressao-automatica-app`
+
+- Corrige a criação automática dos `print_jobs` para pedidos feitos pelo aplicativo do cliente.
+- O pedido do app passa a criar automaticamente as vias `customer_app + kitchen` e `customer_app + delivery`.
+- A fila de impressão agora deduplica por `source + source_id + print_type`, evitando conflito com bancos onde `print_jobs.id` é numérico.
+- Migração obrigatória: `supabase/migracao-final-producao-6-0-47.sql`.
