@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.54-fase-66-lanchonete-pro-comandas-pdv";
+export const APP_VERSION = "6.0.55-fase-67-testes-funcionais-completos";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
@@ -85,4 +85,20 @@ export const PRODUCTION_READINESS_CHECKLIST = [
   { id: "vercel", label: "Deploy Vercel conferido", description: "Build web aprovado, service worker sem cache antigo e variáveis configuradas." },
   { id: "desktop", label: "Desktop de impressão pronto", description: "Electron abre, lista impressoras, consome fila e permite reprocessar falhas." },
   { id: "backup", label: "Rotina de backup definida", description: "Loja sabe baixar diagnóstico, backup diário e checklist antes de operar." },
+];
+
+
+export const FUNCTIONAL_VALIDATION_CHECKLIST = [
+  { id: "category", label: "Categoria de teste criada", description: "Categoria TESTE FASE 67 - Lanches existe e recebe produtos." },
+  { id: "addon", label: "Adicional por categoria validado", description: "Adicional TESTE FASE 67 - Bacon extra aparece para todos os lanches da categoria." },
+  { id: "product", label: "Produto/lanche validado", description: "Lanche de teste cadastrado sem estoque obrigatório e com observação por item." },
+  { id: "combo", label: "Combo validado", description: "Combo teste cadastrado no lugar de kit e com itens vinculados." },
+  { id: "customer_order", label: "Pedido do cliente validado", description: "Carrinho aceita lanche, adicional, escolha de combo e observação." },
+  { id: "counter_sale", label: "PDV Balcão validado", description: "Venda normal do balcão monta itens e totais corretamente." },
+  { id: "tab_create", label: "Comanda criada pelo PDV", description: "Comanda de 1 a 100 exige mesa e nome completo do responsável." },
+  { id: "tab_add_items", label: "Adição em comanda validada", description: "Novos itens entram em comanda aberta e geram impressão separada." },
+  { id: "tab_print", label: "Impressão da comanda validada", description: "Adição, consumo completo e fechamento têm dados suficientes para cozinha/caixa." },
+  { id: "tab_close", label: "Fechamento da comanda validado", description: "Comanda vira venda normal paga e deixa de ser fiado." },
+  { id: "stock", label: "Estoque validado", description: "Lanches não baixam estoque; bebidas e produtos controlados continuam baixando." },
+  { id: "cleanup", label: "Limpeza dos dados de teste validada", description: "Dados TESTE FASE 67 podem ser apagados sem afetar produtos reais." },
 ];

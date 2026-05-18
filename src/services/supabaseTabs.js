@@ -120,7 +120,7 @@ export async function persistTabAccountInSupabase(tab, status = "open", options 
   });
   if (replaceItemsError || replaceItemsResult?.success === false) {
     const reason = replaceItemsError?.message || replaceItemsResult?.error || "verifique a função replace_tab_account_items";
-    return { error: new Error(`Comanda salva parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-54.sql.`) };
+    return { error: new Error(`Comanda salva parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-55.sql.`) };
   }
   return { error: null };
 }

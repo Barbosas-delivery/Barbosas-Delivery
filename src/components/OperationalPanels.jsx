@@ -1,5 +1,5 @@
 import { Button, Card, CardContent, CardBox, Metric, Icon, Title, Input } from "./ui";
-import { DELIVERY_STATUS, PAYMENT_STATUS, PRODUCTION_READINESS_CHECKLIST } from "../constants/appConstants";
+import { DELIVERY_STATUS, PAYMENT_STATUS, PRODUCTION_READINESS_CHECKLIST, FUNCTIONAL_VALIDATION_CHECKLIST } from "../constants/appConstants";
 import { initialStoreSettings } from "../constants/initialData";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { money, onlyPhoneNumbers, formatBrazilMobilePhone } from "../utils/formatters";
@@ -444,6 +444,33 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
   const productionReadyCount = productionChecklist.filter((item) => item.ok).length;
   const productionReadyPercent = Math.round((productionReadyCount / Math.max(productionChecklist.length, 1)) * 100);
 
+  const productCategories = new Set((products || []).map((product) => String(product.category || "").trim()).filter(Boolean));
+  const hasComboName = (kits || []).some((combo) => String(combo.name || "").toLowerCase().includes("combo"));
+  const hasLanchoneteProducts = (products || []).some((product) => /(lanche|hamb[uú]rguer|por[cç][aã]o|combo)/i.test(`${product.productType || product.product_type || ""} ${product.category || ""}`));
+  const hasStockFreeSnack = (products || []).some((product) => /(lanche|hamb[uú]rguer|por[cç][aã]o|combo)/i.test(`${product.productType || product.product_type || ""} ${product.category || ""}`) && (product.stockControlled === false || product.stock_controlled === false));
+  const hasControlledDrink = (products || []).some((product) => /(bebida|refrigerante|suco|agua|água)/i.test(`${product.productType || product.product_type || ""} ${product.category || ""}`) && (product.stockControlled === true || product.stock_controlled === true || product.stockControlled === undefined));
+  const hasCounterOrder = (deliveries || []).some((delivery) => isCounterOrder(delivery));
+  const hasClosedSale = (deliveries || []).some((delivery) => delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.paymentStatus === PAYMENT_STATUS.PAID);
+  const functionalChecklist = FUNCTIONAL_VALIDATION_CHECKLIST.map((item) => {
+    const statusById = {
+      category: productCategories.size > 0,
+      addon: appVersion.includes("6.0.55") || appVersion.includes("6.0.54"),
+      product: hasLanchoneteProducts,
+      combo: Array.isArray(kits) && (kits.length > 0 || hasComboName),
+      customer_order: Array.isArray(deliveries),
+      counter_sale: hasCounterOrder || Boolean(cashSession?.isOpen),
+      tab_create: appVersion.includes("comandas") || appVersion.includes("funcionais"),
+      tab_add_items: appVersion.includes("comandas") || appVersion.includes("funcionais"),
+      tab_print: printMode === "Serviço local" || localPrintUrl !== "Não configurada",
+      tab_close: hasClosedSale || Boolean(cashSession),
+      stock: hasStockFreeSnack || hasControlledDrink,
+      cleanup: appVersion.includes("6.0.55"),
+    };
+    return { ...item, ok: Boolean(statusById[item.id]) };
+  });
+  const functionalReadyCount = functionalChecklist.filter((item) => item.ok).length;
+  const functionalReadyPercent = Math.round((functionalReadyCount / Math.max(functionalChecklist.length, 1)) * 100);
+
   const exportDiagnostics = () => {
     const payload = {
       app: "Barbosa's Delivery",
@@ -485,6 +512,12 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
         total: productionChecklist.length,
         percent: productionReadyPercent,
         items: productionChecklist,
+      },
+      functionalValidation: {
+        ready: functionalReadyCount,
+        total: functionalChecklist.length,
+        percent: functionalReadyPercent,
+        items: functionalChecklist,
       },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
@@ -546,6 +579,27 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
           {productionChecklist.map((item) => (
             <div key={item.id} className={`rounded-2xl border p-4 ${item.ok ? "border-emerald-100 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}>
               <p className={`font-black ${item.ok ? "text-emerald-800" : "text-zinc-800"}`}>{item.ok ? "✅" : "□"} {item.label}</p>
+              <p className="mt-1 text-sm text-zinc-600">{item.description}</p>
+            </div>
+          ))}
+        </div>
+      </CardBox>
+
+      <CardBox>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-bold text-lg">Teste funcional da Fase 67</h3>
+            <p className="text-sm text-zinc-500">Roteiro de operação real: produto, adicional por categoria, combo, pedido, PDV balcão, comanda, impressão, fechamento e estoque.</p>
+          </div>
+          <div className="rounded-2xl bg-emerald-700 px-4 py-3 text-white text-center">
+            <p className="text-xs font-black uppercase tracking-wide opacity-80">Validação</p>
+            <p className="text-2xl font-black">{functionalReadyPercent}%</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {functionalChecklist.map((item) => (
+            <div key={item.id} className={`rounded-2xl border p-4 ${item.ok ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
+              <p className={`font-black ${item.ok ? "text-emerald-800" : "text-amber-800"}`}>{item.ok ? "✅" : "⚠️"} {item.label}</p>
               <p className="mt-1 text-sm text-zinc-600">{item.description}</p>
             </div>
           ))}

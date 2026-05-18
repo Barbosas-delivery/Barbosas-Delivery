@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.54-fase-66-lanchonete-pro-comandas-pdv"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-54-fase-66-lanchonete-pro-comandas-pdv-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.55-fase-67-testes-funcionais-completos"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-55-fase-67-testes-funcionais-completos-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
   const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
   const finalizationMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-52.sql", import.meta.url), "utf8");
@@ -64,9 +64,13 @@ test("versão final consistente", () => {
   assert.ok(stockServiceSource.includes("product_type"), "produtos precisam estar preparados para tipo de cardápio de lanchonete");
   assert.match(stockMigrationSource, /create table if not exists public\.menu_addons/i, "migração precisa preparar adicionais globais para lanchonete");
   const lanchoneteProMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-54.sql", import.meta.url), "utf8");
+  const functionalTestMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-55.sql", import.meta.url), "utf8");
   assert.match(lanchoneteProMigrationSource, /create table if not exists public\.category_addons/i, "fase 66 precisa criar adicionais por categoria");
   assert.match(lanchoneteProMigrationSource, /alter table if exists public\.tab_accounts/i, "fase 66 precisa preparar comandas integradas");
   assert.match(lanchoneteProMigrationSource, /stock_controlled/i, "fase 66 precisa separar lanches sem estoque de bebidas com estoque");
+  assert.match(functionalTestMigrationSource, /run_phase_67_functional_test/i, "fase 67 precisa ter função de teste funcional real");
+  assert.match(functionalTestMigrationSource, /cleanup_phase_67_test_data/i, "fase 67 precisa permitir limpar dados de teste");
+  assert.ok(appSource.includes("Teste funcional da Fase 67"), "diagnóstico precisa mostrar validação funcional da fase 67");
   assert.ok(appSource.includes("Personalize seu lanche"), "cliente precisa ter modal de personalização de lanche");
   assert.ok(appSource.includes("selectedAddons") && appSource.includes("removedIngredients") && appSource.includes("itemNote"), "carrinho precisa carregar adicionais, removidos e observação por item");
 
@@ -112,7 +116,7 @@ test("versão final consistente", () => {
   assert.ok(appSource.includes("catalogRefreshInterval"), "cliente aberto precisa atualizar catálogo mesmo sem realtime habilitado");
   assert.ok(appSource.includes("async function saveKitEdits"), "edição de kit precisa ser assíncrona para salvar no Supabase");
   assert.ok(appSource.includes('supabase.rpc("replace_kit_items"'), "edição de kit precisa substituir itens por função SQL transacional, não só no estado da tela");
-  assert.ok(appSource.includes("Kit atualizado e sincronizado no Supabase."), "edição de kit precisa confirmar sincronização real");
+  assert.ok(appSource.includes("Combo atualizado e sincronizado no Supabase."), "edição de combo precisa confirmar sincronização real");
   assert.match(stockMigrationSource, /create or replace function replace_kit_items/i, "migração final precisa criar função transacional para substituir itens de kit");
   assert.match(stockMigrationSource, /create or replace function replace_tab_account_items/i, "migração final precisa criar função transacional para substituir itens de comanda");
   assert.ok(readFileSync(new URL("../src/services/supabaseTabs.js", import.meta.url), "utf8").includes('supabase.rpc("replace_tab_account_items"'), "itens de comanda precisam ser substituídos via função SQL transacional");
@@ -223,6 +227,10 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-40-taxas-bairro.sql",
     "supabase/migracao-final-producao-6-0-52.sql",
     "supabase/migracao-final-producao-6-0-54.sql",
+    "supabase/migracao-final-producao-6-0-55.sql",
+    "docs/FASE-67-TESTES-FUNCIONAIS-COMPLETOS.md",
+    "CHECKLIST-TESTE-FUNCIONAL-FASE-67.md",
+    "scripts/functional-test-fase67.mjs",
     "docs/FASE-66-LANCHONETE-PRO-COMANDAS-PDV.md",
     "docs/ATUALIZAR-APP-INSTALADO-PC.md",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",

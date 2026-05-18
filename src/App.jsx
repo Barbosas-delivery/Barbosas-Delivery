@@ -606,13 +606,13 @@ function App() {
   async function loadKits() {
     const { data: kitData, error: kitError } = await supabase.from("kits").select("*");
     if (kitError) {
-      console.error("Erro ao carregar kits:", kitError);
+      console.error("Erro ao carregar combos:", kitError);
       setKits([]);
       return;
     }
     const { data: itemData, error: itemError } = await supabase.from("kit_items").select("*");
     if (itemError) {
-      console.error("Erro ao carregar itens dos kits:", itemError);
+      console.error("Erro ao carregar itens dos combos:", itemError);
       setKits((Array.isArray(kitData) ? kitData : []).map((kit) => ({ id: kit.id, name: kit.name || "", description: kit.description || "", items: [], price: Number(kit.price || 0), endDate: kit.end_date || kit.endDate || "", active: isTruthyActive(kit.active) })));
       return;
     }
@@ -1503,7 +1503,7 @@ function App() {
     if (!term) return availableProducts;
     return availableProducts.filter((product) => `${product.name || ""} ${product.barcode || ""} ${product.category || ""}`.toLowerCase().includes(term));
   }, [products, tabProductSearch]);
-  const shouldShowCustomerProducts = selectedCustomerGroup !== "Kits";
+  const shouldShowCustomerProducts = selectedCustomerGroup !== "Combos";
   const newKitProductsTotal = useMemo(() => buildKitProductsTotal(newKit.items, products), [newKit.items, products]);
 
   const safeCustomerCart = useMemo(() => sanitizeCustomerCart(customerCart), [customerCart]);
@@ -2264,8 +2264,8 @@ function App() {
   }
 
   async function addKit() {
-    if (!newKit.name.trim()) return setLastAction("Digite o nome do kit.");
-    if (newKit.items.length === 0) return setLastAction("Adicione produtos cadastrados para montar o kit.");
+    if (!newKit.name.trim()) return setLastAction("Digite o nome do combo.");
+    if (newKit.items.length === 0) return setLastAction("Adicione produtos cadastrados para montar o combo.");
     const baseTotal = buildKitProductsTotal(newKit.items, products);
     const finalPrice = newKit.price === "" ? baseTotal : Number(newKit.price || 0);
     const kitToSave = { id: makeUniqueNumericId(), name: newKit.name.trim(), description: newKit.description.trim(), items: newKit.items, price: finalPrice, endDate: newKit.endDate, active: true };
@@ -2274,16 +2274,16 @@ function App() {
     const { error: kitItemsError } = await insertWithSchemaRetry("kit_items", kitToSave.items.map((item) => ({ id: makeUniqueNumericId(), kit_id: kitToSave.id, product_id: item.productId, quantity: item.quantity })), false);
     if (kitItemsError) {
       const { error: cleanupError } = await supabase.from("kits").delete().eq("id", kitToSave.id);
-      if (cleanupError) console.warn("Kit principal não removido após falha nos itens:", cleanupError);
+      if (cleanupError) console.warn("Combo principal não removido após falha nos itens:", cleanupError);
       return setLastAction(cleanupError
-        ? `Itens do kit não salvos no Supabase e o kit principal pode ter ficado incompleto: ${kitItemsError.message || "verifique kit_items."}`
-        : `Itens do kit não salvos no Supabase. O kit principal foi removido para evitar cadastro incompleto: ${kitItemsError.message || "verifique kit_items."}`);
+        ? `Itens do combo não salvos no Supabase e o combo principal pode ter ficado incompleto: ${kitItemsError.message || "verifique kit_items."}`
+        : `Itens do combo não salvos no Supabase. O combo principal foi removido para evitar cadastro incompleto: ${kitItemsError.message || "verifique kit_items."}`);
     }
     setKits((previousKits) => [...previousKits, kitToSave]);
     setNewKit({ name: "", description: "", items: [], price: "", endDate: "", active: true });
     setNewKitPriceEdited(false);
     setKitProductSearch("");
-    setLastAction("Kit cadastrado com sucesso.");
+    setLastAction("Combo cadastrado com sucesso.");
   }
 
   async function toggleKitStatus(id) {
@@ -2291,9 +2291,9 @@ function App() {
     if (!kit) return;
     const nextActive = !kit.active;
     const { error } = await updateWithSchemaRetry("kits", id, { active: nextActive });
-    if (error) return setLastAction(`Status do kit não salvo no Supabase: ${error.message || "verifique kits."}`);
+    if (error) return setLastAction(`Status do combo não salvo no Supabase: ${error.message || "verifique kits."}`);
     setKits((previousKits) => previousKits.map((item) => (item.id === id ? { ...item, active: nextActive } : item)));
-    setLastAction("Status do kit atualizado no Supabase.");
+    setLastAction("Status do combo atualizado no Supabase.");
   }
 
   function updateKitField(id, field, value) {
@@ -2357,34 +2357,34 @@ function App() {
 
     if (replaceItemsError || replaceItemsResult?.success === false) {
       const reason = replaceItemsError?.message || replaceItemsResult?.error || "verifique a função replace_kit_items";
-      console.error("Erro ao substituir itens do kit de forma transacional:", replaceItemsError || replaceItemsResult);
+      console.error("Erro ao substituir itens do combo de forma transacional:", replaceItemsError || replaceItemsResult);
       return setLastAction(`Combo salvo parcialmente: dados principais salvos, mas os itens não foram substituídos com segurança (${reason}). Rode supabase/migracao-final-producao-6-0-36.sql.`);
     }
 
     setKits((previousKits) => previousKits.map((item) => (item.id === id ? { ...kit, items: normalizedItems } : item)));
     setEditingKitId(null);
     await loadKits();
-    setLastAction("Kit atualizado e sincronizado no Supabase.");
+    setLastAction("Combo atualizado e sincronizado no Supabase.");
   }
 
   function addKitToCustomerCart(kit) {
     setShowCustomerCheckout(false);
     setShowCustomerNeedMoreMessage(false);
     setCustomerOrderConfirmation(null);
-    if (!kit || !Array.isArray(kit.items) || kit.items.length === 0) return setCustomerError("Kit indisponível no momento.");
+    if (!kit || !Array.isArray(kit.items) || kit.items.length === 0) return setCustomerError("Combo indisponível no momento.");
     const kitItems = getKitItemsForOrder(kit, products).filter((item) => item.id !== undefined && item.id !== null && toPositiveInteger(item.quantity, 0) > 0);
-    if (kitItems.length === 0 || kitItems.length !== kit.items.length) return setCustomerError("Kit com produto indisponível ou sem estoque. Revise o cadastro do kit na loja.");
+    if (kitItems.length === 0 || kitItems.length !== kit.items.length) return setCustomerError("Combo com produto indisponível ou sem estoque. Revise o cadastro do combo na loja.");
     const kitPrice = toSafeMoneyNumber(kit.price || buildKitProductsTotal(kit.items, products), 0);
 
     setCustomerCart((previousCart) => {
       const currentCart = sanitizeCustomerCart(previousCart);
-      const nextCart = [...currentCart, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name || "Kit", price: kitPrice, quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems, cartKey: `kit-${kit.id}-${Date.now()}-${Math.random().toString(36).slice(2)}` }];
+      const nextCart = [...currentCart, { id: `kit-${kit.id}-${Date.now()}`, name: kit.name || "Combo", price: kitPrice, quantity: 1, barcode: "KIT", isKit: true, kitId: kit.id, kitItems, cartKey: `kit-${kit.id}-${Date.now()}-${Math.random().toString(36).slice(2)}` }];
       const validation = validateOrderItems(nextCart, products);
       if (!validation.valid) {
         setCustomerError(validation.message);
         return currentCart;
       }
-      setCustomerError(`${kit.name || "Kit"} adicionado ao pedido.`);
+      setCustomerError(`${kit.name || "Combo"} adicionado ao pedido.`);
       return nextCart;
     });
   }
@@ -5151,7 +5151,7 @@ function App() {
   const tabs = [
     { id: "dashboard", label: "Painel", icon: "chart" },
     { id: "products", label: "Produtos", icon: "package" },
-    { id: "kits", label: "Kits", icon: "package" },
+    { id: "kits", label: "Combos", icon: "package" },
     { id: "promos", label: "Promoções", icon: "percent" },
     { id: "deliveries", label: "PDV Entregas", icon: "truck" },
     { id: "counter", label: "PDV Balcão", icon: "money" },
@@ -5487,7 +5487,7 @@ function App() {
                   <div className="sticky top-3 z-20 rounded-3xl bg-white text-zinc-950 p-3 space-y-3 shadow-lg md:static md:shadow-none">
                     <SearchBox value={customerProductSearch} onChange={setCustomerProductSearch} placeholder="Buscar produto por nome, grupo ou código" />
                     <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
-                      {["Todos", ...(customerVisibleKits.length > 0 ? ["Kits"] : []), ...visibleCustomerGroups].map((group) => (
+                      {["Todos", ...(customerVisibleKits.length > 0 ? ["Combos"] : []), ...visibleCustomerGroups].map((group) => (
                         <button
                           key={group}
                           type="button"
@@ -5500,9 +5500,9 @@ function App() {
                     </div>
                   </div>
 
-                  {customerVisibleKits.length > 0 && (selectedCustomerGroup === "Todos" || selectedCustomerGroup === "Kits") && (
+                  {customerVisibleKits.length > 0 && (selectedCustomerGroup === "Todos" || selectedCustomerGroup === "Combos") && (
                     <div className="space-y-3">
-                      <h3 className="text-white font-black text-sm px-1 uppercase tracking-wide">Kits</h3>
+                      <h3 className="text-white font-black text-sm px-1 uppercase tracking-wide">Combos</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {customerVisibleKits.map((kit) => (
                           <div key={kit.id} className="rounded-2xl bg-yellow-50 text-zinc-950 p-3 border border-yellow-200 shadow-sm">
@@ -6291,16 +6291,16 @@ function App() {
                 <Title title="Combos da loja" subtitle="Monte combos usando somente produtos já cadastrados. O valor base vem dos produtos, mas pode ser alterado." />
 
                 <CardBox>
-                  <h3 className="font-bold text-lg mb-4">Novo kit</h3>
+                  <h3 className="font-bold text-lg mb-4">Novo combo</h3>
                   <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">
-                    <p className="font-bold">Regra dos kits</p>
-                    <p>O kit só pode ser montado com produtos cadastrados. Se não colocar data final, ele fica ativo até você inativar manualmente.</p>
+                    <p className="font-bold">Regra dos combos</p>
+                    <p>O combo é montado com produtos cadastrados. Se não colocar data final, ele fica ativo até você inativar manualmente.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-                    <Input label="Nome do kit" value={newKit.name} onChange={(value) => setNewKit({ ...newKit, name: value })} placeholder="Ex: Kit Balada" />
+                    <Input label="Nome do combo" value={newKit.name} onChange={(value) => setNewKit({ ...newKit, name: value })} placeholder="Ex: Kit Balada" />
                     <Input label="Descrição" value={newKit.description} onChange={(value) => setNewKit({ ...newKit, description: value })} placeholder="Ex: 2 vodka, 2 energéticos..." />
-                    <Input label="Valor do kit" type="number" value={newKit.price} onChange={(value) => { setNewKitPriceEdited(true); setNewKit({ ...newKit, price: value === "" ? "" : Number(value || 0) }); }} placeholder={String(newKitProductsTotal)} />
+                    <Input label="Valor do combo" type="number" value={newKit.price} onChange={(value) => { setNewKitPriceEdited(true); setNewKit({ ...newKit, price: value === "" ? "" : Number(value || 0) }); }} placeholder={String(newKitProductsTotal)} />
                     <Input label="Data para acabar" type="date" value={newKit.endDate} onChange={(value) => setNewKit({ ...newKit, endDate: value })} />
                   </div>
 
@@ -6320,7 +6320,7 @@ function App() {
 
                     <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4">
                       <h4 className="font-bold mb-3">Produtos do combo</h4>
-                      {newKit.items.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto adicionado ao kit.</p>}
+                      {newKit.items.length === 0 && <p className="text-sm text-zinc-500">Nenhum produto adicionado ao combo.</p>}
                       <div className="grid gap-2">
                         {newKit.items.map((item) => {
                           const product = products.find((currentProduct) => currentProduct.id === Number(item.productId));
@@ -6340,18 +6340,18 @@ function App() {
                       </div>
                       <div className="mt-4 border-t border-zinc-200 pt-3">
                         <p className="text-sm text-zinc-500">Valor dos produtos: {money(newKitProductsTotal)}</p>
-                        <p className="text-xl font-black">Valor do kit: {money(newKit.price === "" ? newKitProductsTotal : newKit.price)}</p>
+                        <p className="text-xl font-black">Valor do combo: {money(newKit.price === "" ? newKitProductsTotal : newKit.price)}</p>
                       </div>
                     </div>
                   </div>
 
-                  <Button onClick={addKit} className="mt-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Cadastrar kit</Button>
+                  <Button onClick={addKit} className="mt-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Cadastrar combo</Button>
                 </CardBox>
 
                 <CardBox>
-                  <h3 className="font-bold text-lg mb-4">Kits cadastrados</h3>
+                  <h3 className="font-bold text-lg mb-4">Combos cadastrados</h3>
                   <div className="grid gap-3">
-                    {kits.length === 0 && <p className="text-sm text-zinc-500">Nenhum kit cadastrado.</p>}
+                    {kits.length === 0 && <p className="text-sm text-zinc-500">Nenhum combo cadastrado.</p>}
                     {kits.map((kit) => {
                       const isEditing = editingKitId === kit.id;
                       const baseTotal = buildKitProductsTotal(kit.items, products);
@@ -6363,9 +6363,9 @@ function App() {
                                 <p className="font-black">{kit.name}</p>
                                 <p className="text-sm text-zinc-600">{kit.description || describeKitItems(kit, products)}</p>
                                 <p className="text-xs text-zinc-500">Produtos: {describeKitItems(kit, products)}</p>
-                                <p className="text-xs text-zinc-500">Valor dos produtos: {money(baseTotal)} • Valor do kit: {money(kit.price)} • Data final: {kit.endDate || "sem data"}</p>
+                                <p className="text-xs text-zinc-500">Valor dos produtos: {money(baseTotal)} • Valor do combo: {money(kit.price)} • Data final: {kit.endDate || "sem data"}</p>
                                 <p className={`text-sm font-semibold ${kit.active && isKitInPeriod(kit) ? "text-emerald-700" : "text-red-600"}`}>Status: {kit.active && isKitInPeriod(kit) ? "Ativo" : "Inativo"}</p>
-                                {kit.active && !isKitInPeriod(kit) && <p className="text-xs font-bold text-amber-700">Data final vencida. O kit não aparece para o cliente.</p>}
+                                {kit.active && !isKitInPeriod(kit) && <p className="text-xs font-bold text-amber-700">Data final vencida. O combo não aparece para o cliente.</p>}
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button onClick={() => setEditingKitId(kit.id)} variant="secondary" className="rounded-2xl">Editar combo</Button>
@@ -6377,7 +6377,7 @@ function App() {
                               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                                 <Input label="Nome" value={kit.name} onChange={(value) => updateKitField(kit.id, "name", value)} />
                                 <Input label="Descrição" value={kit.description} onChange={(value) => updateKitField(kit.id, "description", value)} />
-                                <Input label="Valor do kit" type="number" value={kit.price} onChange={(value) => updateKitField(kit.id, "price", value)} />
+                                <Input label="Valor do combo" type="number" value={kit.price} onChange={(value) => updateKitField(kit.id, "price", value)} />
                                 <Input label="Data para acabar" type="date" value={kit.endDate} onChange={(value) => updateKitField(kit.id, "endDate", value)} />
                               </div>
                               <div className="rounded-3xl border border-zinc-100 bg-white p-4 space-y-3">
@@ -6620,7 +6620,7 @@ function App() {
                 <Title title="Frente de caixa para entregas" subtitle="Pesquise produtos, monte o pedido, lance a entrega e imprima." />
                 <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
                   <CardBox>
-                    <h3 className="font-bold text-lg mb-4">1. Pesquisar produtos e kits</h3>
+                    <h3 className="font-bold text-lg mb-4">1. Pesquisar produtos e combos</h3>
                     <SearchBox value={deliveryProductSearch} onChange={setDeliveryProductSearch} placeholder="Buscar produto por nome, categoria ou código de barras" />
                     <div className="mt-4 grid gap-3 max-h-96 overflow-auto pr-1">
                       {deliveryProductResults.map((product) => <div key={product.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50 p-3"><div><p className="font-bold">{product.name}</p><p className="text-xs text-zinc-500">{product.category} • Código: {product.barcode}</p><p className="text-sm font-semibold mt-1">{money(product.price)}</p></div><Button onClick={() => addProductToDelivery(product)} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800"><span className="mr-2"><Icon name="plus" /></span>Adicionar</Button></div>)}
@@ -6716,7 +6716,7 @@ function App() {
                 <Title title="PDV Balcão" subtitle="Venda presencial separada do PDV Entregas, mas ligada ao estoque, caixa, pagamento e relatórios." />
                 <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
                   <CardBox>
-                    <h3 className="font-bold text-lg mb-4">1. Pesquisar produtos e kits</h3>
+                    <h3 className="font-bold text-lg mb-4">1. Pesquisar produtos e combos</h3>
                     <SearchBox value={counterProductSearch} onChange={setCounterProductSearch} placeholder="Buscar produto por nome, grupo ou código" />
                     <div className="mt-4 grid gap-3 max-h-80 overflow-auto pr-1">
                       {counterProductResults.map((product) => (

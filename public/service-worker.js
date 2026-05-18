@@ -1,4 +1,4 @@
-const CACHE_NAME = "barbosas-delivery-6-0-54-fase-66-lanchonete-pro-comandas-pdv-sem-cache";
+const CACHE_NAME = "barbosas-delivery-6-0-55-fase-67-testes-funcionais-completos-sem-cache";
 self.__BARBOSAS_DELIVERY_CACHE_POLICY__ = CACHE_NAME;
 
 self.addEventListener("install", (event) => {

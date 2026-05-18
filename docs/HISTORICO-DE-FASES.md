@@ -531,3 +531,12 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Adição posterior de itens na comanda com impressão dos novos itens.
 - Impressão de consumo completo da comanda.
 - Fechamento da comanda como venda normal.
+
+## Fase 67 — 6.0.55 — Testes funcionais completos da lanchonete
+
+- Criado teste funcional simulado em `scripts/functional-test-fase67.mjs`.
+- Criada migração `supabase/migracao-final-producao-6-0-55.sql`.
+- Criadas funções SQL para rodar e limpar dados de teste com prefixo `TESTE FASE 67`.
+- Diagnóstico ganhou checklist de teste funcional da Fase 67.
+- Interface reforçada para falar Combos no lugar de Kits em áreas visíveis.
+- `npm test` agora valida smoke test, Electron e fluxo funcional de categoria, adicional, produto, combo, comanda, impressão e estoque.
