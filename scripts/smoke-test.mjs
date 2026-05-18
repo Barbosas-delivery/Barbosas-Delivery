@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.55-fase-67-testes-funcionais-completos"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-55-fase-67-testes-funcionais-completos-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.56-fase-68-teste-operacional-completo"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-56-fase-68-teste-operacional-completo-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
   const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
   const finalizationMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-52.sql", import.meta.url), "utf8");
@@ -65,12 +65,18 @@ test("versão final consistente", () => {
   assert.match(stockMigrationSource, /create table if not exists public\.menu_addons/i, "migração precisa preparar adicionais globais para lanchonete");
   const lanchoneteProMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-54.sql", import.meta.url), "utf8");
   const functionalTestMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-55.sql", import.meta.url), "utf8");
+  const operationalTestMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-56.sql", import.meta.url), "utf8");
   assert.match(lanchoneteProMigrationSource, /create table if not exists public\.category_addons/i, "fase 66 precisa criar adicionais por categoria");
   assert.match(lanchoneteProMigrationSource, /alter table if exists public\.tab_accounts/i, "fase 66 precisa preparar comandas integradas");
   assert.match(lanchoneteProMigrationSource, /stock_controlled/i, "fase 66 precisa separar lanches sem estoque de bebidas com estoque");
   assert.match(functionalTestMigrationSource, /run_phase_67_functional_test/i, "fase 67 precisa ter função de teste funcional real");
   assert.match(functionalTestMigrationSource, /cleanup_phase_67_test_data/i, "fase 67 precisa permitir limpar dados de teste");
+  assert.match(operationalTestMigrationSource, /run_phase_68_operational_test/i, "fase 68 precisa ter função de teste operacional completo");
+  assert.match(operationalTestMigrationSource, /cleanup_phase_68_test_data/i, "fase 68 precisa permitir limpar dados de teste operacional");
+  assert.match(operationalTestMigrationSource, /cash_open/i, "fase 68 precisa testar abertura de caixa");
+  assert.match(operationalTestMigrationSource, /confirm_delivery/i, "fase 68 precisa testar confirmação de entrega");
   assert.ok(appSource.includes("Teste funcional da Fase 67"), "diagnóstico precisa mostrar validação funcional da fase 67");
+  assert.ok(appSource.includes("Teste operacional completo da Fase 68"), "diagnóstico precisa mostrar validação operacional da fase 68");
   assert.ok(appSource.includes("Personalize seu lanche"), "cliente precisa ter modal de personalização de lanche");
   assert.ok(appSource.includes("selectedAddons") && appSource.includes("removedIngredients") && appSource.includes("itemNote"), "carrinho precisa carregar adicionais, removidos e observação por item");
 
@@ -228,9 +234,13 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-final-producao-6-0-52.sql",
     "supabase/migracao-final-producao-6-0-54.sql",
     "supabase/migracao-final-producao-6-0-55.sql",
+    "supabase/migracao-final-producao-6-0-56.sql",
     "docs/FASE-67-TESTES-FUNCIONAIS-COMPLETOS.md",
+    "docs/FASE-68-TESTE-OPERACIONAL-COMPLETO.md",
     "CHECKLIST-TESTE-FUNCIONAL-FASE-67.md",
+    "CHECKLIST-TESTE-OPERACIONAL-FASE-68.md",
     "scripts/functional-test-fase67.mjs",
+    "scripts/operational-test-fase68.mjs",
     "docs/FASE-66-LANCHONETE-PRO-COMANDAS-PDV.md",
     "docs/ATUALIZAR-APP-INSTALADO-PC.md",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",

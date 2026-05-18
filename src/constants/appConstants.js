@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.55-fase-67-testes-funcionais-completos";
+export const APP_VERSION = "6.0.56-fase-68-teste-operacional-completo";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
@@ -101,4 +101,22 @@ export const FUNCTIONAL_VALIDATION_CHECKLIST = [
   { id: "tab_close", label: "Fechamento da comanda validado", description: "Comanda vira venda normal paga e deixa de ser fiado." },
   { id: "stock", label: "Estoque validado", description: "Lanches não baixam estoque; bebidas e produtos controlados continuam baixando." },
   { id: "cleanup", label: "Limpeza dos dados de teste validada", description: "Dados TESTE FASE 67 podem ser apagados sem afetar produtos reais." },
+];
+
+export const OPERATIONAL_VALIDATION_CHECKLIST = [
+  { id: "cash_open", label: "Abrir caixa", description: "Cria sessão de caixa aberta com valor inicial e operador." },
+  { id: "cash_supply", label: "Suprimento de caixa", description: "Registra reforço/suprimento vinculado ao caixa." },
+  { id: "cash_withdrawal", label: "Sangria", description: "Registra retirada de dinheiro com motivo operacional." },
+  { id: "customer_delivery", label: "Pedido delivery", description: "Cria pedido delivery com cliente, endereço, taxa, itens e pagamento." },
+  { id: "accept_delivery", label: "Aceitar pedido", description: "Pedido recebe aceite da loja/operador com data e responsável." },
+  { id: "dispatch_delivery", label: "Sair para entrega", description: "Pedido recebe motoboy, horário de retirada e status de rota." },
+  { id: "confirm_delivery", label: "Confirmar entrega", description: "Pedido finaliza como entregue confirmado com pagamento pago." },
+  { id: "counter_sale", label: "Venda balcão", description: "Venda de balcão paga e vinculada ao caixa aberto." },
+  { id: "tab_full_flow", label: "Comanda completa", description: "Comanda nasce no PDV, recebe itens, imprime, fecha e vira venda paga." },
+  { id: "stock_movement", label: "Estoque real", description: "Bebida controlada baixa estoque; lanche sem estoque não baixa." },
+  { id: "print_jobs", label: "Impressões", description: "Gera cozinha, entrega, balcão, comanda, consumo completo e fechamento." },
+  { id: "cancel_order", label: "Cancelamento", description: "Pedido cancelado registra motivo, pagamento cancelado e auditoria." },
+  { id: "cash_close", label: "Fechar caixa", description: "Caixa fecha com totais por pagamento, sangria, suprimento e diferença." },
+  { id: "reports", label: "Relatórios e auditoria", description: "Resumo operacional, notificações e histórico ficam consultáveis." },
+  { id: "cleanup", label: "Limpeza segura", description: "Dados TESTE FASE 68 podem ser removidos sem afetar dados reais." },
 ];

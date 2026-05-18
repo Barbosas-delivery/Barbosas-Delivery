@@ -540,3 +540,13 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Diagnóstico ganhou checklist de teste funcional da Fase 67.
 - Interface reforçada para falar Combos no lugar de Kits em áreas visíveis.
 - `npm test` agora valida smoke test, Electron e fluxo funcional de categoria, adicional, produto, combo, comanda, impressão e estoque.
+
+
+## Fase 68 — 6.0.56 — Teste operacional completo do sistema
+
+- Criado teste operacional amplo em `scripts/operational-test-fase68.mjs`.
+- Criada migração `supabase/migracao-final-producao-6-0-56.sql`.
+- Criadas funções SQL para rodar e limpar dados `TESTE FASE 68`.
+- Teste cobre caixa, delivery, aceitar pedido, sair para entrega, confirmar entrega, PDV balcão, comanda, estoque, impressão, cancelamento, fechamento de caixa, auditoria e relatórios.
+- Diagnóstico ganhou checklist da Fase 68.
+- `npm test` agora valida smoke test, Electron, Fase 67 e Fase 68.

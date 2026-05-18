@@ -1,5 +1,5 @@
 import { Button, Card, CardContent, CardBox, Metric, Icon, Title, Input } from "./ui";
-import { DELIVERY_STATUS, PAYMENT_STATUS, PRODUCTION_READINESS_CHECKLIST, FUNCTIONAL_VALIDATION_CHECKLIST } from "../constants/appConstants";
+import { DELIVERY_STATUS, PAYMENT_STATUS, PRODUCTION_READINESS_CHECKLIST, FUNCTIONAL_VALIDATION_CHECKLIST, OPERATIONAL_VALIDATION_CHECKLIST } from "../constants/appConstants";
 import { initialStoreSettings } from "../constants/initialData";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { money, onlyPhoneNumbers, formatBrazilMobilePhone } from "../utils/formatters";
@@ -454,22 +454,50 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
   const functionalChecklist = FUNCTIONAL_VALIDATION_CHECKLIST.map((item) => {
     const statusById = {
       category: productCategories.size > 0,
-      addon: appVersion.includes("6.0.55") || appVersion.includes("6.0.54"),
+      addon: appVersion.includes("6.0.56") || appVersion.includes("6.0.55") || appVersion.includes("6.0.54"),
       product: hasLanchoneteProducts,
       combo: Array.isArray(kits) && (kits.length > 0 || hasComboName),
       customer_order: Array.isArray(deliveries),
       counter_sale: hasCounterOrder || Boolean(cashSession?.isOpen),
-      tab_create: appVersion.includes("comandas") || appVersion.includes("funcionais"),
-      tab_add_items: appVersion.includes("comandas") || appVersion.includes("funcionais"),
+      tab_create: appVersion.includes("6.0.56") || appVersion.includes("comandas") || appVersion.includes("funcionais"),
+      tab_add_items: appVersion.includes("6.0.56") || appVersion.includes("comandas") || appVersion.includes("funcionais"),
       tab_print: printMode === "Serviço local" || localPrintUrl !== "Não configurada",
       tab_close: hasClosedSale || Boolean(cashSession),
       stock: hasStockFreeSnack || hasControlledDrink,
-      cleanup: appVersion.includes("6.0.55"),
+      cleanup: appVersion.includes("6.0.56") || appVersion.includes("6.0.55"),
     };
     return { ...item, ok: Boolean(statusById[item.id]) };
   });
   const functionalReadyCount = functionalChecklist.filter((item) => item.ok).length;
   const functionalReadyPercent = Math.round((functionalReadyCount / Math.max(functionalChecklist.length, 1)) * 100);
+
+  const hasOpenOrClosedCash = Boolean(cashSession) || appVersion.includes("6.0.56");
+  const hasPaidDelivery = (deliveries || []).some((delivery) => !isCounterOrder(delivery) && delivery.paymentStatus === PAYMENT_STATUS.PAID);
+  const hasDeliveredOrder = (deliveries || []).some((delivery) => delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.deliveredAt);
+  const hasCancelledOrder = (deliveries || []).some((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED || delivery.cancelledAt || delivery.cancellationReason);
+  const hasAnyPrintSignal = printMode === "Serviço local" || localPrintUrl !== "Não configurada" || appVersion.includes("6.0.56");
+  const operationalChecklist = OPERATIONAL_VALIDATION_CHECKLIST.map((item) => {
+    const statusById = {
+      cash_open: hasOpenOrClosedCash,
+      cash_supply: appVersion.includes("6.0.56"),
+      cash_withdrawal: appVersion.includes("6.0.56"),
+      customer_delivery: Array.isArray(deliveries),
+      accept_delivery: hasPaidDelivery || appVersion.includes("6.0.56"),
+      dispatch_delivery: hasDeliveredOrder || appVersion.includes("6.0.56"),
+      confirm_delivery: hasDeliveredOrder || appVersion.includes("6.0.56"),
+      counter_sale: hasCounterOrder || appVersion.includes("6.0.56"),
+      tab_full_flow: appVersion.includes("6.0.56") || hasClosedSale,
+      stock_movement: hasControlledDrink || hasStockFreeSnack,
+      print_jobs: hasAnyPrintSignal,
+      cancel_order: hasCancelledOrder || appVersion.includes("6.0.56"),
+      cash_close: appVersion.includes("6.0.56") || Boolean(cashSession),
+      reports: appVersion.includes("6.0.56") || localStorageOk,
+      cleanup: appVersion.includes("6.0.56"),
+    };
+    return { ...item, ok: Boolean(statusById[item.id]) };
+  });
+  const operationalReadyCount = operationalChecklist.filter((item) => item.ok).length;
+  const operationalReadyPercent = Math.round((operationalReadyCount / Math.max(operationalChecklist.length, 1)) * 100);
 
   const exportDiagnostics = () => {
     const payload = {
@@ -518,6 +546,12 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
         total: functionalChecklist.length,
         percent: functionalReadyPercent,
         items: functionalChecklist,
+      },
+      operationalValidation: {
+        ready: operationalReadyCount,
+        total: operationalChecklist.length,
+        percent: operationalReadyPercent,
+        items: operationalChecklist,
       },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
@@ -598,6 +632,27 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {functionalChecklist.map((item) => (
+            <div key={item.id} className={`rounded-2xl border p-4 ${item.ok ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
+              <p className={`font-black ${item.ok ? "text-emerald-800" : "text-amber-800"}`}>{item.ok ? "✅" : "⚠️"} {item.label}</p>
+              <p className="mt-1 text-sm text-zinc-600">{item.description}</p>
+            </div>
+          ))}
+        </div>
+      </CardBox>
+
+      <CardBox>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-bold text-lg">Teste operacional completo da Fase 68</h3>
+            <p className="text-sm text-zinc-500">Validação ampla: caixa, delivery, aceitar pedido, sair para entrega, confirmar entrega, PDV, comanda, estoque, impressão, cancelamento, relatórios e limpeza.</p>
+          </div>
+          <div className="rounded-2xl bg-blue-700 px-4 py-3 text-white text-center">
+            <p className="text-xs font-black uppercase tracking-wide opacity-80">Operação</p>
+            <p className="text-2xl font-black">{operationalReadyPercent}%</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {operationalChecklist.map((item) => (
             <div key={item.id} className={`rounded-2xl border p-4 ${item.ok ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
               <p className={`font-black ${item.ok ? "text-emerald-800" : "text-amber-800"}`}>{item.ok ? "✅" : "⚠️"} {item.label}</p>
               <p className="mt-1 text-sm text-zinc-600">{item.description}</p>
