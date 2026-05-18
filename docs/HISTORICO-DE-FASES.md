@@ -467,3 +467,14 @@ Versão: `6.0.49-fase-61-personalizacao-lanches`
 - `order_items` passa a suportar `selected_addons`, `removed_ingredients`, `item_note` e `customization`.
 - Impressão da cozinha/entrega passa a receber adicionais, removidos e observações.
 - SQL obrigatório: `supabase/migracao-final-producao-6-0-49.sql`.
+
+## Fase 62 — Impressão de cozinha otimizada
+
+Versão: `6.0.50-fase-62-impressao-cozinha-otimizada`
+
+- Melhorado o template térmico de cozinha para lanchonete.
+- Adicionados blocos de preparo por item com adicionais, ingredientes removidos e observação individual.
+- Melhorada a via de entrega com endereço destacado, pagamento, totais e resumo correto.
+- Melhorada a via de balcão para mostrar personalização e valores.
+- Atualizado o payload da fila `print_jobs` para `templateVersion: 6.0.50`.
+- Criado SQL `supabase/migracao-final-producao-6-0-50.sql` com metadados da fila, view operacional e funções auxiliares de reimpressão/limpeza.

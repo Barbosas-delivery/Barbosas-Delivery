@@ -1,7 +1,7 @@
 {
   "name": "barbosas-delivery",
   "private": true,
-  "version": "6.0.49",
+  "version": "6.0.50",
   "type": "module",
   "scripts": {
     "dev": "vite",

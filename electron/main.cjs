@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
-const APP_VERSION = "6.0.48-fase-60-conversao-lanchonete";
+const APP_VERSION = "6.0.50-fase-62-impressao-cozinha-otimizada";
 const CONFIG_FILE = "desktop-config.json";
 const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {

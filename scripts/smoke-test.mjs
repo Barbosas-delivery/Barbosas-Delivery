@@ -52,10 +52,10 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.49-fase-61-personalizacao-lanches"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-49-fase-61-personalizacao-lanches-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.50-fase-62-impressao-cozinha-otimizada"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-50-fase-62-impressao-cozinha-otimizada-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
-  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-49.sql", import.meta.url), "utf8");
+  const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-50.sql", import.meta.url), "utf8");
   assert.ok(appSource.includes("Barbosa's Lanches") || readFileSync(new URL("../src/constants/initialData.js", import.meta.url), "utf8").includes("Barbosa's Lanches"), "fase 60 deve converter a identidade para lanchonete");
   assert.ok(appSource.includes("Cardápio da lanchonete"), "cadastro deve orientar operação de lanchonete");
   assert.doesNotMatch(appSource, /id: "tabs", label: "Fiados\/Comandas"/, "Fiados/Comandas não deve aparecer na navegação da operação nova");
@@ -130,7 +130,7 @@ test("versão final consistente", () => {
   assert.ok(printJobsServiceSource.includes("schemaVersion: 2") && printJobsServiceSource.includes("ticket: buildPrintTicket"), "payload de impressão precisa sair com modelo de cupom padronizado");
   assert.ok(printTemplatesSource.includes('title: "COZINHA"') && printTemplatesSource.includes('title: "ENTREGA"') && printTemplatesSource.includes('title: "BALCÃO"'), "modelos de cupom precisam existir para cozinha, entrega e balcão");
   assert.ok(printTemplatesSource.includes("Via de preparo") && printTemplatesSource.includes("Via do entregador") && printTemplatesSource.includes("Via do caixa"), "cada cupom precisa ter finalidade operacional clara");
-  assert.ok(printTemplatesSource.includes("buildItemsHtml") && printTemplatesSource.includes("buildHtmlTicket"), "Electron precisa receber HTML pronto para impressão térmica");
+  assert.ok(printTemplatesSource.includes("buildKitchenItemsHtml") && printTemplatesSource.includes("REMOVER / SEM") && printTemplatesSource.includes("buildHtmlTicket"), "Electron precisa receber HTML térmico otimizado para cozinha de lanchonete");
   assert.ok(appSource.includes("createPrintJobsForOrder(savedDelivery)"), "pedido/venda salvo deve criar jobs de impressão no Supabase");
   assert.ok(readFileSync(new URL("../src/services/supabasePrintJobs.js", import.meta.url), "utf8").includes("onConflict: \"source,source_id,print_type\""), "fila de impressão deve evitar duplicidade por source/source_id/print_type, não por id incompatível");
   assert.ok(readFileSync(new URL("../src/services/supabasePrintJobs.js", import.meta.url), "utf8").includes("includeLegacyTextId"), "fila de impressão precisa ter fallback para bancos antigos com id textual obrigatório");
@@ -212,9 +212,11 @@ test("arquivos operacionais principais existem", () => {
     "supabase/migracao-fase-24-acessos-loja.sql",
     "supabase/migracao-fase-37-pausas.sql",
     "supabase/migracao-fase-40-taxas-bairro.sql",
-    "supabase/migracao-final-producao-6-0-49.sql",
+    "supabase/migracao-final-producao-6-0-50.sql",
     "docs/FASE-58-ESTABILIDADE-PRODUCAO.md",
     "docs/FASE-60-CONVERSAO-LANCHONETE.md",
+    "docs/FASE-61-PERSONALIZACAO-LANCHES.md",
+    "docs/FASE-62-IMPRESSAO-COZINHA-OTIMIZADA.md",
     "vercel.json",
     "src/utils/printJobTemplates.js",
     "electron/main.cjs",
