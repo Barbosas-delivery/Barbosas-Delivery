@@ -604,3 +604,12 @@ Pacote de operação profissional e segurança Supabase:
 - Fase 81: painel de cozinha/KDS.
 - Fase 82: WhatsApp por status.
 - Correção dos avisos do Supabase Advisor para views operacionais com `SECURITY INVOKER`.
+
+## Fase 83 — Bateria final 100% antes do instalador
+
+- Versão `6.0.63-fase-83-bateria-final-100-por-cento`.
+- Criada auditoria SQL `run_phase_83_final_system_audit`.
+- Criada view `phase_83_final_system_audit_summary_view`.
+- Checklist ampliado para validar marca, horários, cardápio, adicionais, estoque, combos, delivery, PDV, caixa, comandas, impressão, cupom térmico, permissões, relatórios, backup, KDS, WhatsApp, auditoria, notificações e segurança Supabase.
+- Reforçada correção de views com `SECURITY INVOKER`.
+- Adicionado teste `scripts/final-system-audit-test-fase83.mjs` ao `npm test`.

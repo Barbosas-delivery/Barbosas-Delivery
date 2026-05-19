@@ -23,8 +23,8 @@ const printing = readFileSync("src/utils/printing.js", "utf8");
 const sql73 = readFileSync("supabase/migracao-final-producao-6-0-61.sql", "utf8");
 
 test("versão da Fase 74-82 está consistente", () => {
-  assert.equal(pkg.version, "6.0.62");
-  assert.match(appConstants, /6\.0\.62-fase-74-a-82-operacao-profissional-seguranca/);
+  assert.equal(pkg.version, "6.0.63");
+  assert.match(appConstants, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
 });
 
 test("configurações iniciais possuem marca editável", () => {
@@ -60,7 +60,7 @@ test("cupons e fila de impressão recebem marca dinâmica", () => {
   assert.match(printTemplates, /payload\.brand/);
   assert.match(printTemplates, /storeName = safeText/);
   assert.match(printJobs, /brandSettings/);
-  assert.match(printJobs, /templateVersion: "6\.0\.62"/);
+  assert.match(printJobs, /templateVersion: "6\.0\.63"/);
   assert.match(appSource, /buildReceiptBrandHeaderHtml/);
 });
 

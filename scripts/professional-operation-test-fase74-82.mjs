@@ -11,9 +11,9 @@ const sql = readFileSync("supabase/migracao-final-producao-6-0-62.sql", "utf8");
 const docs = readFileSync("docs/FASE-74-A-82-OPERACAO-PROFISSIONAL-E-SEGURANCA.md", "utf8");
 
 test("versão das fases 74 a 82 está consistente", () => {
-  assert.equal(pkg.version, "6.0.62");
-  assert.match(appConstants, /6\.0\.62-fase-74-a-82-operacao-profissional-seguranca/);
-  assert.match(electronMain, /6\.0\.62-fase-74-a-82-operacao-profissional-seguranca/);
+  assert.equal(pkg.version, "6.0.63");
+  assert.match(appConstants, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
+  assert.match(electronMain, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
 });
 
 test("painel de configurações exibe operação profissional", () => {

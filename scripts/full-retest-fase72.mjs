@@ -42,9 +42,9 @@ const checklist = [
 ];
 
 test("versão da Fase 72 está consistente", () => {
-  assert.equal(pkg.version, "6.0.62");
-  assert.match(appConstants, /6\.0\.62-fase-74-a-82-operacao-profissional-seguranca/);
-  assert.match(electronMain, /6\.0\.62-fase-74-a-82-operacao-profissional-seguranca/);
+  assert.equal(pkg.version, "6.0.63");
+  assert.match(appConstants, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
+  assert.match(electronMain, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
 });
 
 test("teste geral inclui fases 67, 68, 69, 70, 71 e 72", () => {
@@ -78,9 +78,9 @@ test("layout térmico continua protegido para 80mm e 58mm", () => {
   assert.match(printing, /width: 72mm; max-width: 72mm/);
 });
 
-test("fila de impressão usa a versão 6.0.62", () => {
-  assert.match(printJobs, /templateVersion: "6\.0\.62"/);
-  assert.match(printJobs, /template_version: "6\.0\.62"/);
+test("fila de impressão usa a versão 6.0.63", () => {
+  assert.match(printJobs, /templateVersion: "6\.0\.63"/);
+  assert.match(printJobs, /template_version: "6\.0\.63"/);
 });
 
 test("SQL da Fase 72 cobre todo checklist operacional", () => {
