@@ -127,6 +127,10 @@ function buildTotalsHtml(totals = {}) {
 }
 
 function buildHtmlTicket(title, sections = [], options = {}) {
+  const brand = options.brand || {};
+  const storeName = safeText(brand.storeName || brand.receiptBrandName, "BARBOSAS LANCHES");
+  const logoUrl = safeText(brand.logoUrl || brand.storeLogoUrl);
+  const logoEnabled = brand.receiptLogoEnabled !== false;
   const sectionsHtml = sections.map((section) => `
     <section class="${escapeHtml(section.className || "")}">
       ${section.title ? `<h2>${escapeHtml(section.title)}</h2>` : ""}
@@ -149,6 +153,8 @@ function buildHtmlTicket(title, sections = [], options = {}) {
     html, body { margin: 0; padding: 0; width: 72mm; max-width: 72mm; overflow: hidden; background: #fff; color: #000; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: ${isDelivery ? "13px" : "12px"}; font-weight: 600; }
     h1 { text-align: center; font-size: ${isKitchen ? "22px" : "19px"}; margin: 0 0 5px; border: 2px solid #000; padding: 5px 2px; letter-spacing: .3px; max-width: 72mm; }
+    .receipt-brand { text-align: center; margin: 0 0 3px; }
+    .receipt-logo { display: block; max-width: 26mm; max-height: 18mm; margin: 0 auto 2px; object-fit: contain; filter: grayscale(1) contrast(1.15); }
     h2 { font-size: 13px; margin: 10px 0 5px; border-top: 1px dashed #111; padding-top: 7px; }
     p { margin: 3px 0; line-height: 1.25; }
     .center { text-align: center; }
@@ -177,7 +183,7 @@ function buildHtmlTicket(title, sections = [], options = {}) {
   </style>
 </head>
 <body>
-  <h1>BARBOSA'S LANCHES</h1>
+  <div class="receipt-brand">${logoEnabled && logoUrl ? `<img class="receipt-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(storeName)}" />` : ""}<h1>${escapeHtml(storeName)}</h1></div>
   <p class="center big">${escapeHtml(title)}</p>
   ${sectionsHtml}
 </body>
@@ -217,7 +223,7 @@ function buildKitchenTicket(payload = {}) {
     widthMm: 80,
     copies: 1,
     lines: sections.flatMap((section) => compactLines([section.title ? `--- ${section.title.toUpperCase()} ---` : "", ...(section.lines || [])])),
-    html: buildHtmlTicket("COZINHA", sections, { variant: "kitchen" }),
+    html: buildHtmlTicket("COZINHA", sections, { variant: "kitchen", brand: payload.brand }),
     sections,
   };
 }
@@ -241,7 +247,7 @@ function buildDeliveryTicket(payload = {}) {
     widthMm: 80,
     copies: 1,
     lines: sections.flatMap((section) => compactLines([section.title ? `--- ${section.title.toUpperCase()} ---` : "", ...(section.lines || [])])),
-    html: buildHtmlTicket("ENTREGA", sections, { variant: "delivery" }),
+    html: buildHtmlTicket("ENTREGA", sections, { variant: "delivery", brand: payload.brand }),
     sections,
   };
 }
@@ -261,7 +267,7 @@ function buildCounterTicket(payload = {}) {
     widthMm: 80,
     copies: 1,
     lines: sections.flatMap((section) => compactLines([section.title ? `--- ${section.title.toUpperCase()} ---` : "", ...(section.lines || [])])),
-    html: buildHtmlTicket("BALCÃO", sections, { variant: "counter" }),
+    html: buildHtmlTicket("BALCÃO", sections, { variant: "counter", brand: payload.brand }),
     sections,
   };
 }

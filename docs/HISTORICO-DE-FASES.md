@@ -581,3 +581,11 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Criado reteste completo pós-correção do cupom térmico.
 - Consolidada validação de adicionais, estoque de lanchonete, caixa, delivery, PDV, comanda, impressão, cancelamento e layout 80mm/58mm.
 - Preparado o caminho para a Fase 73 de personalização de marca, nome e foto/logo.
+
+## Fase 73 — 6.0.61 — Personalização da marca
+
+- Nome da loja editável pelo painel.
+- Logo/foto e capa editáveis pelo painel.
+- Nome do cupom editável.
+- Cupons e fila de impressão recebem marca dinâmica.
+- SQL de suporte com `update_store_brand_settings` e `run_phase_73_brand_test`.

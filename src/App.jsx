@@ -1054,7 +1054,7 @@ function App() {
     }
 
     await saveStockMovements(savedDelivery, "sale");
-    const printJobResult = await createPrintJobsForOrder(savedDelivery);
+    const printJobResult = await createPrintJobsForOrder(savedDelivery, { storeSettings });
     if (printJobResult.error) {
       console.error("Erro ao criar fila de impressão:", printJobResult.error);
       addNotification("impressao_fila_erro", "Impressão pendente não criada", `Pedido #${orderId} foi salvo, mas a fila de impressão não foi criada. Rode a migração 6.0.48 e verifique a tabela print_jobs.`, "loja", orderId);
@@ -3423,6 +3423,19 @@ function App() {
     return Math.min(10, Math.max(0, seconds));
   }
 
+  function getReceiptBrandName() {
+    return String(storeSettings.receiptBrandName || storeSettings.storeName || "BARBOSAS LANCHES").trim() || "BARBOSAS LANCHES";
+  }
+
+  function buildReceiptBrandHeaderHtml({ delivery = false } = {}) {
+    const logoUrl = String(storeSettings.storeLogoUrl || "").trim();
+    const brandName = getReceiptBrandName();
+    const logo = storeSettings.receiptLogoEnabled !== false && logoUrl
+      ? `<img class="receipt-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(brandName)}" />`
+      : "";
+    return `<div class="receipt-brand">${logo}<h1${delivery ? ' class="brand"' : ""}>${escapeHtml(brandName)}</h1></div>`;
+  }
+
   function printThermalHtml(title, bodyHtml, copies = 1, options = {}) {
     const localPrintEnabled = storeSettings.printOutputMode === "local_service";
     return printThermalHtmlBase(title, bodyHtml, copies, {
@@ -3946,7 +3959,7 @@ function App() {
     const itemsHtml = buildReceiptItemsHtml(delivery.items || []);
     const isDelivery = isDeliveryOrder(delivery);
     const body = `
-      ${isDelivery ? `<h1 class="brand">BARBOSAS DELIVERY</h1><p class="center thanks">Obrigado pela preferência! 💛</p>` : `<h1>${escapeHtml(storeSettings.storeName || "BARBOSAS")}</h1>`}
+      ${buildReceiptBrandHeaderHtml({ delivery: isDelivery })}${isDelivery ? `<p class="center thanks">Obrigado pela preferência! 💛</p>` : ""}
       <p class="muted">${delivery.orderType === ORDER_TYPE.COUNTER ? "VENDA BALCÃO" : "PEDIDO ENTREGA"} #${escapeHtml(delivery.id)}</p>
       <p class="muted">${escapeHtml(new Date().toLocaleString("pt-BR"))}</p>
       <div class="line"></div>
@@ -3965,7 +3978,7 @@ function App() {
       ${delivery.notes ? `<p><b>Obs:</b> ${escapeHtml(delivery.notes)}</p>` : ""}
       <div class="line"></div>
       <p class="center">${isDelivery ? "Via de entrega • Conferir endereço e itens" : "Conferir venda no balcão"}</p>
-      ${isDelivery ? `<p class="center thanks">Barbosas Delivery agradece!</p>` : ""}
+      ${isDelivery ? `<p class="center thanks">${escapeHtml(storeSettings.storeName || "BARBOSAS LANCHES")} agradece!</p>` : ""}
     `;
     const printed = printThermalHtml(`${isCounterOrder(delivery) ? "VENDA" : "ENTREGA"} #${delivery.id}`, body, receiptCopies, { delivery: isDelivery, ...printOptions });
     if (printed) {
@@ -4679,7 +4692,7 @@ function App() {
       notes: `${label}. Responsável: ${tab.responsibleName || tab.customerName}. ${tab.notes || ""}`.trim(),
       launchedAt: new Date().toISOString(),
     };
-    await createPrintJobsForOrder(printOrder);
+    await createPrintJobsForOrder(printOrder, { storeSettings });
   }
 
   async function createTabAccount() {
@@ -4909,11 +4922,39 @@ function App() {
                 ? clampLocalPrintTimeoutMs(value)
                 : field === "maxActiveDeliveriesPerCourier"
                   ? Math.min(6, Math.max(1, Math.floor(Number(value || 2))))
-                  : value;
+                  : ["storeName", "storeShortName", "storeSlogan", "storeLogoUrl", "storeCoverUrl", "receiptBrandName"].includes(field)
+                    ? String(value || "").trimStart()
+                    : field === "receiptLogoEnabled"
+                      ? value === true
+                      : value;
     setStoreSettings((previousSettings) => ({ ...previousSettings, [field]: finalValue }));
     if (field === "defaultDeliveryFee") {
       setDeliveryDraft((previousDraft) => ({ ...previousDraft, deliveryFee: finalValue }));
     }
+  }
+
+  function handleBrandImageFile(field, file) {
+    if (!file) return;
+    if (!file.type?.startsWith("image/")) {
+      setLastAction("Selecione uma imagem válida para a marca.");
+      return;
+    }
+    if (file.size > 900 * 1024) {
+      setLastAction("Imagem muito pesada. Use uma imagem menor que 900 KB para sincronizar no Supabase.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateStoreSetting(field, String(reader.result || ""));
+      setLastAction(field === "storeLogoUrl" ? "Logo da loja carregada. Salve/suba a versão e aguarde sincronizar." : "Imagem de capa carregada. Aguarde sincronizar no Supabase.");
+    };
+    reader.onerror = () => setLastAction("Não foi possível ler a imagem selecionada.");
+    reader.readAsDataURL(file);
+  }
+
+  function clearBrandImage(field) {
+    updateStoreSetting(field, "");
+    setLastAction(field === "storeLogoUrl" ? "Logo removida da marca." : "Imagem de capa removida da marca.");
   }
 
 
@@ -5351,7 +5392,7 @@ function App() {
           <Card className="bg-zinc-900 border-zinc-800 shadow-2xl rounded-3xl">
             <CardContent className="p-4 sm:p-6 md:p-8">
               <div className={customerSubmitted ? "flex flex-col md:flex-row md:items-center gap-4 mb-8 justify-center" : "flex flex-col md:flex-row md:items-center gap-4 mb-8 md:justify-between"}>
-                <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-2xl font-bold text-white">{storeSettings.storeName || "Barbosas Delivery"}</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Monte seu lanche e peça pelo delivery"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
+                <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" logoUrl={storeSettings.storeLogoUrl} storeName={storeSettings.storeName} /><div><h1 className="text-2xl font-bold text-white">{storeSettings.storeName || "Barbosas Delivery"}</h1><p className="text-zinc-400 text-sm">{customerSubmitted ? `${customerForm.street}, ${customerForm.number} - ${customerForm.district}` : "Monte seu lanche e peça pelo delivery"}</p></div>{customerSubmitted && <button type="button" onClick={() => { setCustomerSubmitted(false); setShowCustomerCheckout(false); setShowCustomerNeedMoreMessage(false); }} className="ml-2 rounded-xl border border-white/20 bg-white px-3 py-2 text-xs font-black text-zinc-950 shadow-sm hover:bg-zinc-100">Corrigir dados</button>}</div>
                 {!customerSubmitted && (
                   <div className="grid grid-cols-3 w-full md:w-auto rounded-2xl bg-zinc-800 p-1 border border-zinc-700">
                     <button type="button" onClick={() => setEntryMode("customer")} className={`px-4 py-2 rounded-xl text-sm font-semibold ${entryMode === "customer" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>Cliente</button>
@@ -5395,8 +5436,8 @@ function App() {
                   )}
 
                   <div className="rounded-[2rem] border border-amber-300/30 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 p-5 text-zinc-950 shadow-2xl">
-                    <p className="text-xs font-black uppercase tracking-[0.2em]">Barbosa's Lanches</p>
-                    <h2 className="mt-1 text-2xl md:text-3xl font-black leading-tight">Lanches, porções e combos preparados na hora.</h2>
+                    <p className="text-xs font-black uppercase tracking-[0.2em]">{storeSettings.storeName || "BARBOSAS LANCHES"}</p>
+                    <h2 className="mt-1 text-2xl md:text-3xl font-black leading-tight">{storeSettings.storeSlogan || "Lanches, porções e combos preparados na hora."}</h2>
                     <p className="mt-2 text-sm font-bold text-zinc-900/80">Escolha seus itens no cardápio e personalize cada lanche do seu jeito.</p>
                   </div>
 
@@ -5915,7 +5956,7 @@ function App() {
     <div className="min-h-screen bg-zinc-100 text-zinc-950">
       <header className="bg-zinc-950 text-white px-4 md:px-8 py-5 sticky top-0 z-20 shadow-xl">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" /><div><h1 className="text-xl font-bold">Sistema da Loja</h1><p className="text-xs text-zinc-400">Painel administrativo exclusivo da loja • {getCurrentStoreDisplayName()} {storeSession?.role ? `(${storeSession.role})` : ""}</p></div></div>
+          <div className="flex items-center gap-3"><StoreLogo size="h-14 w-14" logoUrl={storeSettings.storeLogoUrl} storeName={storeSettings.storeName} /><div><h1 className="text-xl font-bold">Sistema da Loja</h1><p className="text-xs text-zinc-400">Painel administrativo exclusivo da loja • {getCurrentStoreDisplayName()} {storeSession?.role ? `(${storeSession.role})` : ""}</p></div></div>
           <Button onClick={handleStoreLogout} variant="secondary" className="rounded-2xl"><span className="mr-2"><Icon name="logout" /></span>Sair</Button>
         </div>
       </header>
@@ -7337,12 +7378,45 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-5 rounded-3xl border border-zinc-100 bg-zinc-50 p-4 flex items-center gap-3">
-                    <StoreLogo size="h-16 w-16" />
-                    <div>
-                      <p className="font-bold">Logo atual da loja</p>
-                      <p className="text-sm text-zinc-500">No protótipo a logo está fixa. Na versão final, este campo pode aceitar upload.</p>
+                  <div className="mt-5 rounded-3xl border border-amber-100 bg-amber-50 p-4 space-y-4">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div className="flex items-center gap-3">
+                        <StoreLogo size="h-16 w-16" logoUrl={storeSettings.storeLogoUrl} storeName={storeSettings.storeName} />
+                        <div>
+                          <p className="font-black text-amber-950">Marca da loja</p>
+                          <p className="text-sm text-amber-900">Nome, logo e capa aparecem no cliente, painel e cupons.</p>
+                          <p className="text-xs font-bold text-amber-950">Prévia: {storeSettings.storeName || "BARBOSAS LANCHES"}</p>
+                        </div>
+                      </div>
+                      {storeSettings.storeCoverUrl && <img src={storeSettings.storeCoverUrl} alt="Capa da loja" className="h-20 w-full rounded-2xl object-cover md:w-64" />}
                     </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <Input label="Nome exibido da loja" value={storeSettings.storeName} onChange={(value) => updateStoreSetting("storeName", value)} placeholder="Ex: BARBOSAS LANCHES" />
+                      <Input label="Nome curto" value={storeSettings.storeShortName || ""} onChange={(value) => updateStoreSetting("storeShortName", value)} placeholder="Ex: Barbosas" />
+                      <Input label="Slogan do cliente" value={storeSettings.storeSlogan || ""} onChange={(value) => updateStoreSetting("storeSlogan", value)} placeholder="Ex: Lanches preparados na hora" />
+                      <Input label="Nome no cupom" value={storeSettings.receiptBrandName || storeSettings.storeName} onChange={(value) => updateStoreSetting("receiptBrandName", value)} placeholder="Ex: BARBOSAS LANCHES" />
+                      <Input label="URL da logo" value={storeSettings.storeLogoUrl || ""} onChange={(value) => updateStoreSetting("storeLogoUrl", value)} placeholder="https://... ou imagem carregada" />
+                      <Input label="URL da capa" value={storeSettings.storeCoverUrl || ""} onChange={(value) => updateStoreSetting("storeCoverUrl", value)} placeholder="https://... ou imagem carregada" />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <label className="rounded-2xl border border-amber-200 bg-white p-3 text-sm font-bold text-amber-950">
+                        Carregar logo/foto
+                        <input type="file" accept="image/*" onChange={(event) => handleBrandImageFile("storeLogoUrl", event.target.files?.[0])} className="mt-2 block w-full text-xs" />
+                      </label>
+                      <label className="rounded-2xl border border-amber-200 bg-white p-3 text-sm font-bold text-amber-950">
+                        Carregar capa
+                        <input type="file" accept="image/*" onChange={(event) => handleBrandImageFile("storeCoverUrl", event.target.files?.[0])} className="mt-2 block w-full text-xs" />
+                      </label>
+                      <label className="flex min-h-[74px] items-center gap-2 rounded-2xl border border-amber-200 bg-white p-3 text-sm font-bold text-amber-950">
+                        <input type="checkbox" checked={storeSettings.receiptLogoEnabled !== false} onChange={(event) => updateStoreSetting("receiptLogoEnabled", event.target.checked)} />
+                        Usar logo no cupom quando possível
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button onClick={() => clearBrandImage("storeLogoUrl")} variant="secondary" className="rounded-2xl bg-white">Remover logo</Button>
+                      <Button onClick={() => clearBrandImage("storeCoverUrl")} variant="secondary" className="rounded-2xl bg-white">Remover capa</Button>
+                    </div>
+                    <p className="text-xs text-amber-900">Para imagem carregada direto no painel, use arquivo leve, preferencialmente quadrado para logo e menor que 900 KB.</p>
                   </div>
                 </CardBox>
               </div>

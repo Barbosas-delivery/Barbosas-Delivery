@@ -24,6 +24,8 @@ function buildThermalHtml(title, bodyHtml, copies = 1, options = {}) {
           .receipt-copy:last-child { page-break-after: auto; }
           h1 { font-size: ${options.delivery ? "24px" : "21px"}; margin: 0 0 3mm; text-align: center; letter-spacing: .5px; font-weight: 900; }
           .brand { font-size: 26px; border: 2px solid #000; padding: 3mm 1mm; }
+          .receipt-brand { text-align: center; margin: 0 0 2mm; }
+          .receipt-logo { display: block; max-width: 26mm; max-height: 18mm; margin: 0 auto 1mm; object-fit: contain; filter: grayscale(1) contrast(1.15); }
           .copy-title { text-align: center; font-weight: 900; font-size: 15px; margin: 0 0 2mm; }
           p { margin: 1.7mm 0; line-height: 1.28; overflow-wrap: anywhere; }
           .muted { text-align: center; font-size: 13px; }

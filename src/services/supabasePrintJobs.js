@@ -46,7 +46,7 @@ export function buildPrintJobId(sourceId, printType) {
   return `order-${String(sourceId || "").trim()}-${printType}`;
 }
 
-export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.KITCHEN) {
+export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.KITCHEN, options = {}) {
   const items = Array.isArray(delivery.items) ? delivery.items.map(normalizePrintItem) : [];
   const isCounter = (delivery.orderType || ORDER_TYPE.DELIVERY) === ORDER_TYPE.COUNTER;
   const productsTotal = toSafeMoneyNumber(delivery.productsTotal, items.reduce((sum, item) => sum + item.total, 0));
@@ -55,12 +55,18 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const total = toSafeMoneyNumber(delivery.value, productsTotal + deliveryFee - discount);
   const source = getPrintJobSource(delivery);
   const createdAt = new Date().toISOString();
+  const brandSettings = options.storeSettings || delivery.storeSettings || {};
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.60",
+    templateVersion: "6.0.61",
     printType,
     source,
     createdAt,
+    brand: {
+      storeName: normalizeText(brandSettings.receiptBrandName || brandSettings.storeName, "BARBOSAS LANCHES"),
+      logoUrl: normalizeText(brandSettings.storeLogoUrl),
+      receiptLogoEnabled: brandSettings.receiptLogoEnabled !== false,
+    },
     order: {
       id: String(delivery.id || ""),
       orderType: delivery.orderType || ORDER_TYPE.DELIVERY,
@@ -113,8 +119,8 @@ export function buildPrintJobRowsForOrder(delivery = {}, options = {}) {
       source_id: sourceId,
       print_type: printType,
       status: PRINT_JOB_STATUS.PENDING,
-      payload: buildPrintJobPayload(delivery, printType),
-      template_version: "6.0.60",
+      payload: buildPrintJobPayload(delivery, printType, options),
+      template_version: "6.0.61",
       receipt_width_mm: 80,
       copies: 1,
       attempts: 0,
@@ -140,8 +146,8 @@ function shouldRetryWithLegacyTextId(error) {
   );
 }
 
-export async function createPrintJobsForOrder(delivery = {}) {
-  const rows = buildPrintJobRowsForOrder(delivery);
+export async function createPrintJobsForOrder(delivery = {}, options = {}) {
+  const rows = buildPrintJobRowsForOrder(delivery, options);
   if (!rows.length) return { jobs: [], error: null };
 
   const query = supabase
@@ -162,7 +168,7 @@ export async function createPrintJobsForOrder(delivery = {}) {
     return { jobs: [], error };
   }
 
-  const legacyRows = buildPrintJobRowsForOrder(delivery, { includeLegacyTextId: true });
+  const legacyRows = buildPrintJobRowsForOrder(delivery, { ...options, includeLegacyTextId: true });
   const legacyResult = await supabase
     .from("print_jobs")
     .upsert(legacyRows, { onConflict: "source,source_id,print_type", ignoreDuplicates: true })

@@ -107,23 +107,33 @@ function Icon({ name, className = "" }) {
   return <span aria-hidden="true" className={`inline-flex h-5 min-w-5 items-center justify-center text-base leading-none ${className}`}>{ICONS[name] || "•"}</span>;
 }
 
-function StoreLogo({ size = "h-14 w-14" }) {
+function StoreLogo({ size = "h-14 w-14", logoUrl = "", storeName = "BARBOSAS LANCHES" }) {
+  const cleanLogoUrl = String(logoUrl || "").trim();
+  const label = String(storeName || "BARBOSAS LANCHES").trim() || "BARBOSAS LANCHES";
+  if (cleanLogoUrl) {
+    return (
+      <div aria-label={`Logo ${label}`} className={`${size} shrink-0 rounded-full bg-white text-black border border-yellow-200 shadow-sm overflow-hidden flex items-center justify-center`}>
+        <img src={cleanLogoUrl} alt={`Logo ${label}`} className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+
   return (
     <div
-      aria-label="Logo Conveniência Barbosa's"
+      aria-label={`Logo ${label}`}
       className={`${size} shrink-0 rounded-full bg-yellow-300 text-black border border-yellow-200 shadow-sm flex flex-col items-center justify-center overflow-hidden px-1`}
     >
       <span className="text-[5px] font-medium tracking-tight leading-none">
-        Conveniência
+        Delivery
       </span>
 
-      <span className="text-[8px] font-extrabold tracking-[-0.05em] leading-none mt-[1px]">
-        BARBOSA'S
+      <span className="text-[8px] font-extrabold tracking-[-0.05em] leading-none mt-[1px] text-center">
+        {label.slice(0, 16).toUpperCase()}
       </span>
 
       <div className="mt-[2px] h-[1px] w-6 bg-black/30 rounded-full" />
 
-      <span className="text-[7px] leading-none mt-[2px]">🍻</span>
+      <span className="text-[7px] leading-none mt-[2px]">🍔</span>
     </div>
   );
 }

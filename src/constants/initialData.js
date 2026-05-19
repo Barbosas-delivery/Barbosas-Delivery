@@ -1,7 +1,13 @@
 import { DELIVERY_FEE, PAYMENT_STATUS, DELIVERY_STATUS } from "./appConstants";
 
 export const initialStoreSettings = {
-  storeName: "Barbosa's Lanches",
+  storeName: "BARBOSAS LANCHES",
+  storeShortName: "Barbosas",
+  storeSlogan: "Lanches, porções e combos preparados na hora.",
+  storeLogoUrl: "",
+  storeCoverUrl: "",
+  receiptBrandName: "BARBOSAS LANCHES",
+  receiptLogoEnabled: true,
   storePhone: "(43) 98873-6791",
   defaultDeliveryFee: DELIVERY_FEE,
   minimumOrderValue: 20,
@@ -11,7 +17,7 @@ export const initialStoreSettings = {
     { id: 1, district: "Centro", fee: DELIVERY_FEE, minimumOrderValue: 20, active: true },
     { id: 2, district: "Zona 7", fee: 7, minimumOrderValue: 25, active: true },
   ],
-  whatsappMessage: "Olá, seu pedido do Barbosa's Lanches está em preparo.",
+  whatsappMessage: "Olá, seu pedido do BARBOSAS LANCHES está em preparo.",
   statusWhatsappMessages: {
     approved: "Olá, {cliente}! Seu pedido #{pedido} foi aprovado pela {loja}.\n\nPrevisão: {previsao}.\nTotal: {total}.\n\nObrigado pela preferência!",
     outForDelivery: "Olá, {cliente}! Seu pedido #{pedido} saiu para entrega.\n\nO entregador já está a caminho. Total: {total}.\n\nObrigado pela preferência!",
