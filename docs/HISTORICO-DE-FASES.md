@@ -575,3 +575,9 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Templates usam margem zero e largura segura de 72mm para papel 80mm.
 - Criada migração `supabase/migracao-final-producao-6-0-59.sql`.
 - Criado teste `scripts/print-layout-test-fase71.mjs`.
+
+## Fase 72 — Reteste operacional completo pós-cupom térmico — 6.0.60
+
+- Criado reteste completo pós-correção do cupom térmico.
+- Consolidada validação de adicionais, estoque de lanchonete, caixa, delivery, PDV, comanda, impressão, cancelamento e layout 80mm/58mm.
+- Preparado o caminho para a Fase 73 de personalização de marca, nome e foto/logo.
