@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
-const APP_VERSION = "6.0.63-fase-83-bateria-final-100-por-cento";
+const APP_VERSION = "6.0.64-fase-84-producao-limpa-final";
 const CONFIG_FILE = "desktop-config.json";
 const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {
@@ -544,7 +544,7 @@ function getComputerName() {
 
 function getDesktopInstallChecklist(config = DEFAULT_CONFIG) {
   return [
-    { id: "version", label: "Versão desktop instalada", ok: APP_VERSION.includes("6.0.63"), detail: APP_VERSION },
+    { id: "version", label: "Versão desktop instalada", ok: APP_VERSION.includes("6.0.64"), detail: APP_VERSION },
     { id: "supabase", label: "Supabase configurado", ok: Boolean(config.supabaseUrl && config.supabaseAnonKey), detail: config.supabaseUrl ? "URL configurada" : "Configure URL e anon key" },
     { id: "printer", label: "Impressora selecionada", ok: Boolean(config.printerName) || Boolean(config.silentPrint), detail: config.printerName || "Usando impressora padrão do Windows" },
     { id: "autoprint", label: "Impressão automática", ok: Boolean(config.autoPrint?.enabled), detail: config.autoPrint?.enabled ? "Ligada" : "Desligada" },

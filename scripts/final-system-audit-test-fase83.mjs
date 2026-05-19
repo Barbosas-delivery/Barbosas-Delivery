@@ -46,15 +46,15 @@ const expectedChecklistTokens = [
 ];
 
 test("versão da Fase 83 está consistente", () => {
-  assert.equal(pkg.version, "6.0.63");
-  assert.match(appConstants, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
-  assert.match(electronMain, /6\.0\.63-fase-83-bateria-final-100-por-cento/);
-  assert.match(serviceWorker, /barbosas-delivery-6-0-63-fase-83-bateria-final-100-por-cento-sem-cache/);
+  assert.equal(pkg.version, "6.0.64");
+  assert.match(appConstants, /6\.0\.64-fase-84-producao-limpa-final/);
+  assert.match(electronMain, /6\.0\.64-fase-84-producao-limpa-final/);
+  assert.match(serviceWorker, /barbosas-delivery-6-0-64-fase-84-producao-limpa-final-sem-cache/);
 });
 
 test("fila de impressão usa template da Fase 83", () => {
-  assert.match(printJobs, /templateVersion: "6\.0\.63"/);
-  assert.match(printJobs, /template_version: "6\.0\.63"/);
+  assert.match(printJobs, /templateVersion: "6\.0\.64"/);
+  assert.match(printJobs, /template_version: "6\.0\.64"/);
 });
 
 test("SQL cria auditoria final 100%", () => {
@@ -73,7 +73,7 @@ test("checklist final cobre todos os módulos críticos", () => {
 
 test("teste geral inclui a Fase 83", () => {
   assert.match(pkg.scripts.test, /final-system-audit-test-fase83/);
-  assert.match(appSource, /Bateria final 100%|Fase 83|Antes de gerar o instalador/);
+  assert.match(appSource, /Sistema liberado para produção|Fase 84|dados reais da loja/);
 });
 
 test("documentação orienta execução antes do instalador", () => {

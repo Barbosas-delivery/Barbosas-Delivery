@@ -7458,10 +7458,10 @@ function App() {
                     <p className="font-black">Segurança Supabase</p>
                     <p>Esta fase inclui SQL para trocar views operacionais para <b>SECURITY INVOKER</b> e reduzir os avisos do Advisor sobre <b>Security Definer View</b>.</p>
                   </div>
-                  <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-950">
-                    <p className="font-black">Bateria final 100% — Fase 83</p>
-                    <p>Antes de gerar o instalador, rode no Supabase: <b>select * from public.run_phase_83_final_system_audit('Gabriel', true);</b></p>
-                    <p className="mt-1">O esperado é <b>status passed</b>, <b>ready_percent 100</b> e nenhum item falso no checklist.</p>
+                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-950">
+                    <p className="font-black">Sistema liberado para produção — Fase 84</p>
+                    <p>Os dados de teste foram separados para limpeza no Supabase e o aplicativo está preparado para operar com dados reais da loja.</p>
+                    <p className="mt-1">Antes de abrir vendas reais, confira impressora, caixa inicial, horário de funcionamento, WhatsApp e dados da marca.</p>
                   </div>
                 </CardBox>
               </div>

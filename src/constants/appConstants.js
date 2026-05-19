@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.63-fase-83-bateria-final-100-por-cento";
+export const APP_VERSION = "6.0.64-fase-84-producao-limpa-final";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;
