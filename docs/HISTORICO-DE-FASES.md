@@ -589,3 +589,18 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Nome do cupom editável.
 - Cupons e fila de impressão recebem marca dinâmica.
 - SQL de suporte com `update_store_brand_settings` e `run_phase_73_brand_test`.
+
+## Fases 74 a 82 — 6.0.62
+
+Pacote de operação profissional e segurança Supabase:
+
+- Fase 74: personalização avançada da marca.
+- Fase 75: horário de funcionamento e loja aberta/fechada.
+- Fase 76: cardápio profissional do cliente.
+- Fase 77: melhorias do PDV balcão.
+- Fase 78: permissões de funcionários.
+- Fase 79: relatórios profissionais.
+- Fase 80: backup e exportação.
+- Fase 81: painel de cozinha/KDS.
+- Fase 82: WhatsApp por status.
+- Correção dos avisos do Supabase Advisor para views operacionais com `SECURITY INVOKER`.

@@ -7419,6 +7419,46 @@ function App() {
                     <p className="text-xs text-amber-900">Para imagem carregada direto no painel, use arquivo leve, preferencialmente quadrado para logo e menor que 900 KB.</p>
                   </div>
                 </CardBox>
+
+                <CardBox>
+                  <h3 className="font-black text-lg mb-2">Operação profissional — Fases 74 a 82</h3>
+                  <p className="mb-4 text-sm text-zinc-500">Configurações para marca avançada, loja aberta/fechada, cardápio, PDV, permissões, relatórios, backup, cozinha e WhatsApp.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Input label="Endereço da loja" value={storeSettings.storeAddress || ""} onChange={(value) => updateStoreSetting("storeAddress", value)} placeholder="Rua, número, bairro" />
+                    <Input label="Mensagem de rodapé do cupom" value={storeSettings.receiptFooterMessage || ""} onChange={(value) => updateStoreSetting("receiptFooterMessage", value)} placeholder="Obrigado pela preferência!" />
+                    <Input label="WhatsApp comercial" value={storeSettings.whatsappBusinessNumber || storeSettings.storePhone || ""} onChange={(value) => updateStoreSetting("whatsappBusinessNumber", formatBrazilMobilePhone(value))} placeholder="(44) 99999-9999" />
+                    <Input label="Mensagem quando fechado" value={storeSettings.closedStoreMessage || ""} onChange={(value) => updateStoreSetting("closedStoreMessage", value)} placeholder="Estamos fechados. Voltamos às 18h." />
+                    <Input label="Destaque do cardápio" value={storeSettings.menuFeaturedTitle || ""} onChange={(value) => updateStoreSetting("menuFeaturedTitle", value)} placeholder="Mais pedidos da casa" />
+                    <Input label="Promoção do dia" value={storeSettings.menuPromoMessage || ""} onChange={(value) => updateStoreSetting("menuPromoMessage", value)} placeholder="Combo especial de hoje" />
+                    <Input label="Senha de gerente para ações críticas" type="password" value={storeSettings.managerPassword || ""} onChange={(value) => updateStoreSetting("managerPassword", value)} placeholder="Use para cancelamento/desconto/fechamento" />
+                    <Input label="Observação para cozinha/KDS" value={storeSettings.kitchenDisplayNote || ""} onChange={(value) => updateStoreSetting("kitchenDisplayNote", value)} placeholder="Ex: conferir adicionais antes de finalizar" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    {[
+                      ["isStoreOpen", "Loja aberta para pedidos"],
+                      ["temporarilyPaused", "Pausar pedidos temporariamente"],
+                      ["menuSearchEnabled", "Busca no cardápio"],
+                      ["showBestSellers", "Mostrar mais vendidos"],
+                      ["pdvQuickActionsEnabled", "Atalhos rápidos no PDV"],
+                      ["mixedPaymentEnabled", "Pagamento misto"],
+                      ["cancellationReasonRequired", "Motivo obrigatório ao cancelar"],
+                      ["permissionsModeEnabled", "Permissões por funcionário"],
+                      ["reportsEnabled", "Relatórios profissionais"],
+                      ["backupEnabled", "Backup/exportação"],
+                      ["kitchenDisplayEnabled", "Painel de cozinha"],
+                      ["whatsappAutomationEnabled", "Mensagens de WhatsApp por status"],
+                    ].map(([field, label]) => (
+                      <label key={field} className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 font-bold text-zinc-700">
+                        <input type="checkbox" checked={Boolean(storeSettings[field])} onChange={(event) => updateStoreSetting(field, event.target.checked)} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <p className="font-black">Segurança Supabase</p>
+                    <p>Esta fase inclui SQL para trocar views operacionais para <b>SECURITY INVOKER</b> e reduzir os avisos do Advisor sobre <b>Security Definer View</b>.</p>
+                  </div>
+                </CardBox>
               </div>
             )}
 

@@ -52,8 +52,8 @@ test("HTML de impressão escapa texto e calcula subtotal", () => {
 });
 
 test("versão final consistente", () => {
-  assert.match(constantsSource, /APP_VERSION = "6\.0\.61-fase-73-personalizacao-marca"/);
-  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-61-fase-73-personalizacao-marca-sem-cache/);
+  assert.match(constantsSource, /APP_VERSION = "6\.0\.62-fase-74-a-82-operacao-profissional-seguranca"/);
+  assert.match(serviceWorkerSource, /barbosas-delivery-6-0-62-fase-74-a-82-operacao-profissional-seguranca-sem-cache/);
   const stockServiceSource = readFileSync(new URL("../src/services/supabaseProducts.js", import.meta.url), "utf8");
   const stockMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-51.sql", import.meta.url), "utf8");
   const finalizationMigrationSource = readFileSync(new URL("../supabase/migracao-final-producao-6-0-52.sql", import.meta.url), "utf8");

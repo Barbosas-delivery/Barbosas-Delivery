@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.61-fase-73-personalizacao-marca";
+export const APP_VERSION = "6.0.62-fase-74-a-82-operacao-profissional-seguranca";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

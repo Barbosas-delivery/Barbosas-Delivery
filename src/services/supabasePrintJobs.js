@@ -58,7 +58,7 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const brandSettings = options.storeSettings || delivery.storeSettings || {};
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.61",
+    templateVersion: "6.0.62",
     printType,
     source,
     createdAt,
@@ -120,7 +120,7 @@ export function buildPrintJobRowsForOrder(delivery = {}, options = {}) {
       print_type: printType,
       status: PRINT_JOB_STATUS.PENDING,
       payload: buildPrintJobPayload(delivery, printType, options),
-      template_version: "6.0.61",
+      template_version: "6.0.62",
       receipt_width_mm: 80,
       copies: 1,
       attempts: 0,

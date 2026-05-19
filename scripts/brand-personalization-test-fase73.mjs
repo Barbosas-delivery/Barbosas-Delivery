@@ -22,9 +22,9 @@ const printTemplates = readFileSync("src/utils/printJobTemplates.js", "utf8");
 const printing = readFileSync("src/utils/printing.js", "utf8");
 const sql73 = readFileSync("supabase/migracao-final-producao-6-0-61.sql", "utf8");
 
-test("versão da Fase 73 está consistente", () => {
-  assert.equal(pkg.version, "6.0.61");
-  assert.match(appConstants, /6\.0\.61-fase-73-personalizacao-marca/);
+test("versão da Fase 74-82 está consistente", () => {
+  assert.equal(pkg.version, "6.0.62");
+  assert.match(appConstants, /6\.0\.62-fase-74-a-82-operacao-profissional-seguranca/);
 });
 
 test("configurações iniciais possuem marca editável", () => {
@@ -60,11 +60,11 @@ test("cupons e fila de impressão recebem marca dinâmica", () => {
   assert.match(printTemplates, /payload\.brand/);
   assert.match(printTemplates, /storeName = safeText/);
   assert.match(printJobs, /brandSettings/);
-  assert.match(printJobs, /templateVersion: "6\.0\.61"/);
+  assert.match(printJobs, /templateVersion: "6\.0\.62"/);
   assert.match(appSource, /buildReceiptBrandHeaderHtml/);
 });
 
-test("SQL da Fase 73 prepara RPCs e teste de marca", () => {
+test("SQL da Fase 74-82 prepara RPCs e teste de marca", () => {
   assert.match(sql73, /update_store_brand_settings/);
   assert.match(sql73, /run_phase_73_brand_test/);
   assert.match(sql73, /phase_73_brand_test_summary_view/);
@@ -72,4 +72,4 @@ test("SQL da Fase 73 prepara RPCs e teste de marca", () => {
   assert.match(sql73, /receiptBrandName/);
 });
 
-console.log("\nTeste de personalização da marca da Fase 73 passou.");
+console.log("\nTeste de personalização da marca da Fase 74-82 passou.");
