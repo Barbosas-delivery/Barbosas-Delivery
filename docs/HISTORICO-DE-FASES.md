@@ -566,3 +566,12 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Mantido controle de estoque para bebidas, sobremesas e produtos prontos.
 - Criada documentação `docs/FASE-70-CORRECAO-ESTOQUE-LANCHONETE.md`.
 - Criada migração `supabase/migracao-final-producao-6-0-58.sql`.
+
+
+## Fase 71 — 6.0.59 — Correção do layout do cupom térmico
+
+- Corrigida impressão deslocada/cortada na lateral do papel térmico.
+- Desktop/Electron agora informa pageSize físico ao driver.
+- Templates usam margem zero e largura segura de 72mm para papel 80mm.
+- Criada migração `supabase/migracao-final-producao-6-0-59.sql`.
+- Criado teste `scripts/print-layout-test-fase71.mjs`.

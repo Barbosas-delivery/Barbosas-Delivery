@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 
 const APP_NAME = "Barbosa's Delivery Desktop";
-const APP_VERSION = "6.0.58-fase-70-correcao-estoque-lanchonete";
+const APP_VERSION = "6.0.59-fase-71-correcao-layout-cupom-termico";
 const CONFIG_FILE = "desktop-config.json";
 const MAX_PRINT_LOGS = 80;
 const DEFAULT_CONFIG = {
@@ -242,24 +242,81 @@ function buildMenu() {
   ]);
 }
 
+function buildThermalPrintCss(paperWidthMm = 80) {
+  const width = Number(paperWidthMm) === 58 ? 48 : 72;
+  return `
+    @page { size: ${Number(paperWidthMm) === 58 ? "58mm" : "80mm"} auto; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: ${width}mm !important;
+      max-width: ${width}mm !important;
+      min-width: 0 !important;
+      background: #fff !important;
+      color: #000 !important;
+      overflow: hidden !important;
+    }
+    body {
+      font-family: Arial, Helvetica, sans-serif !important;
+      font-size: 12px !important;
+      line-height: 1.25 !important;
+      transform: none !important;
+      zoom: 1 !important;
+    }
+    body > * {
+      width: ${width}mm !important;
+      max-width: ${width}mm !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+    .ticket, .receipt-copy, section, pre, table {
+      width: ${width}mm !important;
+      max-width: ${width}mm !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+    pre {
+      white-space: pre-wrap !important;
+      word-break: break-word !important;
+      overflow-wrap: anywhere !important;
+      font-family: Consolas, "Courier New", monospace !important;
+      font-size: 11px !important;
+      line-height: 1.2 !important;
+    }
+    h1,h2,h3,p { max-width: ${width}mm !important; overflow-wrap: anywhere !important; }
+    img, svg { max-width: 100% !important; }
+  `;
+}
+
+function injectThermalPrintCss(fullHtml = "", paperWidthMm = 80) {
+  const css = buildThermalPrintCss(paperWidthMm);
+  if (/<\/head>/i.test(fullHtml)) {
+    return fullHtml.replace(/<\/head>/i, `<style id="barbosas-thermal-print-fix">${css}</style></head>`);
+  }
+  return `<!doctype html><html><head><meta charset="utf-8"><style id="barbosas-thermal-print-fix">${css}</style></head><body>${fullHtml}</body></html>`;
+}
+
 function normalizeHtmlForPrinting(html = "", paperWidthMm = 80) {
   const body = String(html || "").trim() || "<h1>Barbosa's Delivery</h1><p>Teste de impressão.</p>";
-  const width = Number(paperWidthMm) === 58 ? 50 : 72;
-  if (/<!doctype html>|<html/i.test(body)) return body;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Impressão</title><style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 12px; color: #111; }
-    .ticket { width: ${width}mm; max-width: ${width}mm; }
+  const width = Number(paperWidthMm) === 58 ? 48 : 72;
+  if (/<!doctype html>|<html/i.test(body)) return injectThermalPrintCss(body, paperWidthMm);
+  const wrapped = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão</title><style>${buildThermalPrintCss(paperWidthMm)}
+    .ticket { padding: 2mm 1mm 4mm; }
     h1,h2,h3,p { margin: 0 0 6px; }
     hr { border: 0; border-top: 1px dashed #333; margin: 8px 0; }
-  </style></head><body><div class="ticket">${body}</div></body></html>`;
+  </style></head><body><div class="ticket" style="width:${width}mm;max-width:${width}mm;">${body}</div></body></html>`;
+  return wrapped;
 }
 
 async function printHtml({ html, printerName, silentPrint = true, paperWidthMm = 80 } = {}) {
   const config = await readConfig();
   const targetPrinter = String(printerName || config.printerName || "").trim();
+  const safePaperWidthMm = Number(paperWidthMm || config.paperWidthMm) === 58 ? 58 : 80;
+  const previewWidthPx = Math.ceil((safePaperWidthMm / 25.4) * 96) + 40;
   const printWindow = new BrowserWindow({
-    width: 420,
-    height: 640,
+    width: previewWidthPx,
+    height: 900,
     show: silentPrint === false,
     webPreferences: {
       contextIsolation: true,
@@ -269,18 +326,22 @@ async function printHtml({ html, printerName, silentPrint = true, paperWidthMm =
   });
 
   try {
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(normalizeHtmlForPrinting(html, paperWidthMm || config.paperWidthMm))}`);
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(normalizeHtmlForPrinting(html, safePaperWidthMm))}`);
     const result = await new Promise((resolve) => {
       printWindow.webContents.print(
         {
           silent: silentPrint !== false,
           printBackground: true,
           deviceName: targetPrinter || undefined,
+          landscape: false,
+          scaleFactor: 100,
+          margins: { marginType: "none" },
+          pageSize: { width: safePaperWidthMm * 1000, height: 297000 },
         },
         (success, failureReason) => resolve({ success, failureReason: failureReason || "" }),
       );
     });
-    return { ...result, printerName: targetPrinter };
+    return { ...result, printerName: targetPrinter, paperWidthMm: safePaperWidthMm };
   } finally {
     if (!printWindow.isDestroyed()) printWindow.close();
   }
@@ -483,7 +544,7 @@ function getComputerName() {
 
 function getDesktopInstallChecklist(config = DEFAULT_CONFIG) {
   return [
-    { id: "version", label: "Versão desktop instalada", ok: APP_VERSION.includes("6.0.58"), detail: APP_VERSION },
+    { id: "version", label: "Versão desktop instalada", ok: APP_VERSION.includes("6.0.59"), detail: APP_VERSION },
     { id: "supabase", label: "Supabase configurado", ok: Boolean(config.supabaseUrl && config.supabaseAnonKey), detail: config.supabaseUrl ? "URL configurada" : "Configure URL e anon key" },
     { id: "printer", label: "Impressora selecionada", ok: Boolean(config.printerName) || Boolean(config.silentPrint), detail: config.printerName || "Usando impressora padrão do Windows" },
     { id: "autoprint", label: "Impressão automática", ok: Boolean(config.autoPrint?.enabled), detail: config.autoPrint?.enabled ? "Ligada" : "Desligada" },

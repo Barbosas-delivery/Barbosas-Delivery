@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.58-fase-70-correcao-estoque-lanchonete";
+export const APP_VERSION = "6.0.59-fase-71-correcao-layout-cupom-termico";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

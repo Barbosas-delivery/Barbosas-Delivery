@@ -144,16 +144,17 @@ function buildHtmlTicket(title, sections = [], options = {}) {
   <meta charset="utf-8" />
   <title>${escapeHtml(title)}</title>
   <style>
-    @page { size: 80mm auto; margin: 3mm; }
+    @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, sans-serif; width: 74mm; margin: 0 auto; color: #000; font-size: ${isDelivery ? "13px" : "12px"}; font-weight: 600; }
-    h1 { text-align: center; font-size: ${isKitchen ? "24px" : "20px"}; margin: 0 0 5px; border: 2px solid #000; padding: 6px 3px; letter-spacing: .5px; }
+    html, body { margin: 0; padding: 0; width: 72mm; max-width: 72mm; overflow: hidden; background: #fff; color: #000; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: ${isDelivery ? "13px" : "12px"}; font-weight: 600; }
+    h1 { text-align: center; font-size: ${isKitchen ? "22px" : "19px"}; margin: 0 0 5px; border: 2px solid #000; padding: 5px 2px; letter-spacing: .3px; max-width: 72mm; }
     h2 { font-size: 13px; margin: 10px 0 5px; border-top: 1px dashed #111; padding-top: 7px; }
     p { margin: 3px 0; line-height: 1.25; }
     .center { text-align: center; }
     .big { font-size: 16px; font-weight: 900; }
     .sale-item { margin: 5px 0; border-bottom: 1px dotted #999; padding-bottom: 4px; }
-    .sale-line { display: flex; justify-content: space-between; gap: 8px; }
+    .sale-line { display: flex; justify-content: space-between; gap: 8px; max-width: 72mm; }
     small { display: block; margin: 2px 0 0 8px; font-size: 11px; line-height: 1.25; }
     .prep-item { border: 2px solid #000; padding: 6px; margin: 7px 0; page-break-inside: avoid; }
     .prep-item.has-details { border-width: 3px; }
@@ -170,8 +171,9 @@ function buildHtmlTicket(title, sections = [], options = {}) {
     .muted-line { margin-left: 0; }
     .highlight-box { border: 2px solid #000; padding: 5px; margin: 5px 0; font-size: 14px; }
     .totals { border-top: 2px solid #000; margin-top: 6px; padding-top: 4px; }
-    .totals p { display: flex; justify-content: space-between; gap: 8px; }
-    .totals .grand { font-size: 20px; font-weight: 900; border-top: 1px solid #000; padding-top: 4px; }
+    .totals p { display: flex; justify-content: space-between; gap: 8px; max-width: 72mm; }
+    .totals .grand { font-size: 19px; font-weight: 900; border-top: 1px solid #000; padding-top: 4px; }
+    p, h2, small, strong, span { overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
