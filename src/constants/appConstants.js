@@ -1,4 +1,4 @@
-export const APP_VERSION = "6.0.56-fase-68-teste-operacional-completo";
+export const APP_VERSION = "6.0.57-fase-69-cadastro-real-adicionais";
 
 export const DELIVERY_FEE = 5;
 export const ESTIMATED_DELIVERY_MINUTES_PER_ORDER = 7;

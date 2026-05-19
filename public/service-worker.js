@@ -1,4 +1,4 @@
-const CACHE_NAME = "barbosas-delivery-6-0-56-fase-68-teste-operacional-completo-sem-cache";
+const CACHE_NAME = "barbosas-delivery-6-0-57-fase-69-cadastro-real-adicionais-sem-cache";
 self.__BARBOSAS_DELIVERY_CACHE_POLICY__ = CACHE_NAME;
 
 self.addEventListener("install", (event) => {

@@ -495,28 +495,59 @@ function App() {
     return categoryAddons.filter((addon) => addon.active !== false && normalizeGroupName(addon.categoryName) === normalized);
   }
 
+  async function saveCategoryAddonRecord(payload) {
+    const rpcPayload = {
+      p_category_name: payload.category_name,
+      p_name: payload.name,
+      p_price: payload.price,
+      p_active: payload.active,
+      p_sort_order: payload.sort_order,
+    };
+
+    const rpcResult = await supabase.rpc("create_category_addon", rpcPayload);
+    if (!rpcResult.error) return { error: null };
+
+    const insertResult = await supabase.from("category_addons").insert(payload);
+    return { error: insertResult.error || rpcResult.error };
+  }
+
   async function addCategoryAddon() {
     const categoryName = normalizeGroupName(categoryAddonDraft.categoryName);
     const name = String(categoryAddonDraft.name || "").trim();
+    const price = toSafeMoneyNumber(categoryAddonDraft.price, 0);
     if (!categoryName || !name) return setLastAction("Informe a categoria e o nome do adicional.");
-    const payload = { category_name: categoryName, name, price: toSafeMoneyNumber(categoryAddonDraft.price, 0), active: true, sort_order: categoryAddons.filter((addon) => normalizeGroupName(addon.categoryName) === categoryName).length + 1 };
-    const { error } = await supabase.from("category_addons").insert(payload);
-    if (error) return setLastAction(`Adicional não salvo: ${error.message || "rode o SQL da fase 66."}`);
+    if (price < 0) return setLastAction("O preço do adicional não pode ser negativo.");
+    const payload = {
+      category_name: categoryName,
+      name,
+      price,
+      active: true,
+      sort_order: categoryAddons.filter((addon) => normalizeGroupName(addon.categoryName) === categoryName).length + 1,
+    };
+    const { error } = await saveCategoryAddonRecord(payload);
+    if (error) return setLastAction(`Adicional não salvo: ${error.message || "rode o SQL da fase 69 e tente novamente."}`);
     setCategoryAddonDraft({ categoryName, name: "", price: "" });
     await loadCategoryAddons({ silent: true });
-    setLastAction("Adicional por categoria cadastrado.");
+    setLastAction(`Adicional "${name}" cadastrado em ${categoryName}. Todos os itens dessa categoria já podem receber esse adicional.`);
   }
 
   async function toggleCategoryAddon(addon) {
-    const { error } = await supabase.from("category_addons").update({ active: addon.active === false }).eq("id", addon.id);
-    if (error) return setLastAction(`Não foi possível alterar o adicional: ${error.message || "verifique o SQL."}`);
+    const nextActive = addon.active === false;
+    const rpcResult = await supabase.rpc("set_category_addon_active", { p_id: addon.id, p_active: nextActive });
+    const updateResult = rpcResult.error ? await supabase.from("category_addons").update({ active: nextActive, updated_at: new Date().toISOString() }).eq("id", addon.id) : { error: null };
+    const error = updateResult.error || null;
+    if (error) return setLastAction(`Não foi possível alterar o adicional: ${error.message || "verifique o SQL da fase 69."}`);
     await loadCategoryAddons({ silent: true });
+    setLastAction(nextActive ? "Adicional ativado." : "Adicional pausado.");
   }
 
   async function removeCategoryAddon(addon) {
-    const { error } = await supabase.from("category_addons").update({ active: false }).eq("id", addon.id);
-    if (error) return setLastAction(`Não foi possível remover o adicional: ${error.message || "verifique o SQL."}`);
+    const rpcResult = await supabase.rpc("set_category_addon_active", { p_id: addon.id, p_active: false });
+    const updateResult = rpcResult.error ? await supabase.from("category_addons").update({ active: false, updated_at: new Date().toISOString() }).eq("id", addon.id) : { error: null };
+    const error = updateResult.error || null;
+    if (error) return setLastAction(`Não foi possível remover o adicional: ${error.message || "verifique o SQL da fase 69."}`);
     await loadCategoryAddons({ silent: true });
+    setLastAction("Adicional removido da categoria.");
   }
 
   async function loadClients() {
@@ -5151,6 +5182,7 @@ function App() {
   const tabs = [
     { id: "dashboard", label: "Painel", icon: "chart" },
     { id: "products", label: "Produtos", icon: "package" },
+    { id: "addons", label: "Adicionais", icon: "package" },
     { id: "kits", label: "Combos", icon: "package" },
     { id: "promos", label: "Promoções", icon: "percent" },
     { id: "deliveries", label: "PDV Entregas", icon: "truck" },
@@ -6285,6 +6317,64 @@ function App() {
                 </CardBox>
               </div>
             )}
+
+            {activeTab === "addons" && (
+              <div className="space-y-6">
+                <Title title="Adicionais por categoria" subtitle="Cadastro direto dos adicionais. Escolha a categoria, informe nome e preço. Todos os produtos dessa categoria recebem o adicional automaticamente." />
+                <CardBox>
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_160px_auto] gap-3 mb-4">
+                    <label className="block">
+                      <span className="text-xs font-medium text-zinc-600">Categoria que receberá o adicional</span>
+                      <select value={categoryAddonDraft.categoryName} onChange={(event) => setCategoryAddonDraft({ ...categoryAddonDraft, categoryName: event.target.value })} className="mt-1 w-full min-h-[48px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base outline-none">
+                        {productGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+                      </select>
+                    </label>
+                    <Input label="Nome do adicional" value={categoryAddonDraft.name} onChange={(value) => setCategoryAddonDraft({ ...categoryAddonDraft, name: value })} placeholder="Ex: Bacon extra, Cheddar, Ovo" />
+                    <Input label="Preço" type="number" value={categoryAddonDraft.price} onChange={(value) => setCategoryAddonDraft({ ...categoryAddonDraft, price: value })} placeholder="0,00" />
+                    <div className="flex items-end"><Button onClick={addCategoryAddon} className="rounded-2xl bg-zinc-950 hover:bg-zinc-800 w-full">Criar adicional</Button></div>
+                  </div>
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <b>Regra profissional:</b> o adicional não fica preso a um produto. Se cadastrar “Bacon extra” na categoria “Lanches”, todos os lanches dessa categoria passam a mostrar Bacon extra na personalização do cliente e do PDV.
+                  </div>
+                </CardBox>
+
+                <CardBox>
+                  <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
+                    <div>
+                      <h3 className="font-bold text-lg">Adicionais cadastrados</h3>
+                      <p className="text-sm text-zinc-500">Use Pausar para esconder temporariamente sem apagar histórico operacional.</p>
+                    </div>
+                    <Button onClick={() => loadCategoryAddons({ silent: false })} variant="secondary" className="rounded-2xl">Atualizar lista</Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {productGroups.map((group) => {
+                      const addonsForGroup = categoryAddons.filter((addon) => normalizeGroupName(addon.categoryName) === normalizeGroupName(group));
+                      return (
+                        <div key={group} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                          <p className="font-black text-sm mb-2">{group}</p>
+                          {addonsForGroup.length === 0 && <p className="text-xs text-zinc-500">Nenhum adicional cadastrado para esta categoria.</p>}
+                          <div className="space-y-2">
+                            {addonsForGroup.map((addon) => (
+                              <div key={addon.id} className="flex items-center justify-between gap-2 rounded-xl bg-white border border-zinc-100 px-3 py-2 text-sm">
+                                <div>
+                                  <span className={addon.active === false ? "line-through text-zinc-400" : "font-semibold"}>{addon.name}</span>
+                                  <p className="text-xs text-zinc-500">{money(addon.price)} • {addon.active === false ? "Pausado" : "Ativo"}</p>
+                                </div>
+                                <div className="flex gap-1">
+                                  <Button onClick={() => toggleCategoryAddon(addon)} variant="secondary" className="rounded-xl px-2 py-1 text-xs">{addon.active === false ? "Ativar" : "Pausar"}</Button>
+                                  <Button onClick={() => removeCategoryAddon(addon)} variant="secondary" className="rounded-xl px-2 py-1 text-xs text-red-700">Remover</Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardBox>
+              </div>
+            )}
+
 
             {activeTab === "kits" && (
               <div className="space-y-6">

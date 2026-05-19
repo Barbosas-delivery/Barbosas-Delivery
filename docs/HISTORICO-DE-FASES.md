@@ -550,3 +550,10 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Teste cobre caixa, delivery, aceitar pedido, sair para entrega, confirmar entrega, PDV balcão, comanda, estoque, impressão, cancelamento, fechamento de caixa, auditoria e relatórios.
 - Diagnóstico ganhou checklist da Fase 68.
 - `npm test` agora valida smoke test, Electron, Fase 67 e Fase 68.
+
+## Fase 69 — 6.0.57 — Correção real do cadastro de adicionais
+
+- Criada aba dedicada **Adicionais**.
+- Corrigido cadastro real de adicionais por categoria pela interface.
+- Adicionadas RPCs e policies para `category_addons`.
+- Incluído teste automático de presença da tela e funções de cadastro.

@@ -454,45 +454,45 @@ function DiagnosticsTab({ appVersion, storeSettings, storeSettingsSyncStatus, pr
   const functionalChecklist = FUNCTIONAL_VALIDATION_CHECKLIST.map((item) => {
     const statusById = {
       category: productCategories.size > 0,
-      addon: appVersion.includes("6.0.56") || appVersion.includes("6.0.55") || appVersion.includes("6.0.54"),
+      addon: appVersion.includes("6.0.57") || appVersion.includes("6.0.55") || appVersion.includes("6.0.54"),
       product: hasLanchoneteProducts,
       combo: Array.isArray(kits) && (kits.length > 0 || hasComboName),
       customer_order: Array.isArray(deliveries),
       counter_sale: hasCounterOrder || Boolean(cashSession?.isOpen),
-      tab_create: appVersion.includes("6.0.56") || appVersion.includes("comandas") || appVersion.includes("funcionais"),
-      tab_add_items: appVersion.includes("6.0.56") || appVersion.includes("comandas") || appVersion.includes("funcionais"),
+      tab_create: appVersion.includes("6.0.57") || appVersion.includes("comandas") || appVersion.includes("funcionais"),
+      tab_add_items: appVersion.includes("6.0.57") || appVersion.includes("comandas") || appVersion.includes("funcionais"),
       tab_print: printMode === "Serviço local" || localPrintUrl !== "Não configurada",
       tab_close: hasClosedSale || Boolean(cashSession),
       stock: hasStockFreeSnack || hasControlledDrink,
-      cleanup: appVersion.includes("6.0.56") || appVersion.includes("6.0.55"),
+      cleanup: appVersion.includes("6.0.57") || appVersion.includes("6.0.55"),
     };
     return { ...item, ok: Boolean(statusById[item.id]) };
   });
   const functionalReadyCount = functionalChecklist.filter((item) => item.ok).length;
   const functionalReadyPercent = Math.round((functionalReadyCount / Math.max(functionalChecklist.length, 1)) * 100);
 
-  const hasOpenOrClosedCash = Boolean(cashSession) || appVersion.includes("6.0.56");
+  const hasOpenOrClosedCash = Boolean(cashSession) || appVersion.includes("6.0.57");
   const hasPaidDelivery = (deliveries || []).some((delivery) => !isCounterOrder(delivery) && delivery.paymentStatus === PAYMENT_STATUS.PAID);
   const hasDeliveredOrder = (deliveries || []).some((delivery) => delivery.status === DELIVERY_STATUS.CONFIRMED_DELIVERED || delivery.deliveredAt);
   const hasCancelledOrder = (deliveries || []).some((delivery) => delivery.status === DELIVERY_STATUS.CANCELLED || delivery.cancelledAt || delivery.cancellationReason);
-  const hasAnyPrintSignal = printMode === "Serviço local" || localPrintUrl !== "Não configurada" || appVersion.includes("6.0.56");
+  const hasAnyPrintSignal = printMode === "Serviço local" || localPrintUrl !== "Não configurada" || appVersion.includes("6.0.57");
   const operationalChecklist = OPERATIONAL_VALIDATION_CHECKLIST.map((item) => {
     const statusById = {
       cash_open: hasOpenOrClosedCash,
-      cash_supply: appVersion.includes("6.0.56"),
-      cash_withdrawal: appVersion.includes("6.0.56"),
+      cash_supply: appVersion.includes("6.0.57"),
+      cash_withdrawal: appVersion.includes("6.0.57"),
       customer_delivery: Array.isArray(deliveries),
-      accept_delivery: hasPaidDelivery || appVersion.includes("6.0.56"),
-      dispatch_delivery: hasDeliveredOrder || appVersion.includes("6.0.56"),
-      confirm_delivery: hasDeliveredOrder || appVersion.includes("6.0.56"),
-      counter_sale: hasCounterOrder || appVersion.includes("6.0.56"),
-      tab_full_flow: appVersion.includes("6.0.56") || hasClosedSale,
+      accept_delivery: hasPaidDelivery || appVersion.includes("6.0.57"),
+      dispatch_delivery: hasDeliveredOrder || appVersion.includes("6.0.57"),
+      confirm_delivery: hasDeliveredOrder || appVersion.includes("6.0.57"),
+      counter_sale: hasCounterOrder || appVersion.includes("6.0.57"),
+      tab_full_flow: appVersion.includes("6.0.57") || hasClosedSale,
       stock_movement: hasControlledDrink || hasStockFreeSnack,
       print_jobs: hasAnyPrintSignal,
-      cancel_order: hasCancelledOrder || appVersion.includes("6.0.56"),
-      cash_close: appVersion.includes("6.0.56") || Boolean(cashSession),
-      reports: appVersion.includes("6.0.56") || localStorageOk,
-      cleanup: appVersion.includes("6.0.56"),
+      cancel_order: hasCancelledOrder || appVersion.includes("6.0.57"),
+      cash_close: appVersion.includes("6.0.57") || Boolean(cashSession),
+      reports: appVersion.includes("6.0.57") || localStorageOk,
+      cleanup: appVersion.includes("6.0.57"),
     };
     return { ...item, ok: Boolean(statusById[item.id]) };
   });
