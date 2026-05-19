@@ -557,3 +557,12 @@ Versão: `6.0.53-fase-65-atualizacao-desktop-instalado`
 - Corrigido cadastro real de adicionais por categoria pela interface.
 - Adicionadas RPCs e policies para `category_addons`.
 - Incluído teste automático de presença da tela e funções de cadastro.
+
+## Fase 70 — 6.0.58 — Correção de estoque para lanchonete
+
+- Corrigido bloqueio indevido de venda por estoque insuficiente em lanches, porções e combos.
+- Front-end agora baixa estoque somente de produtos com controle ativo.
+- RPC `apply_product_stock_deltas` agora ignora produtos `stock_controlled=false`.
+- Mantido controle de estoque para bebidas, sobremesas e produtos prontos.
+- Criada documentação `docs/FASE-70-CORRECAO-ESTOQUE-LANCHONETE.md`.
+- Criada migração `supabase/migracao-final-producao-6-0-58.sql`.

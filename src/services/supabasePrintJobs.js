@@ -57,7 +57,7 @@ export function buildPrintJobPayload(delivery = {}, printType = PRINT_JOB_TYPE.K
   const createdAt = new Date().toISOString();
   const payload = {
     schemaVersion: 2,
-    templateVersion: "6.0.57",
+    templateVersion: "6.0.58",
     printType,
     source,
     createdAt,
@@ -114,7 +114,7 @@ export function buildPrintJobRowsForOrder(delivery = {}, options = {}) {
       print_type: printType,
       status: PRINT_JOB_STATUS.PENDING,
       payload: buildPrintJobPayload(delivery, printType),
-      template_version: "6.0.57",
+      template_version: "6.0.58",
       receipt_width_mm: 80,
       copies: 1,
       attempts: 0,

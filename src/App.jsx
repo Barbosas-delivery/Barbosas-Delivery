@@ -110,7 +110,7 @@ import {
   getPaymentStatusClass,
 } from "./utils/payments";
 import {
-  expandItemsForStock,
+  expandStockControlledItems,
   validateOrderItems,
   syncOrderItemsWithProducts,
   reduceProductStock,
@@ -1230,7 +1230,7 @@ function App() {
 
   function buildStockDeltasFromItems(items, movementType = "sale") {
     const sign = movementType === "restore" || movementType === "cancel" ? 1 : -1;
-    const grouped = expandItemsForStock(items || []).reduce((acc, item) => {
+    const grouped = expandStockControlledItems(items || []).reduce((acc, item) => {
       const productId = Number(item.id ?? item.productId ?? item.product_id);
       const quantity = toPositiveInteger(item.quantity, 0);
       if (!Number.isFinite(productId) || quantity <= 0) return acc;

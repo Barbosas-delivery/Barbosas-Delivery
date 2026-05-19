@@ -2,7 +2,7 @@ import { supabase } from "../supabaseClient";
 import { DELIVERY_STATUS, PAYMENT_STATUS, ORDER_TYPE } from "../constants/appConstants";
 import { toNullableNumber, toPositiveInteger, toSafeMoneyNumber } from "../utils/numbers";
 import { normalizeDeliveryFee } from "../utils/delivery";
-import { expandItemsForStock } from "../utils/stock";
+import { expandStockControlledItems } from "../utils/stock";
 import { insertWithSchemaRetry, updateWithSchemaRetry } from "./supabaseSchema";
 
 export function mapOrderPaymentFromDatabase(row) {
@@ -179,7 +179,7 @@ export function mapOrderToDatabase(delivery) {
 }
 
 export function mapOrderItemsToDatabase(orderId, items = [], cashSessionId = null) {
-  return expandItemsForStock(items).map((item) => ({
+  return expandStockControlledItems(items).map((item) => ({
     order_id: orderId,
     cash_session_id: cashSessionId || null,
     product_id: Number.isFinite(Number(item.id)) ? Number(item.id) : null,
@@ -313,7 +313,7 @@ export async function saveOrderPaymentsInSupabase(delivery, fallbackCashSessionI
 }
 
 export async function saveStockMovementsInSupabase({ delivery, movementType = "sale", products = [], cashSessionId = null, createdBy = "sistema" }) {
-  const stockItems = expandItemsForStock(delivery.items || []);
+  const stockItems = expandStockControlledItems(delivery.items || []);
   if (!stockItems.length) return { error: null };
   const rows = stockItems.map((item) => {
     const product = products.find((currentProduct) => Number(currentProduct.id) === Number(item.id));

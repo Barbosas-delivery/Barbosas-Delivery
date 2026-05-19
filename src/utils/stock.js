@@ -21,10 +21,14 @@ export function expandItemsForStock(items) {
   });
 }
 
+export function expandStockControlledItems(items) {
+  return expandItemsForStock(items || []).filter((item) => isStockControlledProduct(item));
+}
+
 export function validateOrderItems(items, products) {
   if (!items || items.length === 0) return { valid: false, message: "Adicione pelo menos um produto ao pedido." };
 
-  const stockItems = expandItemsForStock(items);
+  const stockItems = expandStockControlledItems(items);
   if (stockItems.some((item) => item.id === undefined || item.id === null || toPositiveInteger(item.quantity, 0) <= 0)) {
     return { valid: false, message: "Existe item inválido no pedido. Remova e adicione novamente." };
   }
@@ -61,6 +65,10 @@ export function syncOrderItemsWithProducts(items, products) {
             name: product?.name || kitItem.name,
             price: Number(product?.price ?? kitItem.price ?? 0),
             barcode: product?.barcode || kitItem.barcode || "",
+            category: product?.category || kitItem.category || "",
+            productType: product?.productType || product?.product_type || kitItem.productType || kitItem.product_type || "",
+            stockControlled: product ? isStockControlledProduct(product) : isStockControlledProduct(kitItem),
+            stock: Number(product?.stock ?? kitItem.stock ?? 0),
           };
         }),
       };
@@ -78,12 +86,16 @@ export function syncOrderItemsWithProducts(items, products) {
       variantId: item.variantId || null,
       variantName: item.variantName || "",
       imageUrl: item.imageUrl || product?.imageUrl || "",
+      category: product?.category || item.category || "",
+      productType: product?.productType || product?.product_type || item.productType || item.product_type || "",
+      stockControlled: product ? isStockControlledProduct(product) : isStockControlledProduct(item),
+      stock: Number(product?.stock ?? item.stock ?? 0),
     };
   });
 }
 
 export function reduceProductStock(products, items) {
-  const stockItems = expandItemsForStock(items);
+  const stockItems = expandStockControlledItems(items);
   return products.map((product) => {
     const totalQuantity = stockItems
       .filter((item) => Number(item.id) === Number(product.id))
@@ -94,7 +106,7 @@ export function reduceProductStock(products, items) {
 }
 
 export function restoreProductStock(products, items) {
-  const stockItems = expandItemsForStock(items || []);
+  const stockItems = expandStockControlledItems(items || []);
   return products.map((product) => {
     const totalQuantity = stockItems
       .filter((item) => Number(item.id) === Number(product.id))
